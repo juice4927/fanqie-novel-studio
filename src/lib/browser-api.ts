@@ -569,7 +569,7 @@ export function createBrowserApi(): AppApi {
     async generatePlanningDraft() {
       throw new Error("AI 规划生成需要在桌面版配置模型后使用");
     },
-    async saveChapter(projectId, chapter: Chapter) {
+    async saveChapter(projectId, chapter: Chapter, mode = "version") {
       const project = getProject(state, projectId);
       const existing = project.chapters.findIndex(
         (item) => item.id === chapter.id,
@@ -635,7 +635,7 @@ export function createBrowserApi(): AppApi {
         linkedExpectationIds: chapter.linkedExpectationIds ?? [],
         status,
         wordCount: countWords(chapter.content),
-        revision: previous ? previous.revision + 1 : 1,
+        revision: previous ? previous.revision + (mode === "version" ? 1 : 0) : 1,
         updatedAt: now(),
       } as Chapter;
       if (existing >= 0) project.chapters[existing] = next;
@@ -1065,6 +1065,12 @@ export function createBrowserApi(): AppApi {
       persist();
       return state.settings;
     },
+    async listAiJobs() {
+      return [];
+    },
+    async cancelAiJob() {
+      return false;
+    },
     async exportProject(projectId, format) {
       const project = getProject(state, projectId);
       const content = project.chapters
@@ -1100,6 +1106,37 @@ export function createBrowserApi(): AppApi {
     },
     async restoreBackup() {
       throw new Error("备份恢复仅在桌面版可用");
+    },
+    async getAutoBackupSettings() {
+      return { enabled: false, frequency: "daily", retentionCount: 7, hasPassword: false, lastRunAt: null, lastStatus: "未运行", lastError: null, nextRunAt: null };
+    },
+    async saveAutoBackupSettings() {
+      throw new Error("自动加密备份仅在 Windows 桌面版可用");
+    },
+    async runAutoBackup() {
+      throw new Error("自动加密备份仅在 Windows 桌面版可用");
+    },
+    async runSystemHealthCheck() {
+      const chapterCount = state.projects.reduce((sum, project) => sum + project.chapters.length, 0);
+      return { checkedAt: now(), status: "正常", projectCount: state.projects.length, chapterCount, failedAiJobs: 0, workspaceBytes: new Blob([JSON.stringify(state)]).size, backupBytes: 0, checks: [{ id: "browser-storage", label: "浏览器预览数据", status: "正常", detail: "localStorage 数据可读取；SQLite 完整性检查仅在桌面版可用", projectId: null, repairable: false }] } as const;
+    },
+    async startSystemHealthCheck() {
+      const id = crypto.randomUUID();
+      const report = await this.runSystemHealthCheck();
+      const task = { id, status: "完成" as const, completed: 1, total: 1, label: "检查完成", report, error: null };
+      localStorage.setItem(`novel-health-task:${id}`, JSON.stringify(task));
+      return task;
+    },
+    async getSystemHealthCheck(id: string) {
+      const stored = localStorage.getItem(`novel-health-task:${id}`);
+      if (!stored) throw new Error("健康检查任务不存在");
+      return JSON.parse(stored);
+    },
+    async cancelSystemHealthCheck() {
+      return false;
+    },
+    async rebuildSearchIndexes() {
+      throw new Error("搜索索引重建仅在桌面版可用");
     },
     async getWorkspacePath() {
       return "浏览器预览使用 localStorage";

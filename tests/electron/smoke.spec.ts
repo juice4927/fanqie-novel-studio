@@ -29,13 +29,17 @@ test("starts the production Electron app and persists through the preload API", 
       }
       const first = (await api.getProject(project.id)).chapters[0];
       const batch = await api.previewChapterBatch(project.id, first.id);
+      const autoBackup = await api.getAutoBackupSettings();
+      const health = await api.runSystemHealthCheck();
       const detail = await api.getProject(project.id);
-      return { workspace: await api.getWorkspacePath(), projectId: project.id, title: detail.summary.title, batch };
+      return { workspace: await api.getWorkspacePath(), projectId: project.id, title: detail.summary.title, batch, autoBackup, health };
     });
     expect(result.workspace).toBe(workspace);
     expect(result.title).toBe("桌面烟雾测试");
     expect(result.batch.canRun).toBe(true);
     expect(result.batch.chapters).toHaveLength(5);
+    expect(result.autoBackup).toMatchObject({ enabled: false, retentionCount: 7, hasPassword: false });
+    expect(result.health).toMatchObject({ status: "正常", projectCount: 1, chapterCount: 5 });
     expect(existsSync(path.join(workspace, "catalog.sqlite"))).toBe(true);
     expect(existsSync(path.join(workspace, "projects", result.projectId, "project.sqlite"))).toBe(true);
   } finally {

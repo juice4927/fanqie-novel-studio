@@ -344,6 +344,26 @@ export interface AiSettings {
   outputPricePerMillion: number;
 }
 
+export type AiJobStatus = "运行中" | "成功" | "失败" | "已取消" | "已中断";
+
+export interface AiJobRecord {
+  id: string;
+  projectId: string | null;
+  taskType: string;
+  inputSummary: string;
+  promptVersion: string;
+  provider: string;
+  model: string;
+  status: AiJobStatus;
+  inputTokens: number;
+  outputTokens: number;
+  actualCost: number;
+  durationMs: number;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectDetail {
   summary: ProjectSummary;
   contract: StoryContract;
@@ -473,6 +493,57 @@ export interface RevisionRecord {
   createdAt: string;
 }
 
+export type ChapterSaveMode = "version" | "autosave";
+
+export type AutoBackupFrequency = "daily" | "weekly";
+
+export interface AutoBackupSettings {
+  enabled: boolean;
+  frequency: AutoBackupFrequency;
+  retentionCount: number;
+  hasPassword: boolean;
+  lastRunAt: string | null;
+  lastStatus: "未运行" | "成功" | "失败";
+  lastError: string | null;
+  nextRunAt: string | null;
+}
+
+export interface AutoBackupInput {
+  enabled: boolean;
+  frequency: AutoBackupFrequency;
+  retentionCount: number;
+}
+
+export interface HealthCheckItem {
+  id: string;
+  label: string;
+  status: "正常" | "警告" | "错误";
+  detail: string;
+  projectId: string | null;
+  repairable: boolean;
+}
+
+export interface SystemHealthReport {
+  checkedAt: string;
+  status: "正常" | "警告" | "错误";
+  projectCount: number;
+  chapterCount: number;
+  failedAiJobs: number;
+  workspaceBytes: number;
+  backupBytes: number;
+  checks: HealthCheckItem[];
+}
+
+export interface HealthCheckTask {
+  id: string;
+  status: "运行中" | "完成" | "已取消" | "失败";
+  completed: number;
+  total: number;
+  label: string;
+  report: SystemHealthReport | null;
+  error: string | null;
+}
+
 export interface AppApi {
   getDashboard(): Promise<DashboardData>;
   listProjects(): Promise<ProjectSummary[]>;
@@ -487,7 +558,7 @@ export interface AppApi {
   savePlan(id: string, plan: PlanNode): Promise<PlanNode>;
   approvePlan(id: string, planId: string): Promise<void>;
   generatePlanningDraft(id: string, input: PlanningGenerationInput): Promise<PlanningGenerationResult>;
-  saveChapter(id: string, chapter: Chapter): Promise<Chapter>;
+  saveChapter(id: string, chapter: Chapter, mode?: ChapterSaveMode): Promise<Chapter>;
   saveExpectation(
     id: string,
     expectation: ExpectationEntry,
@@ -555,6 +626,8 @@ export interface AppApi {
     settings: Omit<AiSettings, "hasApiKey">,
     apiKey?: string,
   ): Promise<AiSettings>;
+  listAiJobs(projectId?: string): Promise<AiJobRecord[]>;
+  cancelAiJob(id: string): Promise<boolean>;
   exportProject(
     id: string,
     format: "txt" | "md" | "docx",
@@ -563,5 +636,13 @@ export interface AppApi {
   getReviewSuggestions(id: string): Promise<ReviewSuggestion[]>;
   createBackup(password: string): Promise<string | null>;
   restoreBackup(password: string): Promise<string | null>;
+  getAutoBackupSettings(): Promise<AutoBackupSettings>;
+  saveAutoBackupSettings(input: AutoBackupInput, password?: string): Promise<AutoBackupSettings>;
+  runAutoBackup(): Promise<AutoBackupSettings>;
+  runSystemHealthCheck(): Promise<SystemHealthReport>;
+  startSystemHealthCheck(): Promise<HealthCheckTask>;
+  getSystemHealthCheck(id: string): Promise<HealthCheckTask>;
+  cancelSystemHealthCheck(id: string): Promise<boolean>;
+  rebuildSearchIndexes(projectId: string): Promise<SystemHealthReport>;
   getWorkspacePath(): Promise<string>;
 }

@@ -20,6 +20,7 @@ import type {
 import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
 import { WorkspaceDatabase, now } from "./database";
 import { compileCommercialGuidance, compileDeconstructionFramework } from "../src/shared/commercial-knowledge";
+import { inferProviderCapabilities, parseProviderUsage, providerError, rejectsJsonMode } from "./ai-provider";
 
 const PROMPT_VERSION = "2026-07-30.v4-structured-genres";
 
@@ -184,11 +185,22 @@ function hashInput(value: string) {
 }
 
 export class AiService {
+  private readonly activeRequests = new Map<string, AbortController>();
+  private readonly cancelledJobs = new Set<string>();
+
   constructor(
     private readonly database: WorkspaceDatabase,
     private readonly getApiKey: () => string,
     private readonly requestTimeoutMs = 120_000,
   ) {}
+
+  cancelJob(id: string) {
+    const controller = this.activeRequests.get(id);
+    if (!controller) return false;
+    this.cancelledJobs.add(id);
+    controller.abort();
+    return true;
+  }
 
   private async runJson<T>(options: {
     projectId: string | null;
@@ -208,12 +220,16 @@ export class AiService {
     const jobId = this.database.startAiJob(
       options.projectId, options.taskType, inputHash, PROMPT_VERSION, settings.baseUrl, settings.model, options.inputSummary,
     );
+    const startedAt = Date.now();
     let lastError = "模型输出不符合结构要求";
     let repairInstruction = "";
+    let useJsonMode = inferProviderCapabilities(settings.baseUrl).jsonMode;
+    let usage = { inputTokens: 0, outputTokens: 0 };
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const endpoint = `${settings.baseUrl.replace(/\/$/, "")}/chat/completions`;
         const controller = new AbortController();
+        this.activeRequests.set(jobId, controller);
         const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         let response: Response;
@@ -225,7 +241,7 @@ export class AiService {
           body: JSON.stringify({
             model: settings.model,
             temperature: options.taskType === "draft-chapter" ? 0.85 : 0.35,
-            response_format: { type: "json_object" },
+            ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
             messages: [
               { role: "system", content: `${options.system}\n只返回合法 JSON，不使用 Markdown。` },
               { role: "user", content: `${options.user}${repairInstruction}` },
@@ -233,26 +249,44 @@ export class AiService {
           }),
           });
         } catch (error) {
-          if (controller.signal.aborted) throw new Error(`模型请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`);
+          if (controller.signal.aborted) {
+            if (this.cancelledJobs.has(jobId)) throw new Error("任务已取消");
+            throw new Error(`模型请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`);
+          }
           throw error;
         } finally {
           clearTimeout(timeout);
+          this.activeRequests.delete(jobId);
         }
         if (!response.ok) {
           const detail = (await response.text()).slice(0, 300);
-          if ([429, 502, 503, 504].includes(response.status)) throw new Error(`模型服务暂时不可用 ${response.status}: ${detail}`);
-          throw new Error(`模型接口返回 ${response.status}: ${detail}`);
+          if (useJsonMode && rejectsJsonMode(response.status, detail)) {
+            useJsonMode = false;
+            attempt -= 1;
+            continue;
+          }
+          throw new Error(providerError(response.status, detail));
         }
-        const body = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+        const body = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } };
+        usage = parseProviderUsage(body);
         const raw = body.choices?.[0]?.message?.content;
         if (!raw) throw new Error("模型没有返回内容");
         const parsed = options.schema.parse(JSON.parse(stripCodeFence(raw)));
-        this.database.finishAiJob(jobId, JSON.stringify(parsed));
+        this.database.finishAiJob(jobId, JSON.stringify(parsed), undefined, {
+          ...usage,
+          actualCost: usage.inputTokens / 1_000_000 * settings.inputPricePerMillion + usage.outputTokens / 1_000_000 * settings.outputPricePerMillion,
+          durationMs: Date.now() - startedAt,
+        });
         return parsed;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
+        if (lastError === "任务已取消") {
+          this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt, status: "已取消" });
+          this.cancelledJobs.delete(jobId);
+          throw new Error(lastError);
+        }
         if (lastError.startsWith("模型请求超时")) {
-          this.database.finishAiJob(jobId, "", lastError);
+          this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt });
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型服务暂时不可用") && attempt < 2)
@@ -260,7 +294,7 @@ export class AiService {
         repairInstruction = `\n上一次输出校验失败：${lastError}。请修复结构并重新输出完整 JSON。`;
       }
     }
-    this.database.finishAiJob(jobId, "", lastError);
+    this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt });
     throw new Error(lastError);
   }
 

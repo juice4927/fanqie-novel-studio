@@ -1,11 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   AiSettings,
+  AiJobRecord,
+  AutoBackupInput,
+  AutoBackupSettings,
   ChangeRequest,
   Chapter,
+  ChapterSaveMode,
   ChapterStatus,
   CreateProjectInput,
   ExpectationEntry,
@@ -26,6 +30,7 @@ import type {
   RevisionRecord,
   StoryContract,
   StorySummary,
+  SystemHealthReport,
 } from "../src/shared/types";
 import { cosineSimilarity, localEmbedding } from "./semantic";
 import {
@@ -33,6 +38,7 @@ import {
   buildChapterSummary,
 } from "../src/shared/summaries";
 import { volumeBoundaryChapters } from "../src/shared/planning";
+import { hasColumn, runMigrations } from "./migration-runner";
 
 const now = () => new Date().toISOString();
 
@@ -48,29 +54,16 @@ function parseJson<T>(value: unknown): T {
   return JSON.parse(String(value)) as T;
 }
 
-function hasColumn(db: DatabaseSync, table: string, column: string) {
-  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
-    .some((item) => item.name === column);
-}
-
-function migrateDatabase(
-  db: DatabaseSync,
-  migrations: ReadonlyArray<(database: DatabaseSync) => void>,
-) {
-  const current = Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
-  if (current > migrations.length)
-    throw new Error(`数据库版本 ${current} 高于当前程序支持的版本 ${migrations.length}`);
-  for (let version = current + 1; version <= migrations.length; version += 1) {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      migrations[version - 1](db);
-      db.exec(`PRAGMA user_version = ${version}`);
-      db.exec("COMMIT");
-    } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
-      throw new Error(`数据库升级到版本 ${version} 失败`, { cause: error });
-    }
+function directoryBytes(root: string): number {
+  if (!existsSync(root)) return 0;
+  let total = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const target = path.join(root, entry.name);
+    if (entry.isSymbolicLink()) continue;
+    if (entry.isDirectory()) total += directoryBytes(target);
+    else if (entry.isFile()) total += statSync(target).size;
   }
+  return total;
 }
 
 interface CatalogRow {
@@ -114,11 +107,12 @@ export class WorkspaceDatabase {
       path.join(this.researchRoot, "research.sqlite"),
     );
     this.initCatalog();
+    this.recoverInterruptedAiJobs();
     this.initResearch();
   }
 
   private initCatalog() {
-    migrateDatabase(this.catalog, [
+    runMigrations(this.catalog, [
       (db) => db.exec(`
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
@@ -144,11 +138,21 @@ export class WorkspaceDatabase {
         if (!hasColumn(db, "projects", "safe_stock_line"))
           db.exec("ALTER TABLE projects ADD COLUMN safe_stock_line INTEGER NOT NULL DEFAULT 10");
       },
+      (db) => {
+        for (const column of ["input_tokens INTEGER NOT NULL DEFAULT 0", "output_tokens INTEGER NOT NULL DEFAULT 0", "actual_cost REAL NOT NULL DEFAULT 0", "duration_ms INTEGER NOT NULL DEFAULT 0"]) {
+          const name = column.split(" ")[0];
+          if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
+        }
+      },
     ]);
   }
 
+  private recoverInterruptedAiJobs() {
+    this.catalog.prepare("UPDATE ai_jobs SET status = '已中断', error = '应用退出时任务仍在运行，可重新执行原操作', updated_at = ? WHERE status = '运行中'").run(now());
+  }
+
   private initResearch() {
-    migrateDatabase(this.research, [
+    runMigrations(this.research, [
       (db) => db.exec(`
       CREATE TABLE IF NOT EXISTS ranking_snapshots (
         id TEXT PRIMARY KEY, source TEXT NOT NULL, list_name TEXT NOT NULL,
@@ -192,7 +196,7 @@ export class WorkspaceDatabase {
   }
 
   private initProject(db: DatabaseSync) {
-    migrateDatabase(db, [
+    runMigrations(db, [
       (database) => database.exec(`
       CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS records (
@@ -544,8 +548,8 @@ export class WorkspaceDatabase {
     this.touchProject(id);
   }
 
-  saveChapter(id: string, chapter: Chapter) {
-    return this.persistChapter(id, chapter);
+  saveChapter(id: string, chapter: Chapter, mode: ChapterSaveMode = "version") {
+    return this.persistChapter(id, chapter, undefined, mode === "version");
   }
 
   saveGeneratedChapter(id: string, chapter: Chapter) {
@@ -558,8 +562,28 @@ export class WorkspaceDatabase {
     id: string,
     chapter: Chapter,
     forcedStatus?: ChapterStatus,
+    createRevision = true,
   ) {
     const db = this.projectDb(id);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const saved = this.persistChapterInTransaction(db, id, chapter, forcedStatus, createRevision);
+      db.exec("COMMIT");
+      this.touchProject(id);
+      return saved;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
+  }
+
+  private persistChapterInTransaction(
+    db: DatabaseSync,
+    id: string,
+    chapter: Chapter,
+    forcedStatus?: ChapterStatus,
+    createRevision = true,
+  ) {
     const previous = chapter.id
       ? this.getRecord<Chapter>(db, "chapters", chapter.id)
       : undefined;
@@ -641,7 +665,7 @@ export class WorkspaceDatabase {
             endingExpectationId,
           )
         : undefined;
-      const savedExpectation = this.saveExpectation(id, {
+      const savedExpectation = this.persistExpectation(db, {
         id: endingExpectationId ?? "",
         title: chapter.endingExpectation.trim(),
         description: chapter.endingExpectation.trim(),
@@ -652,7 +676,7 @@ export class WorkspaceDatabase {
         payoffResult: existingExpectation?.payoffResult ?? "",
         createdAt: existingExpectation?.createdAt ?? now(),
         updatedAt: now(),
-      });
+      }, createRevision);
       endingExpectationId = savedExpectation.id;
     }
     const next: Chapter = {
@@ -662,7 +686,7 @@ export class WorkspaceDatabase {
       id: chapter.id || randomUUID(),
       status,
       wordCount: [...chapter.content].filter((char) => !/\s/.test(char)).length,
-      revision: previous ? previous.revision + 1 : 1,
+      revision: previous ? previous.revision + (createRevision ? 1 : 0) : 1,
       batchMode:
         chapter.isKeyChapter ||
         hasFactConflict ||
@@ -673,7 +697,7 @@ export class WorkspaceDatabase {
           : chapter.batchMode,
       updatedAt: now(),
     };
-    this.saveRecord(db, "chapters", next.id, next, previous?.revision);
+    this.saveRecord(db, "chapters", next.id, next, previous?.revision, createRevision);
     db.prepare("DELETE FROM chapter_fts WHERE id = ?").run(next.id);
     db.prepare(
       "INSERT INTO chapter_fts(id, title, content) VALUES(?, ?, ?)",
@@ -688,12 +712,24 @@ export class WorkspaceDatabase {
       next.id,
       `${next.title}\n${next.outline}\n${next.content.slice(0, 1600)}`,
     );
-    this.touchProject(id);
     return next;
   }
 
-  saveExpectation(id: string, expectation: ExpectationEntry) {
+  saveExpectation(id: string, expectation: ExpectationEntry, createRevision = true) {
     const db = this.projectDb(id);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const saved = this.persistExpectation(db, expectation, createRevision);
+      db.exec("COMMIT");
+      this.touchProject(id);
+      return saved;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
+  }
+
+  private persistExpectation(db: DatabaseSync, expectation: ExpectationEntry, createRevision = true) {
     const previous = expectation.id
       ? this.getRecord<ExpectationEntry>(db, "expectations", expectation.id)
       : undefined;
@@ -714,8 +750,7 @@ export class WorkspaceDatabase {
     }
     if (next.status === "已兑现" && !next.actualPayoffChapter)
       throw new Error("已兑现期待必须填写实际兑现章");
-    this.saveRecord(db, "expectations", next.id, next);
-    this.touchProject(id);
+    this.saveRecord(db, "expectations", next.id, next, undefined, createRevision);
     return next;
   }
 
@@ -1237,18 +1272,35 @@ export class WorkspaceDatabase {
     return id;
   }
 
-  finishAiJob(id: string, output: string, error?: string) {
+  finishAiJob(id: string, output: string, error?: string, usage?: { inputTokens: number; outputTokens: number; actualCost: number; durationMs: number; status?: "失败" | "已取消" }) {
     this.catalog
       .prepare(
-        "UPDATE ai_jobs SET status = ?, output = ?, error = ?, updated_at = ? WHERE id = ?",
+        "UPDATE ai_jobs SET status = ?, output = ?, error = ?, input_tokens = ?, output_tokens = ?, actual_cost = ?, duration_ms = ?, updated_at = ? WHERE id = ?",
       )
       .run(
-        error ? "失败" : "成功",
+        error ? usage?.status ?? "失败" : "成功",
         error ? null : output,
         error ?? null,
+        usage?.inputTokens ?? 0,
+        usage?.outputTokens ?? 0,
+        usage?.actualCost ?? 0,
+        usage?.durationMs ?? 0,
         now(),
         id,
       );
+  }
+
+  listAiJobs(projectId?: string): AiJobRecord[] {
+    const rows = (projectId
+      ? this.catalog.prepare("SELECT * FROM ai_jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 200").all(projectId)
+      : this.catalog.prepare("SELECT * FROM ai_jobs ORDER BY created_at DESC LIMIT 200").all()) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      id: String(row.id), projectId: row.project_id ? String(row.project_id) : null, taskType: String(row.task_type),
+      inputSummary: String(row.input_summary), promptVersion: String(row.prompt_version), provider: String(row.provider), model: String(row.model),
+      status: String(row.status) as AiJobRecord["status"], inputTokens: Number(row.input_tokens ?? 0), outputTokens: Number(row.output_tokens ?? 0),
+      actualCost: Number(row.actual_cost ?? 0), durationMs: Number(row.duration_ms ?? 0), error: row.error ? String(row.error) : null,
+      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    }));
   }
 
   getAiSettings(): AiSettings {
@@ -1287,6 +1339,107 @@ export class WorkspaceDatabase {
       String(settings.outputPricePerMillion),
     );
     return this.getAiSettings();
+  }
+
+  getAutoBackupSettings(): AutoBackupSettings {
+    const frequency = this.getSetting("backup.auto.frequency", "daily") === "weekly" ? "weekly" : "daily";
+    const retentionCount = Math.min(30, Math.max(1, Number(this.getSetting("backup.auto.retentionCount", "7")) || 7));
+    const lastStatus = this.getSetting("backup.auto.lastStatus", "未运行") as AutoBackupSettings["lastStatus"];
+    return {
+      enabled: this.getSetting("backup.auto.enabled", "false") === "true",
+      frequency,
+      retentionCount,
+      hasPassword: false,
+      lastRunAt: this.getSetting("backup.auto.lastRunAt", "") || null,
+      lastStatus: ["未运行", "成功", "失败"].includes(lastStatus) ? lastStatus : "未运行",
+      lastError: this.getSetting("backup.auto.lastError", "") || null,
+      nextRunAt: this.getSetting("backup.auto.nextRunAt", "") || null,
+    };
+  }
+
+  saveAutoBackupSettings(input: AutoBackupInput, nextRunAt: string | null) {
+    if (!Number.isInteger(input.retentionCount) || input.retentionCount < 1 || input.retentionCount > 30)
+      throw new Error("自动备份保留份数必须在 1–30 之间");
+    this.setSetting("backup.auto.enabled", String(input.enabled));
+    this.setSetting("backup.auto.frequency", input.frequency);
+    this.setSetting("backup.auto.retentionCount", String(input.retentionCount));
+    this.setSetting("backup.auto.nextRunAt", nextRunAt ?? "");
+    return this.getAutoBackupSettings();
+  }
+
+  finishAutoBackup(status: "成功" | "失败", nextRunAt: string, error?: string) {
+    this.setSetting("backup.auto.lastRunAt", now());
+    this.setSetting("backup.auto.lastStatus", status);
+    this.setSetting("backup.auto.lastError", error ?? "");
+    this.setSetting("backup.auto.nextRunAt", nextRunAt);
+    return this.getAutoBackupSettings();
+  }
+
+  runSystemHealthCheck(): SystemHealthReport {
+    const checks: SystemHealthReport["checks"] = [];
+    const addIntegrityCheck = (id: string, label: string, db: DatabaseSync, projectId: string | null) => {
+      try {
+        const rows = db.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
+        const messages = rows.map((row) => row.integrity_check).filter((message) => message !== "ok");
+        checks.push({ id, label, status: messages.length ? "错误" : "正常", detail: messages.length ? messages.slice(0, 3).join("；") : "SQLite 完整性检查通过", projectId, repairable: false });
+      } catch (error) {
+        checks.push({ id, label, status: "错误", detail: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300), projectId, repairable: false });
+      }
+    };
+
+    addIntegrityCheck("catalog-integrity", "目录数据库", this.catalog, null);
+    addIntegrityCheck("research-integrity", "研究数据库", this.research, null);
+    const projectRows = this.catalog.prepare("SELECT id, title FROM projects ORDER BY created_at").all() as Array<{ id: string; title: string }>;
+    const catalogIds = new Set(projectRows.map((row) => row.id));
+    let chapterCount = 0;
+    let failedAiJobs = Number((this.catalog.prepare("SELECT COUNT(*) AS count FROM ai_jobs WHERE status = '失败'").get() as { count: number }).count);
+
+    for (const row of projectRows) {
+      const databasePath = path.join(this.projectsRoot, row.id, "project.sqlite");
+      if (!existsSync(databasePath)) {
+        checks.push({ id: `project-missing-${row.id}`, label: row.title, status: "错误", detail: "目录库存在作品，但项目数据库文件缺失", projectId: row.id, repairable: false });
+        continue;
+      }
+      const db = this.projectDb(row.id);
+      addIntegrityCheck(`project-integrity-${row.id}`, `${row.title} · 项目数据库`, db, row.id);
+      const records = Number((db.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count);
+      const fts = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts").get() as { count: number }).count);
+      const trigram = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts_tri").get() as { count: number }).count);
+      chapterCount += records;
+      failedAiJobs += Number((db.prepare("SELECT COUNT(*) AS count FROM ai_jobs WHERE status = '失败'").get() as { count: number }).count);
+      const indexesMatch = records === fts && records === trigram;
+      checks.push({ id: `project-search-${row.id}`, label: `${row.title} · 搜索索引`, status: indexesMatch ? "正常" : "警告", detail: indexesMatch ? `${records} 章索引完整` : `章节 ${records}，全文索引 ${fts}，中文索引 ${trigram}`, projectId: row.id, repairable: !indexesMatch });
+    }
+
+    for (const entry of readdirSync(this.projectsRoot, { withFileTypes: true }))
+      if (entry.isDirectory() && !catalogIds.has(entry.name))
+        checks.push({ id: `orphan-${entry.name}`, label: "孤立项目目录", status: "警告", detail: `projects/${entry.name} 不在目录库中，未做自动处理`, projectId: null, repairable: false });
+
+    checks.push({ id: "failed-ai-jobs", label: "失败的 AI 任务", status: failedAiJobs ? "警告" : "正常", detail: failedAiJobs ? `共 ${failedAiJobs} 个失败任务，可在重新执行对应操作后保留审计记录` : "没有失败的 AI 任务", projectId: null, repairable: false });
+    const status = checks.some((item) => item.status === "错误") ? "错误" : checks.some((item) => item.status === "警告") ? "警告" : "正常";
+    return { checkedAt: now(), status, projectCount: projectRows.length, chapterCount, failedAiJobs, workspaceBytes: directoryBytes(this.root), backupBytes: directoryBytes(this.backupRoot), checks };
+  }
+
+  rebuildSearchIndexes(projectId: string) {
+    const row = this.catalog.prepare("SELECT id FROM projects WHERE id = ?").get(projectId);
+    if (!row) throw new Error("项目不存在");
+    const db = this.projectDb(projectId);
+    const chapters = this.listRecords<Chapter>(db, "chapters");
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec("DELETE FROM chapter_fts; DELETE FROM chapter_fts_tri;");
+      const insertFts = db.prepare("INSERT INTO chapter_fts(id, title, content) VALUES(?, ?, ?)");
+      const insertTrigram = db.prepare("INSERT INTO chapter_fts_tri(id, title, content) VALUES(?, ?, ?)");
+      for (const chapter of chapters) {
+        insertFts.run(chapter.id, chapter.title, chapter.content);
+        insertTrigram.run(chapter.id, chapter.title, chapter.content);
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
+    return this.runSystemHealthCheck();
   }
 
   checkpointAll() {
@@ -1419,9 +1572,10 @@ export class WorkspaceDatabase {
     id: string,
     payload: T,
     priorRevision?: number,
+    createRevision = true,
   ) {
     const previous = this.getRecord<T>(db, collection, id);
-    if (previous)
+    if (previous && createRevision)
       this.addRevision(
         db,
         collection,

@@ -51,9 +51,63 @@ describe("per-book isolation and gates", () => {
     databases.push(database);
     expect(database.listProjects()[0]).toMatchObject({ id: "legacy-project", title: "旧版作品", safeStockLine: 10 });
     const inspection = new DatabaseSync(path.join(root, "catalog.sqlite"));
-    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
     expect((inspection.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some((column) => column.name === "safe_stock_line")).toBe(true);
     inspection.close();
+  });
+
+  it("stores bounded automatic backup scheduling metadata without a password", () => {
+    const database = createDatabase();
+    const nextRunAt = "2026-07-31T08:00:00.000Z";
+    const saved = database.saveAutoBackupSettings({ enabled: true, frequency: "weekly", retentionCount: 12 }, nextRunAt);
+    expect(saved).toMatchObject({ enabled: true, frequency: "weekly", retentionCount: 12, nextRunAt, hasPassword: false });
+    expect(() => database.saveAutoBackupSettings({ enabled: true, frequency: "daily", retentionCount: 31 }, nextRunAt)).toThrow("1–30");
+    expect(JSON.stringify(saved)).not.toContain("password");
+  });
+
+  it("records AI usage and marks abandoned running jobs as interrupted", () => {
+    const database = createDatabase();
+    const id = database.startAiJob(null, "draft-chapter", "hash", "prompt", "provider", "model", "第1章");
+    database.finishAiJob(id, "{}", undefined, { inputTokens: 120, outputTokens: 80, actualCost: 0.012, durationMs: 345 });
+    expect(database.listAiJobs()[0]).toMatchObject({ id, status: "成功", inputTokens: 120, outputTokens: 80, actualCost: 0.012, durationMs: 345 });
+    const abandoned = database.startAiJob(null, "draft-chapter", "hash-2", "prompt", "provider", "model", "第2章");
+    const root = database.root;
+    database.close();
+    databases.splice(databases.indexOf(database), 1);
+    const reopened = new WorkspaceDatabase(root);
+    databases.push(reopened);
+    expect(reopened.listAiJobs().find((job) => job.id === abandoned)).toMatchObject({ status: "已中断", error: expect.stringContaining("重新执行") });
+  });
+
+  it("detects and rebuilds incomplete chapter search indexes", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "novel-studio-health-"));
+    roots.push(root);
+    let database = new WorkspaceDatabase(root);
+    const project = database.createProject({ title: "索引健康", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    database.saveChapter(project.id, createChapter(1, "可被搜索的健康检查正文"));
+    database.close();
+
+    const raw = new DatabaseSync(path.join(root, "projects", project.id, "project.sqlite"));
+    raw.exec("DELETE FROM chapter_fts_tri");
+    raw.close();
+
+    database = new WorkspaceDatabase(root);
+    databases.push(database);
+    const broken = database.runSystemHealthCheck();
+    expect(broken.status).toBe("警告");
+    expect(broken.checks).toContainEqual(expect.objectContaining({ id: `project-search-${project.id}`, status: "警告", repairable: true }));
+    const repaired = database.rebuildSearchIndexes(project.id);
+    expect(repaired.checks).toContainEqual(expect.objectContaining({ id: `project-search-${project.id}`, status: "正常", repairable: false }));
+    expect(database.searchProject(project.id, "健康检查")).toHaveLength(1);
+  });
+
+  it("reports orphan project directories without deleting them", () => {
+    const database = createDatabase();
+    const orphan = path.join(database.projectsRoot, "orphan-project");
+    mkdirSync(orphan, { recursive: true });
+    const report = database.runSystemHealthCheck();
+    expect(report.checks).toContainEqual(expect.objectContaining({ id: "orphan-orphan-project", status: "警告", repairable: false }));
+    expect(existsSync(orphan)).toBe(true);
   });
 
   it("creates a zero-start project with an unapproved contract draft", () => {
@@ -106,6 +160,24 @@ describe("per-book isolation and gates", () => {
     expect(detail.expectations[0]).toMatchObject({ sourceChapter: 1, expectedPayoffChapter: 6, status: "待兑现" });
     const fulfilled = database.saveExpectation(project.id, { ...detail.expectations[0], status: "已兑现", actualPayoffChapter: 5, payoffResult: "锁定第一名交易者" });
     expect(fulfilled.payoffResult).toContain("交易者");
+  });
+
+  it("keeps autosaves out of revision history until a version is established", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "自动保存版本", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    const initial = database.saveChapter(project.id, createChapter(1, "第一稿正文"));
+    const firstAutosave = database.saveChapter(project.id, { ...initial, content: "自动保存正文一" }, "autosave");
+    const secondAutosave = database.saveChapter(project.id, { ...firstAutosave, content: "自动保存正文二" }, "autosave");
+
+    expect(secondAutosave.revision).toBe(initial.revision);
+    expect(database.getProject(project.id).chapters[0].content).toBe("自动保存正文二");
+    expect(database.listRevisions(project.id, "chapters", initial.id)).toHaveLength(0);
+
+    const versioned = database.saveChapter(project.id, secondAutosave);
+    const revisions = database.listRevisions(project.id, "chapters", initial.id);
+    expect(versioned.revision).toBe(initial.revision + 1);
+    expect(revisions).toHaveLength(1);
+    expect((revisions[0].payload as Chapter).content).toBe("自动保存正文二");
   });
 
   it("keeps same-name entities inside their own project databases", () => {

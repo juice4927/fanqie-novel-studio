@@ -15,11 +15,13 @@ import type {
   StoryContract,
 } from "../src/shared/types";
 import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
+import { scanSystemHealth } from "./health-service";
 
 interface WorkerRequest {
   id: string;
-  task: "parse-document" | "quality-check";
+  task: "parse-document" | "quality-check" | "system-health";
   payload: unknown;
+  cancel?: boolean;
 }
 
 interface QualityPayload {
@@ -305,12 +307,21 @@ export function qualityCheck(payload: QualityPayload): QualityIssue[] {
   return issues;
 }
 
+const cancelledTasks = new Set<string>();
+
 parentPort?.on("message", async (request: WorkerRequest) => {
+  if (request.cancel) {
+    cancelledTasks.add(request.id);
+    return;
+  }
   try {
-    const result =
-      request.task === "parse-document"
-        ? await parseDocument(
-            String((request.payload as { filePath: string }).filePath),
+    const result = request.task === "parse-document"
+      ? await parseDocument(String((request.payload as { filePath: string }).filePath))
+      : request.task === "system-health"
+        ? await scanSystemHealth(
+            String((request.payload as { root: string }).root),
+            (progress) => parentPort?.postMessage({ id: request.id, progress }),
+            () => cancelledTasks.has(request.id),
           )
         : qualityCheck(request.payload as QualityPayload);
     parentPort?.postMessage({ id: request.id, ok: true, result });
@@ -320,5 +331,7 @@ parentPort?.on("message", async (request: WorkerRequest) => {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    cancelledTasks.delete(request.id);
   }
 });

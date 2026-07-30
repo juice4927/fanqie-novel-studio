@@ -18,21 +18,24 @@ import type {
   RankingSnapshot,
   RankingCaptureSchedule,
   ResearchBook,
+  HealthCheckTask,
+  SystemHealthReport,
 } from "../src/shared/types";
 import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
 import { AiService } from "./ai-service";
-import { createEncryptedBackup, restoreEncryptedBackup } from "./backup";
+import { autoBackupFileName, createEncryptedBackup, nextAutoBackupAt, pruneAutoBackups, restoreEncryptedBackup } from "./backup";
 import { analyzeRankings, capturePublicRankingPage } from "./ranking-service";
 import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
 import {
   findCurrentVolume,
   volumeBoundaryChapters,
 } from "../src/shared/planning";
-import { readApiCredential, writeApiCredential } from "./credential-store";
+import { deleteAutoBackupCredential, readApiCredential, readAutoBackupCredential, writeApiCredential, writeAutoBackupCredential } from "./credential-store";
 import { compileCommercialGuidance } from "../src/shared/commercial-knowledge";
 import { buildLongTermMemory } from "../src/shared/summaries";
 import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
+import { validateIpcArgs } from "./ipc-validation";
 
 let mainWindow: BrowserWindow | null = null;
 let database: WorkspaceDatabase;
@@ -41,6 +44,9 @@ let ai: AiService;
 let apiCredential = "";
 const activeGenerationProjects = new Set<string>();
 let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
+let autoBackupTimer: ReturnType<typeof setInterval> | null = null;
+let autoBackupRunning = false;
+const healthTasks = new Map<string, HealthCheckTask>();
 const singleInstanceLockDisabled =
   process.env.NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
 const hasSingleInstanceLock =
@@ -70,6 +76,27 @@ async function runDueRankingSchedules() {
     try { await runRankingSchedule(schedule.id); } catch (error) {
       database.saveRankingSchedule(failRankingSchedule(schedule, error));
     }
+  }
+}
+
+async function runAutomaticBackup(force = false) {
+  const settings = database.getAutoBackupSettings();
+  if (!settings.enabled || autoBackupRunning) return settings;
+  if (!force && settings.nextRunAt && Date.parse(settings.nextRunAt) > Date.now()) return settings;
+  autoBackupRunning = true;
+  try {
+    const password = await readAutoBackupCredential();
+    if (!password) throw new Error("自动备份密码不存在，请在系统设置中重新保存");
+    database.checkpointAll();
+    const destination = path.join(database.backupRoot, autoBackupFileName());
+    await createEncryptedBackup(database.root, destination, password);
+    await pruneAutoBackups(database.backupRoot, settings.retentionCount);
+    return database.finishAutoBackup("成功", nextAutoBackupAt(settings.frequency));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return database.finishAutoBackup("失败", new Date(Date.now() + 60 * 60 * 1000).toISOString(), message);
+  } finally {
+    autoBackupRunning = false;
   }
 }
 
@@ -502,7 +529,7 @@ function registerHandlers() {
     ipcMain.handle(`studio:${channel}`, (event, ...args) => {
       if (!mainWindow || event.sender.id !== mainWindow.webContents.id)
         throw new Error("拒绝来自非主窗口的调用");
-      return callback(...args);
+      return callback(...validateIpcArgs(channel, args));
     });
   handle("getDashboard", () => getDashboard());
   handle("listProjects", () => database.listProjects());
@@ -554,7 +581,7 @@ function registerHandlers() {
     const chapters = generated.chapters.map((chapter) => database.saveChapter(id, chapter));
     return { ...generated, plans, chapters };
   });
-  handle("saveChapter", (id, chapter) => database.saveChapter(id, chapter));
+  handle("saveChapter", (id, chapter, mode) => database.saveChapter(id, chapter, mode));
   handle("saveExpectation", (id, expectation) =>
     database.saveExpectation(id, expectation),
   );
@@ -888,6 +915,10 @@ function registerHandlers() {
           (item) => item.id === candidate.id,
         );
         if (!chapter) throw new Error(`第${candidate.number}章不存在`);
+        if (chapter.content.trim()) {
+          generated.push(chapter);
+          continue;
+        }
         const facts = database.searchRelevantFacts(
           id,
           `${chapter.title} ${chapter.outline}`,
@@ -919,6 +950,8 @@ function registerHandlers() {
       hasApiKey: Boolean(getApiKey()),
     };
   });
+  handle("listAiJobs", (projectId) => database.listAiJobs(projectId));
+  handle("cancelAiJob", (id) => ai.cancelJob(id));
   handle("exportProject", (id, format) => exportProject(id, format));
   handle("importMetricsCsv", (id, csvText) => {
     const metrics = parseMetricsCsv(csvText);
@@ -950,6 +983,67 @@ function registerHandlers() {
     if (result.canceled || !result.filePaths[0]) return null;
     return restoreEncryptedBackup(result.filePaths[0], database.root, password);
   });
+  handle("getAutoBackupSettings", async () => ({
+    ...database.getAutoBackupSettings(),
+    hasPassword: Boolean(await readAutoBackupCredential()),
+  }));
+  handle("saveAutoBackupSettings", async (input, password) => {
+    const currentPassword = await readAutoBackupCredential();
+    if (input.enabled && !password && !currentPassword)
+      throw new Error("启用自动备份需要设置至少 8 位的专用密码");
+    if (password) await writeAutoBackupCredential(password);
+    if (!input.enabled) await deleteAutoBackupCredential();
+    const saved = database.saveAutoBackupSettings(
+      input,
+      input.enabled ? nextAutoBackupAt(input.frequency) : null,
+    );
+    return { ...saved, hasPassword: input.enabled && Boolean(password || currentPassword) };
+  });
+  handle("runAutoBackup", async () => ({
+    ...await runAutomaticBackup(true),
+    hasPassword: Boolean(await readAutoBackupCredential()),
+  }));
+  const runHealthCheck = (id: string) => worker.run<SystemHealthReport>(
+    "system-health",
+    { root: database.root },
+    {
+      id,
+      onProgress: (value) => {
+        const progress = value as { completed: number; total: number; label: string };
+        const task = healthTasks.get(id);
+        if (task?.status === "运行中") healthTasks.set(id, { ...task, ...progress });
+      },
+    },
+  );
+  handle("runSystemHealthCheck", () => runHealthCheck(randomUUID()));
+  handle("startSystemHealthCheck", () => {
+    const running = [...healthTasks.values()].find((task) => task.status === "运行中");
+    if (running) return running;
+    const id = randomUUID();
+    const task: HealthCheckTask = { id, status: "运行中", completed: 0, total: 1, label: "准备检查", report: null, error: null };
+    healthTasks.set(id, task);
+    void runHealthCheck(id).then((report) => {
+      const current = healthTasks.get(id);
+      if (current?.status === "运行中") healthTasks.set(id, { ...current, status: "完成", completed: current.total, label: "检查完成", report });
+    }).catch((error) => {
+      const current = healthTasks.get(id);
+      const message = error instanceof Error ? error.message : String(error);
+      if (current) healthTasks.set(id, { ...current, status: message === "健康检查已取消" ? "已取消" : "失败", error: message });
+    });
+    return task;
+  });
+  handle("getSystemHealthCheck", (id) => {
+    const task = healthTasks.get(id);
+    if (!task) throw new Error("健康检查任务不存在");
+    return task;
+  });
+  handle("cancelSystemHealthCheck", (id) => {
+    const task = healthTasks.get(id);
+    if (!task || task.status !== "运行中") return false;
+    healthTasks.set(id, { ...task, status: "已取消", label: "正在取消" });
+    return worker.cancel(id);
+  });
+  handle("rebuildSearchIndexes", (projectId) => database.rebuildSearchIndexes(projectId));
   handle("getWorkspacePath", () => database.root);
 }
 
@@ -992,7 +1086,9 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ai = new AiService(database, getApiKey);
   registerHandlers();
   void runDueRankingSchedules();
+  void runAutomaticBackup();
   rankingScheduleTimer = setInterval(() => void runDueRankingSchedules(), 15 * 60 * 1000);
+  autoBackupTimer = setInterval(() => void runAutomaticBackup(), 15 * 60 * 1000);
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -1001,6 +1097,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (rankingScheduleTimer) clearInterval(rankingScheduleTimer);
+  if (autoBackupTimer) clearInterval(autoBackupTimer);
   void worker?.close();
   database?.close();
   if (process.platform !== "darwin") app.quit();

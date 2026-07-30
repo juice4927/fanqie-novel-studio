@@ -160,6 +160,19 @@ test("keeps the dashboard readable without viewport overflow", async ({
     });
 });
 
+test("shows automatic backup controls without exposing stored secrets", async ({ page }) => {
+  await page.getByRole("button", { name: "系统设置" }).click();
+  await expect(page.getByRole("heading", { name: "自动加密备份" })).toBeVisible();
+  await expect(page.getByText("启用自动备份", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("自动备份专用密码")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "立即备份" })).toBeDisabled();
+  await page.getByRole("button", { name: "运行健康检查" }).click();
+  await expect(page.getByRole("article").getByText("浏览器预览数据", { exact: true })).toBeVisible();
+  await expect(page.getByText("localStorage 数据可读取；SQLite 完整性检查仅在桌面版可用")).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("creates a book from zero through AI concept selection", async ({ page }) => {
   await page.getByRole("button", { name: "新建作品" }).first().click();
   await expect(page.getByRole("dialog", { name: "从 0 开始创建一本书" })).toBeVisible();

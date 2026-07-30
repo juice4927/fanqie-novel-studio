@@ -48,6 +48,7 @@ import type {
   SearchHit,
   RevisionRecord,
 } from "../shared/types";
+import { AutosaveCoordinator, chapterDraftSignature, clearRecoveredChapter, readRecoveredChapter, writeRecoveredChapter } from "../lib/chapter-draft";
 import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
 import type { GenrePluginDefinition } from "../shared/genre-plugins";
 import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
@@ -106,32 +107,6 @@ const EMPTY_CHAPTER = (number: number): Chapter => ({
   revision: 0,
   updatedAt: new Date().toISOString(),
 });
-
-function chapterDraftSignature(chapter: Chapter) {
-  const { id: _id, revision: _revision, updatedAt: _updatedAt, wordCount: _wordCount, ...editable } = chapter;
-  return JSON.stringify(editable);
-}
-
-function chapterRecoveryKey(projectId: string, chapter: Chapter) {
-  return `novel-studio.chapter-draft.${projectId}.${chapter.id || `new-${chapter.number}`}`;
-}
-
-function readRecoveredChapter(projectId: string, chapter: Chapter) {
-  try {
-    const recovered = localStorage.getItem(chapterRecoveryKey(projectId, chapter));
-    return recovered ? JSON.parse(recovered) as Chapter : chapter;
-  } catch {
-    return chapter;
-  }
-}
-
-function writeRecoveredChapter(projectId: string, chapter: Chapter) {
-  try { localStorage.setItem(chapterRecoveryKey(projectId, chapter), JSON.stringify(chapter)); } catch { /* storage unavailable */ }
-}
-
-function clearRecoveredChapter(projectId: string, chapter: Chapter) {
-  try { localStorage.removeItem(chapterRecoveryKey(projectId, chapter)); } catch { /* storage unavailable */ }
-}
 
 function splitLines(value: string) {
   return value
@@ -1205,10 +1180,37 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
   const [saveStatus, setSaveStatus] = useState<"saved" | "dirty" | "saving" | "error">("saved");
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
   const draftRef = useRef(draft);
-  const saveInFlight = useRef(false);
+  const autosaveRef = useRef<AutosaveCoordinator | null>(null);
+  const reloadRef = useRef(reload);
+  const notifyRef = useRef(notify);
   const [batchPreview, setBatchPreview] =
     useState<BatchGenerationPreview | null>(null);
-  useEffect(() => { draftRef.current = draft; }, [draft]);
+  useEffect(() => { draftRef.current = draft; reloadRef.current = reload; notifyRef.current = notify; }, [draft, reload, notify]);
+  useEffect(() => {
+    const coordinator = new AutosaveCoordinator(
+      (snapshot) => api.saveChapter(project.summary.id, snapshot, "autosave"),
+      (snapshot, saved) => {
+        const snapshotSignature = chapterDraftSignature(snapshot);
+        const stillEditingChapter = draftRef.current.id === snapshot.id;
+        if (stillEditingChapter) lastSavedSignature.current = snapshotSignature;
+        if (stillEditingChapter && chapterDraftSignature(draftRef.current) === snapshotSignature) {
+          clearRecoveredChapter(project.summary.id, snapshot);
+          setDraft(saved);
+          setSaveStatus("saved");
+        } else if (stillEditingChapter) setSaveStatus("dirty");
+        void reloadRef.current();
+      },
+      (error) => {
+        setSaveStatus("error");
+        notifyRef.current(`${error instanceof Error ? error.message : String(error)}；将自动重试`, "error");
+      },
+    );
+    autosaveRef.current = coordinator;
+    return () => {
+      coordinator.stop();
+      if (autosaveRef.current === coordinator) autosaveRef.current = null;
+    };
+  }, [api, project.summary.id]);
   useEffect(() => {
     const next = project.chapters.find((chapter) => chapter.id === selectedId);
     if (!next || chapterDraftSignature(draftRef.current) !== lastSavedSignature.current) return;
@@ -1225,27 +1227,9 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
     setSaveStatus("dirty");
     if (!draft.id || ["已定稿", "待发布", "已发布"].includes(draft.status)) return;
     const timer = window.setTimeout(async () => {
-      if (saveInFlight.current) return;
       const snapshot = draftRef.current;
-      const snapshotSignature = chapterDraftSignature(snapshot);
-      saveInFlight.current = true;
       setSaveStatus("saving");
-      try {
-        const saved = await api.saveChapter(project.summary.id, snapshot);
-        const stillEditingChapter = draftRef.current.id === snapshot.id;
-        clearRecoveredChapter(project.summary.id, snapshot);
-        if (stillEditingChapter) lastSavedSignature.current = snapshotSignature;
-        if (stillEditingChapter && chapterDraftSignature(draftRef.current) === snapshotSignature) {
-          setDraft(saved);
-          setSaveStatus("saved");
-        } else if (stillEditingChapter) setSaveStatus("dirty");
-        await reload();
-      } catch (error) {
-        setSaveStatus("error");
-        notify(error instanceof Error ? error.message : String(error), "error");
-      } finally {
-        saveInFlight.current = false;
-      }
+      autosaveRef.current?.enqueue(snapshot);
     }, 2000);
     return () => window.clearTimeout(timer);
   }, [api, dirty, draft, notify, project.summary.id]);
@@ -1396,10 +1380,10 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
             <Button
               variant="secondary"
               icon={<Save size={16} />}
-              disabled={!dirty || saveStatus === "saving"}
+              disabled={saveStatus === "saving"}
               onClick={save}
             >
-              保存
+              建立版本
             </Button>
           </div>
         </header>

@@ -2269,6 +2269,103 @@ p {
   gap: 20px;
   padding: 20px;
 }
+.backup-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.backup-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.backup-status-grid span {
+  display: grid;
+  gap: 4px;
+  padding: 11px 13px;
+  color: var(--subtle);
+  background: var(--surface-soft);
+  font-size: 9px;
+}
+.backup-status-grid strong {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+}
+.backup-status-grid .backup-error {
+  grid-column: 1 / -1;
+}
+.backup-status-grid .backup-error strong {
+  color: var(--danger);
+}
+.health-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.health-progress { display: grid; gap: 7px; }
+.health-progress div { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 10px; }
+.health-progress strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.health-progress progress { width: 100%; height: 7px; accent-color: var(--teal); }
+.ai-job-list { display: grid; border-top: 1px solid var(--line); }
+.ai-job-list article { display: grid; grid-template-columns: minmax(180px, 1fr) auto 120px auto; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.ai-job-list article > div { display: grid; gap: 3px; min-width: 0; }
+.ai-job-list strong { font-size: 11px; overflow-wrap: anywhere; }
+.ai-job-list small, .job-usage { color: var(--muted); font-size: 9px; }
+.ai-job-list .job-error { color: var(--danger); }
+.job-status { font-size: 9px; padding: 3px 6px; border: 1px solid var(--line); }
+.job-成功 { color: var(--teal); }
+.job-失败, .job-已取消, .job-已中断 { color: var(--danger); }
+.job-usage { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) { .ai-job-list article { grid-template-columns: minmax(0, 1fr) auto; } .job-usage { text-align: left; } }
+.health-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.health-summary span {
+  display: grid;
+  gap: 4px;
+  padding: 11px;
+  color: var(--subtle);
+  background: var(--surface-soft);
+  font-size: 9px;
+}
+.health-summary strong {
+  color: var(--text);
+  font-size: 12px;
+}
+.health-check-list {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.health-check-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--line);
+}
+.health-check-list article:last-child { border-bottom: 0; }
+.health-check-list article > span { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 2px 7px; min-width: 0; }
+.health-check-list i { grid-row: 1 / 3; align-self: center; width: 7px; height: 7px; background: var(--teal); border-radius: 50%; }
+.health-check-list strong { font-size: 10px; }
+.health-check-list small { color: var(--muted); font-size: 9px; overflow-wrap: anywhere; }
+.health-check-list .health-警告 i { background: var(--warning); }
+.health-check-list .health-错误 i { background: var(--danger); }
 
 .modal-backdrop {
   position: fixed;

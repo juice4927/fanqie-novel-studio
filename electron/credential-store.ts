@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
-const TARGET = "cn.local.fanqie.novelstudio/model-api";
+const API_TARGET = "cn.local.fanqie.novelstudio/model-api";
+const AUTO_BACKUP_TARGET = "cn.local.fanqie.novelstudio/auto-backup";
 
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -35,6 +36,9 @@ public static class NovelStudioCredential {
 
   [DllImport("advapi32.dll", SetLastError = true)]
   private static extern void CredFree(IntPtr buffer);
+
+  [DllImport("advapi32.dll", EntryPoint = "CredDeleteW", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool CredDelete(string target, uint type, uint flags);
 
   public static void Write(string target, string secret) {
     byte[] bytes = Encoding.Unicode.GetBytes(secret);
@@ -71,6 +75,13 @@ public static class NovelStudioCredential {
       CredFree(pointer);
     }
   }
+
+  public static void Delete(string target) {
+    if (!CredDelete(target, 1, 0)) {
+      int error = Marshal.GetLastWin32Error();
+      if (error != 1168) throw new Win32Exception(error);
+    }
+  }
 }
 '@
 
@@ -78,13 +89,15 @@ if ($env:NOVEL_STUDIO_CREDENTIAL_OPERATION -eq 'write') {
   $encoded = [Console]::In.ReadToEnd()
   $secret = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
   [NovelStudioCredential]::Write($env:NOVEL_STUDIO_CREDENTIAL_TARGET, $secret)
-} else {
+} elseif ($env:NOVEL_STUDIO_CREDENTIAL_OPERATION -eq 'read') {
   $secret = [NovelStudioCredential]::Read($env:NOVEL_STUDIO_CREDENTIAL_TARGET)
   [Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($secret)))
+} else {
+  [NovelStudioCredential]::Delete($env:NOVEL_STUDIO_CREDENTIAL_TARGET)
 }
 `;
 
-function execute(operation: "read" | "write", value = "") {
+function execute(target: string, operation: "read" | "write" | "delete", value = "") {
   if (process.platform !== "win32") return Promise.resolve("");
   return new Promise<string>((resolve, reject) => {
     const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], {
@@ -92,7 +105,7 @@ function execute(operation: "read" | "write", value = "") {
       env: {
         ...process.env,
         NOVEL_STUDIO_CREDENTIAL_OPERATION: operation,
-        NOVEL_STUDIO_CREDENTIAL_TARGET: TARGET,
+        NOVEL_STUDIO_CREDENTIAL_TARGET: target,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -110,11 +123,25 @@ function execute(operation: "read" | "write", value = "") {
 }
 
 export async function readApiCredential() {
-  const encoded = await execute("read");
+  const encoded = await execute(API_TARGET, "read");
   return encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";
 }
 
 export async function writeApiCredential(value: string) {
   if (!value) throw new Error("API 密钥不能为空");
-  await execute("write", value);
+  await execute(API_TARGET, "write", value);
+}
+
+export async function readAutoBackupCredential() {
+  const encoded = await execute(AUTO_BACKUP_TARGET, "read");
+  return encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";
+}
+
+export async function writeAutoBackupCredential(value: string) {
+  if (value.length < 8) throw new Error("自动备份密码至少需要 8 个字符");
+  await execute(AUTO_BACKUP_TARGET, "write", value);
+}
+
+export async function deleteAutoBackupCredential() {
+  await execute(AUTO_BACKUP_TARGET, "delete");
 }
