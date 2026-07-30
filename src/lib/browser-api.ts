@@ -3,6 +3,7 @@ import type {
   AppApi,
   BookConceptCandidate,
   BookConceptInput,
+  BookConceptSkeleton,
   ChangeRequest,
   Chapter,
   ConceptCandidate,
@@ -385,6 +386,30 @@ function browserRankingAnalytics(
   };
 }
 
+function browserConceptSkeleton(concept: BookConceptCandidate): BookConceptSkeleton {
+  if (concept.genreElements.includes("探案")) return {
+    protagonistArc: "她从只想证明自己没有失职，走到敢于承担调查后果、建立可靠证据标准，并最终以公开真相重新定义职业尊严。",
+    keyRelationships: ["主角与受害客户：从相互怀疑到共同追索欠款，客户掌握线索却隐瞒自身责任", "主角与同行调查者：既争夺职业机会又共享证据方法，对规则边界持相反立场"],
+    worldRules: ["每条欠款线索必须由票据、往来记录或证人交叉验证，异常提示不能直接作为结论", "调查会消耗职业信用和现实资源，越接近利益链核心，主角承担的法律与人际代价越高"],
+    majorForces: ["主角的职业协作网络：依靠财务能力与基层信息追索证据", "恶意欠款利益链：依靠合同漏洞、关系掩护和信息差转移责任"],
+    timelineAnchors: ["开局前：主角因替他人背责失去职业信任", "开局触发：一笔恶意欠款显露首条可追索证据", "中期节点：证据指向主角曾信任的职业体系并迫使她公开站队", "终局兑现：利益链完成司法与行业双重定性，主角建立新的调查规范"],
+  };
+  if (concept.genreElements.includes("乡村")) return {
+    protagonistArc: "她从把荒山当作最后退路，走到理解土地、合作与长期责任的代价，最终成为能够让个人选择与地方共同发展并存的经营者。",
+    keyRelationships: ["主角与村集体负责人：围绕承包边界彼此试探，双方必须在收益与公共责任之间达成新规则", "主角与返乡技术伙伴：一个重视长期改造，一个急于商业回报，路线冲突决定产业方向"],
+    worldRules: ["土地改造受承包合同、生态条件和农业周期约束，投入不能立即兑换收益", "产业扩张必须获得村民协作并处理利益分配，个人成功不能绕过社区成本"],
+    majorForces: ["荒山改造合作组：拥有合同、劳动力和技术试验能力", "等待低价收地的外部资本：拥有资金、渠道和地方关系，试图利用短期失败取得控制权"],
+    timelineAnchors: ["开局前：主角被迫让出工作名额并失去家庭资源", "开局触发：旧承包合同使她意外获得荒山经营权", "中期节点：首次产业成果引发土地控制权和分配规则争夺", "终局兑现：荒山形成稳定产业，合同与社区治理规则得到重新确认"],
+  };
+  return {
+    protagonistArc: "她从只求尽快止损、拒绝再次信任任何人，走到能够建立合作规则、承担共同体责任，并在终局以平等关系守住自己的事业和选择。",
+    keyRelationships: ["主角与供销社老会计：从互相防备到共同核账，老会计掌握旧渠道但害怕再次担责", "主角与前夫家利益代表：围绕资产和名誉持续对抗，对方每次施压都会暴露旧账链条", "主角与女性互助团队：成员各有生计目标，合作成果与分配矛盾共同推动群像线"],
+    worldRules: ["供销社的采购、赊销和票据必须留下可核对记录，经营成果不能凭空出现", "主角只能依靠职业能力、渠道谈判和团队协作解决问题，每次扩张都会增加现金流与责任风险"],
+    majorForces: ["主角经营团队：目标是让供销社恢复稳定经营，资源是专业能力、基层渠道和社区信任", "旧利益网络：目标是掩盖历史烂账并夺回资产控制权，资源是人情关系、合同漏洞和舆论压力"],
+    timelineAnchors: ["开局前：主角在婚姻与工作中长期替他人承担损失", "开局触发：离婚与资产争夺当天，她接手濒临倒闭的供销社", "中期节点：团队首次扩张后因分配与旧账证据出现不可逆分裂", "终局兑现：旧利益链被公开清算，供销社形成可持续制度并由团队共同治理"],
+  };
+}
+
 export function createBrowserApi(): AppApi {
   let state = load();
   const persist = () => save(state);
@@ -483,8 +508,7 @@ export function createBrowserApi(): AppApi {
         openingMechanism: concept.openingMechanism, growthCarrier: concept.growthCarrier,
         primaryPayoff: concept.primaryPayoff, longFormEngine: concept.longFormEngine,
         protagonistDesire: concept.protagonistDesire, readerPromise: concept.readerPromise,
-        protagonistArc: `${concept.protagonistDesire}；最终走向：${concept.ending}`,
-        keyRelationships: [], worldRules: [], majorForces: [], timelineAnchors: [],
+        ...browserConceptSkeleton(concept),
         coreEmotion: concept.coreEmotion, ending: concept.ending,
         immutableRules: concept.immutableRules, prohibitedPatterns: concept.prohibitedPatterns,
       };
@@ -550,6 +574,11 @@ export function createBrowserApi(): AppApi {
         ["核心回报", project.contract.primaryPayoff], ["长篇发动机", project.contract.longFormEngine],
       ];
       const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label);
+      if (!project.contract.protagonistArc?.trim()) missing.push("主角弧光");
+      if ((project.contract.keyRelationships?.length ?? 0) < 2) missing.push("关键关系（至少2条）");
+      if ((project.contract.worldRules?.length ?? 0) < 2) missing.push("世界规则（至少2条）");
+      if ((project.contract.majorForces?.length ?? 0) < 2) missing.push("主要势力（至少2个）");
+      if ((project.contract.timelineAnchors?.length ?? 0) < 3) missing.push("时间锚点（至少3条）");
       if (missing.length) throw new Error(`创作契约尚未补全：${missing.join("、")}`);
       project.contract.approved = true;
       project.summary.status = "大纲审批";

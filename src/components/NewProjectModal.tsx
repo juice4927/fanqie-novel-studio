@@ -20,6 +20,7 @@ export function NewProjectModal({ api, onClose, onCreated, notify }: {
   const [concepts, setConcepts] = useState<BookConceptCandidate[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyMessage, setBusyMessage] = useState("正在处理…");
   const selected = concepts.find((item) => item.id === selectedId) ?? null;
   const plugin = GENRE_PLUGINS[input.genre];
   const selectedDirection = [
@@ -29,6 +30,7 @@ export function NewProjectModal({ api, onClose, onCreated, notify }: {
   ].filter(Boolean).join("；");
 
   const generate = async () => {
+    setBusyMessage("正在构思三套方案…");
     setBusy(true);
     try {
       const next = await api.generateBookConcepts(input);
@@ -42,6 +44,7 @@ export function NewProjectModal({ api, onClose, onCreated, notify }: {
   };
 
   const create = async () => {
+    setBusyMessage(mode === "AI 从零开书" ? "正在完善人物与世界…" : "正在创建作品…");
     setBusy(true);
     try {
       const project = mode === "AI 从零开书" && selected
@@ -82,7 +85,7 @@ export function NewProjectModal({ api, onClose, onCreated, notify }: {
         <div className="wizard-genre-note"><strong>{selectedDirection ? "本次题材组合" : "平台商业基线"}</strong><span>{selectedDirection || `${plugin.readerPromise}；未指定复合方向时，三套方案会分别选择不同叙事主轴。`}</span></div>
         {!concepts.length ? <div className="wizard-generate"><Sparkles size={24} /><div><strong>AI 会先给出 3 套完整开书方案</strong><span>每套包含书名、故事前提、核心卖点、目标读者、长篇发动机和未审批创作契约。</span></div><Button icon={busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} disabled={busy} onClick={generate}>{busy ? "正在构思…" : "生成三套方案"}</Button></div> : <div className="book-concept-grid">{concepts.map((concept) => <button type="button" key={concept.id} className={selectedId === concept.id ? "selected" : ""} onClick={() => setSelectedId(concept.id)}><header><span>{concept.genreSubtype}</span>{selectedId === concept.id && <Check size={17} />}</header><h3>{concept.title}</h3><p>{concept.premise}</p><dl><dt>叙事主轴</dt><dd>{concept.secondaryGenres.join(" + ")}</dd><dt>开局机制</dt><dd>{concept.openingMechanism}</dd><dt>成长载体</dt><dd>{concept.growthCarrier}</dd><dt>主要回报</dt><dd>{concept.primaryPayoff}</dd><dt>商业钩子</dt><dd>{concept.commercialHook}</dd><dt>目标读者</dt><dd>{concept.audience}</dd><dt>长篇发动机</dt><dd>{concept.longFormEngine}</dd><dt>故事终局</dt><dd>{concept.ending}</dd><dt>明确避用</dt><dd>{concept.prohibitedPatterns.join("；")}</dd></dl></button>)}</div>}
       </>}
-      <div className="modal-actions"><Button variant="secondary" disabled={busy} onClick={onClose}>取消</Button>{mode === "AI 从零开书" && concepts.length > 0 && <Button variant="secondary" disabled={busy} icon={<Sparkles size={16} />} onClick={generate}>换一批</Button>}<Button disabled={busy || (mode === "手动创建" ? !manualTitle.trim() : !selected)} onClick={create}>{busy ? "正在创建…" : mode === "AI 从零开书" ? "采用此方案并创建" : "创建空白作品"}</Button></div>
+      <div className="modal-actions"><Button variant="secondary" disabled={busy} onClick={onClose}>取消</Button>{mode === "AI 从零开书" && concepts.length > 0 && <Button variant="secondary" disabled={busy} icon={<Sparkles size={16} />} onClick={generate}>换一批</Button>}<Button disabled={busy || (mode === "手动创建" ? !manualTitle.trim() : !selected)} onClick={create}>{busy ? busyMessage : mode === "AI 从零开书" ? "采用此方案并创建" : "创建空白作品"}</Button></div>
     </div>
   </Modal>;
 }

@@ -582,6 +582,11 @@ export class WorkspaceDatabase {
       ["核心回报", contract.primaryPayoff], ["长篇发动机", contract.longFormEngine],
     ];
     const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label);
+    if (!contract.protagonistArc?.trim()) missing.push("主角弧光");
+    if ((contract.keyRelationships?.length ?? 0) < 2) missing.push("关键关系（至少2条）");
+    if ((contract.worldRules?.length ?? 0) < 2) missing.push("世界规则（至少2条）");
+    if ((contract.majorForces?.length ?? 0) < 2) missing.push("主要势力（至少2个）");
+    if ((contract.timelineAnchors?.length ?? 0) < 3) missing.push("时间锚点（至少3条）");
     if (missing.length) throw new Error(`创作契约尚未补全：${missing.join("、")}`);
     const next = { ...contract, approved: true, updatedAt: now() };
     this.setState(db, "contract", next);

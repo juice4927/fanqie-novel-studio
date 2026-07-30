@@ -209,6 +209,11 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await expect(page.getByLabel("成长载体")).toHaveValue("商品渠道与女性互助团队");
   await expect(page.getByLabel("核心回报")).toHaveValue("经营成果改变个人和社区处境");
   await expect(page.getByLabel("长篇发动机")).toHaveValue(/个人止损、团队经营、区域产业/);
+  await expect(page.getByLabel("主角弧光")).toHaveValue(/建立合作规则/);
+  await expect(page.getByLabel("关键关系")).toHaveValue(/供销社老会计/);
+  await expect(page.getByLabel("世界规则")).toHaveValue(/采购、赊销和票据/);
+  await expect(page.getByLabel("主要势力")).toHaveValue(/旧利益网络/);
+  await expect(page.getByLabel("时间锚点")).toHaveValue(/中期节点/);
   await expect(page.getByRole("heading", { name: "审美设定" })).toBeVisible();
   await expect(page.getByRole("button", { name: "AI 优化本书审美" })).toBeVisible();
   await expect(page.getByLabel("叙事距离")).toHaveValue("适中");

@@ -503,6 +503,14 @@ export interface BookConceptCandidate {
   longFormEngine: string;
 }
 
+export interface BookConceptSkeleton {
+  protagonistArc: string;
+  keyRelationships: string[];
+  worldRules: string[];
+  majorForces: string[];
+  timelineAnchors: string[];
+}
+
 export interface CreateProjectInput extends GenreComposition {
   title: string;
   genre: Genre;

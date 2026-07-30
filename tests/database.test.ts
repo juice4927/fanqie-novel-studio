@@ -28,6 +28,11 @@ const completeNarrativeEngine = {
   growthCarrier: "专业能力、关系网络与认知共同积累",
   primaryPayoff: "解决现实问题并改变人物处境",
   longFormEngine: "个人困境、组织阻力和规则真相形成三轮升级",
+  protagonistArc: "主角从逃避责任到主动承担调查代价，并在终局建立新的行动准则",
+  keyRelationships: ["主角与搭档从互不信任到共同承担后果", "主角与对手围绕规则解释权持续冲突"],
+  worldRules: ["所有异常结果都必须有可验证的触发条件", "能力使用会消耗现实资源并产生关系代价"],
+  majorForces: ["主角调查团队掌握专业能力与基层线索", "既得利益组织掌握资源渠道与规则解释权"],
+  timelineAnchors: ["开局前主角因旧事故逃避责任", "开局异常迫使主角重新调查", "中期证据揭示组织性掩盖", "终局主角公开真相并建立新规则"],
 };
 
 afterEach(() => {

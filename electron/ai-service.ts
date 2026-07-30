@@ -5,6 +5,7 @@ import type {
   Chapter,
   BookConceptCandidate,
   BookConceptInput,
+  BookConceptSkeleton,
   ConceptCandidate,
   ContextPackage,
   Genre,
@@ -101,6 +102,17 @@ const BookConceptSchema = z.object({
     commercialHook: z.string().min(8).max(300),
     longFormEngine: z.string().min(10).max(400),
   })).length(3),
+});
+
+const distinctSkeletonList = (minimum: number, maximum: number) => z.array(z.string().min(8).max(300)).min(minimum).max(maximum)
+  .refine((items) => new Set(items.map((item) => diversityKey(item))).size === items.length, "骨架条目不能重复");
+
+const BookConceptSkeletonSchema = z.object({
+  protagonistArc: z.string().min(20).max(600),
+  keyRelationships: distinctSkeletonList(2, 8),
+  worldRules: distinctSkeletonList(2, 10),
+  majorForces: distinctSkeletonList(2, 8),
+  timelineAnchors: distinctSkeletonList(3, 10),
 });
 
 type GeneratedBookConcept = z.infer<typeof BookConceptSchema>["candidates"][number];
@@ -741,6 +753,27 @@ export class AiService {
       if (issues.length) throw new Error(`三套方案仍过于相似：${issues.join("；")}。请补充更具体的复合类型或自定义方向后重试。`);
     }
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
+  }
+
+  async expandBookConcept(input: BookConceptInput, concept: BookConceptCandidate): Promise<BookConceptSkeleton> {
+    return this.runJson({
+      projectId: null,
+      taskType: "expand-book-concept-skeleton",
+      inputSummary: `${concept.title} 人物与世界骨架`,
+      system: [
+        "你是中文长篇小说的故事架构师。作者已经选定立项方案，现在只扩展这一本书的人物与世界骨架。",
+        "不得更换主角、核心矛盾、开局机制、成长载体、主要回报、长篇发动机或终局，不得偷偷加入系统、重生、血脉等未选择元素。",
+        "主角弧光必须写清起点认知、阶段转变、关键代价和终局状态。关键关系必须说明双方、初始张力、各自目标和不可替代作用。",
+        "世界规则必须是会影响人物选择的职业、社会、能力、资源或超自然规则，并写清边界或代价。主要势力必须说明目标、资源和与主线的冲突位置。",
+        "时间锚点必须覆盖开局前因、开局触发、至少一个中期不可逆节点和终局兑现，使用相对阶段，不要编造具体公历日期。",
+        "各项要能直接进入故事圣经，不写空泛的‘关系逐渐加深、世界更加广阔、经历重重困难’。",
+      ].join("\n"),
+      user: `平台主题材：${input.genre}\n复合叙事类型：${concept.secondaryGenres.join(" + ")}\n题材元素：${concept.genreElements.join("、") || "无固定元素"}\n自定义方向：${input.customGenreDirection?.trim() || "无"}\n已选开书方案：${JSON.stringify(concept)}\n输出 protagonistArc、keyRelationships、worldRules、majorForces、timelineAnchors。所有内容必须能由已选方案推出，并共同支撑 longFormEngine。`,
+      schema: BookConceptSkeletonSchema,
+      longTask: true,
+      stream: true,
+      reasoningEffort: "medium",
+    });
   }
 
   async generatePlanning(

@@ -29,6 +29,11 @@ test("starts the production Electron app and persists through the preload API", 
         growthCarrier: "维修经验、事故证据与可信协作者共同积累",
         primaryPayoff: "提前阻止事故并揭开责任链条",
         longFormEngine: "个人事故、企业掩盖与回声源头形成三轮升级",
+        protagonistArc: "维修员从只想保护家人、逃避旧事故，到愿意公开证据承担职业代价，并最终建立透明的事故追责规则",
+        keyRelationships: ["维修员与安全主管从互相防备到共同核验证据", "维修员与企业负责人围绕事故责任和家人安全持续对抗"],
+        worldRules: ["事故回声只能提示尚未发生的危险片段，不能直接给出原因", "每次追查都必须由维修记录和现场证据交叉验证"],
+        majorForces: ["维修协作组掌握现场经验和设备记录", "企业管理层掌握事故档案和人员调度权"],
+        timelineAnchors: ["开局前维修员曾因旧事故失去同事", "开局检修时首次听见未来事故回声", "中期证据指向企业长期掩盖", "终局公开回声源头与责任链"],
       });
       await api.approveContract(project.id);
       for (let number = 1; number <= 5; number += 1) {

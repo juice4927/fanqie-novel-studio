@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { abortableDelay, AiService, conceptDiversityIssues } from "../electron/ai-service";
 import type { WorkspaceDatabase } from "../electron/database";
-import type { Chapter, ContextPackage, ProjectDetail, QualityIssue, ResearchBook } from "../src/shared/types";
+import type { BookConceptCandidate, BookConceptInput, Chapter, ContextPackage, ProjectDetail, QualityIssue, ResearchBook } from "../src/shared/types";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -47,6 +47,37 @@ describe("book concept diversity", () => {
     expect(conceptDiversityIssues(candidates, false)).toEqual(expect.arrayContaining([
       expect.stringContaining("方案1与方案2"),
     ]));
+  });
+});
+
+describe("selected concept expansion", () => {
+  it("builds a complete character and world skeleton only after selection", async () => {
+    const requests: string[] = [];
+    const skeleton = {
+      protagonistArc: "主角从只想独自止损，走到愿意建立合作规则并承担团队失败的责任，最终以公开账目守住共同事业。",
+      keyRelationships: ["主角与老会计从互相防备到共同核账，双方对旧责任有不同立场", "主角与前夫家代表围绕资产控制持续对抗，对方掌握旧合同"],
+      worldRules: ["每笔采购和赊销都必须留下可核验票据，经营成果不能凭空出现", "团队扩张会同步增加现金流风险和分配责任"],
+      majorForces: ["供销社经营团队掌握基层渠道和社区信任", "旧利益网络掌握合同漏洞和地方人情关系"],
+      timelineAnchors: ["开局前主角长期替家人承担债务", "开局当天主角接手濒临倒闭的供销社", "中期旧账证据引发团队路线分裂", "终局公开清算旧账并建立共同治理制度"],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(String(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(skeleton) } }] }), { status: 200 });
+    }));
+    const database = {
+      getAiSettings: () => ({ baseUrl: "https://model.invalid/v1", model: "test", embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
+      findAiJob: () => undefined, startAiJob: () => "job-skeleton", finishAiJob: vi.fn(),
+    } as unknown as WorkspaceDatabase;
+    const input = { genre: "年代重生", targetWords: 1000000, updateCadence: "每日2章", seed: "", secondaryGenres: ["经营", "群像"], genreElements: ["年代", "经商"], customGenreDirection: "不要系统" } satisfies BookConceptInput;
+    const concept = {
+      id: "concept", title: "离婚当天，我接手了倒闭供销社", premise: "基层职员接手濒临倒闭的供销社，用异常进货单串起女性互助生意。", genreSubtype: "年代经营",
+      secondaryGenres: ["经营", "群像"], genreElements: ["年代", "经商"], openingMechanism: "接手即将倒闭的供销社", growthCarrier: "商品渠道与女性互助团队", primaryPayoff: "经营成果改变个人和社区处境",
+      protagonistDesire: "夺回人生选择权并建立事业", readerPromise: "持续提供经营成果和关系成长", coreEmotion: "治愈与重建", ending: "建立可持续事业并完成平等关系选择",
+      immutableRules: ["经营结果必须有过程", "关系变化必须有行动"], prohibitedPatterns: ["反派无故降智", "连续误会拖延"], audience: "偏好现实经营与女性成长的读者", commercialHook: "低谷接手倒闭资产并逆转经营", longFormEngine: "个人止损、团队经营和区域产业三轮扩张",
+    } satisfies BookConceptCandidate;
+    await expect(new AiService(database, () => "secret").expandBookConcept(input, concept)).resolves.toEqual(skeleton);
+    expect(requests[0]).toContain("离婚当天，我接手了倒闭供销社");
+    expect(requests[0]).toContain("不要系统");
   });
 });
 

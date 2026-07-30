@@ -640,7 +640,8 @@ function registerHandlers() {
   handle("listProjects", () => database.listProjects());
   handle("createProject", (input) => database.createProject(input));
   handle("generateBookConcepts", (input) => ai.generateBookConcepts(input));
-  handle("createProjectFromConcept", (input, concept) => {
+  handle("createProjectFromConcept", async (input, concept) => {
+    const skeleton = await ai.expandBookConcept(input, concept);
     return database.createProjectFromConcept({
       title: concept.title,
       genre: input.genre,
@@ -660,11 +661,11 @@ function registerHandlers() {
       primaryPayoff: concept.primaryPayoff,
       longFormEngine: concept.longFormEngine,
       protagonistDesire: concept.protagonistDesire,
-      protagonistArc: `${concept.protagonistDesire}；最终走向：${concept.ending}`,
-      keyRelationships: [],
-      worldRules: [],
-      majorForces: [],
-      timelineAnchors: [],
+      protagonistArc: skeleton.protagonistArc,
+      keyRelationships: skeleton.keyRelationships,
+      worldRules: skeleton.worldRules,
+      majorForces: skeleton.majorForces,
+      timelineAnchors: skeleton.timelineAnchors,
       readerPromise: concept.readerPromise,
       coreEmotion: concept.coreEmotion,
       ending: concept.ending,
