@@ -27,6 +27,21 @@ afterEach(() => {
 });
 
 describe("per-book isolation and gates", () => {
+  it("persists chapter intent and synchronizes the cross-chapter expectation ledger", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "期待账本", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
+    const chapter = database.saveChapter(project.id, {
+      ...createChapter(1), chapterPromise: "验证能力首次反馈", expectedPayoff: "救人成功但付出记忆代价",
+      crisis: "七分钟内必须找到伤者", endingExpectation: "谁在制造事故", expectationTargetChapter: 6,
+    });
+    const detail = database.getProject(project.id);
+    expect(chapter.endingExpectationId).toBeTruthy();
+    expect(detail.expectations).toHaveLength(1);
+    expect(detail.expectations[0]).toMatchObject({ sourceChapter: 1, expectedPayoffChapter: 6, status: "待兑现" });
+    const fulfilled = database.saveExpectation(project.id, { ...detail.expectations[0], status: "已兑现", actualPayoffChapter: 5, payoffResult: "锁定第一名交易者" });
+    expect(fulfilled.payoffResult).toContain("交易者");
+  });
+
   it("keeps same-name entities inside their own project databases", () => {
     const database = createDatabase();
     const one = database.createProject({ title: "项目一", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
@@ -55,6 +70,7 @@ describe("per-book isolation and gates", () => {
     database.transitionChapter(project.id, saved.id, "待定稿");
     expect(database.transitionChapter(project.id, saved.id, "已定稿").status).toBe("已定稿");
     expect(database.getProject(project.id).summaries.map((item) => item.layer)).toEqual(expect.arrayContaining(["场景", "章节", "十章阶段", "全书"]));
+    expect(database.getProject(project.id).summaries.find((item) => item.layer === "章节")?.content).toContain("未解决事项：");
     expect(database.searchProject(project.id, "章节版本")[0].chapterNumber).toBe(1);
   });
 

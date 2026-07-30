@@ -7,12 +7,15 @@ import type {
   Genre,
   InsightPack,
   ProjectDetail,
+  QualityIssue,
   ResearchAnalysisRecord,
   ResearchBook,
 } from "../src/shared/types";
+import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
 import { WorkspaceDatabase, now } from "./database";
+import { compileCommercialGuidance, compileDeconstructionFramework } from "../src/shared/commercial-knowledge";
 
-const PROMPT_VERSION = "2026-07-30.v1";
+const PROMPT_VERSION = "2026-07-30.v4-structured-genres";
 
 const InsightSchema = z.object({
   audienceNeed: z.string(),
@@ -34,6 +37,12 @@ const BatchAnalysisSchema = z.object({
     hook: z.string(),
     stateChange: z.string(),
     risk: z.string(),
+    enteringExpectation: z.string(),
+    protagonistGoal: z.string(),
+    coreInterest: z.string(),
+    emotionalPayoff: z.string(),
+    payoffImpact: z.string(),
+    nextExpectation: z.string(),
   })),
   synthesis: InsightSchema,
 });
@@ -53,6 +62,15 @@ const CandidateSchema = z.object({
 const DraftSchema = z.object({
   title: z.string(),
   content: z.string().min(500),
+});
+
+const QualityReviewSchema = z.object({
+  issues: z.array(z.object({
+    severity: z.enum(["硬性", "警告", "建议"]),
+    category: z.string().min(1).max(40),
+    message: z.string().min(1).max(500),
+    evidence: z.string().max(500),
+  })).max(12),
 });
 
 type InsightResult = z.infer<typeof InsightSchema>;
@@ -191,13 +209,13 @@ export class AiService {
         projectId: null,
         taskType: "deconstruct-batch",
         inputSummary: `${book.title} 第${start + 1}-${start + batch.length}章脱敏分析`,
-        system: "你是网络小说结构研究员。只能抽象情节机制和读者体验，不得复述句子、输出作品专名、角色名、独特设定名或模仿文风。",
-        user: `题材：${book.genre}\n章节范围：${start + 1}-${start + batch.length}\n输出 chapters 数组，逐章给出 ordinal、finding、conflict、hook、stateChange、risk；再输出 synthesis，字段为 audienceNeed、openingPromise、conflictEngine、emotionalRhythm、retentionDevices、longFormEngine、marketGap、risks、confidence。所有结论必须抽象，不得引用原句或专名。\n` +
+        system: `你是中国商业网文结构研究员。只能抽象情节机制和读者体验，不得复述句子、输出作品专名、角色名、独特设定名或模仿文风。\n${compileDeconstructionFramework(book.genre)}`,
+        user: `题材：${book.genre}\n章节范围：${start + 1}-${start + batch.length}\n输出 chapters 数组，逐章给出 ordinal、finding、conflict、hook、stateChange、risk、enteringExpectation、protagonistGoal、coreInterest、emotionalPayoff、payoffImpact、nextExpectation；没有证据时写“证据不足”，不得臆测。再输出 synthesis，字段为 audienceNeed、openingPromise、conflictEngine、emotionalRhythm、retentionDevices、longFormEngine、marketGap、risks、confidence。所有结论必须抽象，不得引用原句或专名。\n` +
           batch.map((chapter, index) => `【章节${chapter.ordinal}】\n${sanitizedBatch[index]}`).join("\n"),
         schema: BatchAnalysisSchema,
       });
       partials.push(result.synthesis);
-      for (const finding of result.chapters) analyses.push({ id: randomUUID(), bookId: book.id, layer: "章节", fromChapter: finding.ordinal, toChapter: finding.ordinal, findings: `结构：${finding.finding}\n冲突：${finding.conflict}\n钩子：${finding.hook}\n状态变化：${finding.stateChange}\n风险：${finding.risk}`, evidenceChapters: [finding.ordinal], confidence: result.synthesis.confidence, createdAt: now() });
+      for (const finding of result.chapters) analyses.push({ id: randomUUID(), bookId: book.id, layer: "章节", fromChapter: finding.ordinal, toChapter: finding.ordinal, findings: `进入期待：${finding.enteringExpectation}\n主角目标：${finding.protagonistGoal}\n核心利益：${finding.coreInterest}\n结构：${finding.finding}\n冲突：${finding.conflict}\n情绪回报：${finding.emotionalPayoff}\n回报影响：${finding.payoffImpact}\n下一期待：${finding.nextExpectation}\n章末钩子：${finding.hook}\n状态变化：${finding.stateChange}\n风险：${finding.risk}`, evidenceChapters: [finding.ordinal], confidence: result.synthesis.confidence, createdAt: now() });
       analyses.push({ id: randomUUID(), bookId: book.id, layer: "十章阶段", fromChapter: batch[0].ordinal, toChapter: batch.at(-1)!.ordinal, findings: insightText(result.synthesis), evidenceChapters: batch.map((chapter) => chapter.ordinal), confidence: result.synthesis.confidence, createdAt: now() });
     }
     const volumes: InsightResult[] = [];
@@ -263,8 +281,8 @@ export class AiService {
       projectId: project.summary.id,
       taskType: "generate-concepts",
       inputSummary: `${project.summary.title} 三案立项`,
-      system: "你是原创网络小说策划。你只能使用输入中的抽象市场洞察，不得假定、复原或模仿任何样本作品。三个方案必须在主角身份、核心矛盾和长篇发动机上明显不同。",
-      user: `项目题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n脱敏洞察：${JSON.stringify(insights)}\n输出 candidates 数组，每项包含 title、oneLinePitch、audience、coreConflict、differentiation、longFormCapacity、originalityRisk。`,
+      system: "你是原创中国商业网文策划。你只能使用输入中的抽象市场洞察，不得假定、复原或模仿任何样本作品。三个方案必须在主角身份、核心矛盾和长篇发动机上明显不同，并能持续制造逐级升级的期待与回报。",
+      user: `项目题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n商业知识：${compileCommercialGuidance(project.summary.genre, 1)}\n脱敏洞察：${JSON.stringify(insights)}\n输出 candidates 数组，每项包含 title、oneLinePitch、audience、coreConflict、differentiation、longFormCapacity、originalityRisk。longFormCapacity 必须说明冲突、资源/关系/地图或规则如何至少三轮升级。`,
       schema: CandidateSchema,
     });
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
@@ -275,10 +293,43 @@ export class AiService {
       projectId,
       taskType: "draft-chapter",
       inputSummary: `第${chapter.number}章 ${chapter.title || "未命名"}`,
-      system: "你是中文长篇网络小说协作写作者。严格遵守已审批创作契约、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。",
-      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(context)}\n请输出 title 和 content。正文目标 1800-2600 汉字，完成本章目标并留下自然的下一章推动力。`,
+      system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑和契约。",
+      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(context)}\n请输出 title 和 content。正文目标 1800-2600 汉字。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响；留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
       schema: DraftSchema,
     });
     return { ...chapter, title: result.title, content: result.content, status: "待质检", updatedAt: now() };
+  }
+
+  async reviewChapter(project: ProjectDetail, chapter: Chapter, context: ContextPackage): Promise<QualityIssue[]> {
+    const result = await this.runJson({
+      projectId: project.summary.id,
+      taskType: "quality-review",
+      inputSummary: `第${chapter.number}章语义质检`,
+      system: [
+        "你是中文长篇网络小说的严格审校员。只报告能够引用本章证据的问题，不做文风偏好式改写。",
+        "检查：章纲兑现、人物动机、事件因果、设定与状态一致性、角色知识边界、重复信息、节奏停滞、读者承诺、具体压力、主动行动、情绪回报、回报实际影响与章末推动力。",
+        `题材专项检查：${GENRE_PLUGINS[project.summary.genre].qualityChecks.join("；")}。`,
+        "只有正文明确违反已审批契约、事实账本或知识边界时才标记为硬性；可以优化但不构成矛盾的问题标记为警告或建议。",
+        "evidence 必须是本章中的简短原文或明确的契约/事实条目。没有可验证问题时返回空数组。",
+      ].join("\n"),
+      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(context)}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 issues 数组，每项包含 severity、category、message、evidence。`,
+      schema: QualityReviewSchema,
+    });
+    const evidenceSource = [chapter.content, context.contract, context.volumeGoal, context.rollingOutline, context.relevantFacts, context.forbiddenKnowledge]
+      .join("\n").replace(/\s+/g, "");
+    return result.issues.map((issue) => {
+      const evidence = issue.evidence.trim();
+      const supported = evidence.length >= 4 && evidenceSource.includes(evidence.replace(/\s+/g, ""));
+      return {
+        ...issue,
+        severity: issue.severity === "硬性" && !supported ? "警告" as const : issue.severity,
+        evidence,
+        id: randomUUID(),
+        projectId: project.summary.id,
+        chapterId: chapter.id,
+        status: "待处理" as const,
+        createdAt: now(),
+      };
+    });
   }
 }

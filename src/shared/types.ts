@@ -19,7 +19,8 @@ export type ProjectStatus =
   | "完结"
   | "归档";
 
-export type ChapterStatus = "章纲" | "草稿" | "待质检" | "待定稿" | "已定稿" | "待发布" | "已发布";
+export type ChapterStatus =
+  "章纲" | "草稿" | "待质检" | "待定稿" | "已定稿" | "待发布" | "已发布";
 
 export interface ProjectSummary {
   id: string;
@@ -60,6 +61,9 @@ export interface RankingEntry {
   status: string;
   tags: string[];
   sourceUrl: string;
+  synopsis?: string;
+  officialReaderUrl?: string;
+  platform?: string;
 }
 
 export interface RankingSnapshot {
@@ -130,6 +134,7 @@ export interface InsightPack {
 
 export interface StoryContract {
   premise: string;
+  genreSubtype?: string;
   protagonistDesire: string;
   readerPromise: string;
   coreEmotion: string;
@@ -164,15 +169,49 @@ export interface Chapter {
   status: ChapterStatus;
   batchMode: "逐章" | "五章批次";
   isKeyChapter: boolean;
+  chapterPromise?: string;
+  expectedPayoff?: string;
+  crisis?: string;
+  endingExpectation?: string;
+  expectationTargetChapter?: number | null;
+  endingExpectationId?: string | null;
+  linkedExpectationIds?: string[];
   revision: number;
   updatedAt: string;
 }
 
-export type LedgerKind = "人物" | "关系" | "能力" | "资源" | "地点" | "时间线" | "秘密" | "承诺" | "伏笔" | "支线" | "事件";
+export type ExpectationStatus = "待兑现" | "部分兑现" | "已兑现" | "已放弃";
+
+export interface ExpectationEntry {
+  id: string;
+  title: string;
+  description: string;
+  sourceChapter: number;
+  expectedPayoffChapter: number | null;
+  actualPayoffChapter: number | null;
+  status: ExpectationStatus;
+  payoffResult: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LedgerKind =
+  | "人物"
+  | "关系"
+  | "能力"
+  | "资源"
+  | "地点"
+  | "时间线"
+  | "秘密"
+  | "承诺"
+  | "伏笔"
+  | "支线"
+  | "事件";
 
 export interface LedgerFact {
   id: string;
   kind: LedgerKind;
+  genreDimension?: string;
   subject: string;
   predicate: string;
   value: string;
@@ -277,6 +316,7 @@ export interface ProjectDetail {
   metrics: MetricSnapshot[];
   insightIds: string[];
   summaries: StorySummary[];
+  expectations: ExpectationEntry[];
 }
 
 export interface ConceptCandidate {
@@ -317,6 +357,9 @@ export interface ImportPreview {
 
 export interface ContextPackage {
   contract: string;
+  commercialGuidance: string;
+  chapterIntent: string;
+  expectationLedger: string;
   volumeGoal: string;
   rollingOutline: string;
   recentSummary: string;
@@ -363,16 +406,36 @@ export interface AppApi {
   savePlan(id: string, plan: PlanNode): Promise<PlanNode>;
   approvePlan(id: string, planId: string): Promise<void>;
   saveChapter(id: string, chapter: Chapter): Promise<Chapter>;
-  transitionChapter(id: string, chapterId: string, status: ChapterStatus): Promise<Chapter>;
+  saveExpectation(
+    id: string,
+    expectation: ExpectationEntry,
+  ): Promise<ExpectationEntry>;
+  transitionChapter(
+    id: string,
+    chapterId: string,
+    status: ChapterStatus,
+  ): Promise<Chapter>;
   compileContext(id: string, chapterId: string): Promise<ContextPackage>;
   searchProject(id: string, query: string): Promise<SearchHit[]>;
-  listRevisions(id: string, collection: RevisionRecord["collection"], entityId: string): Promise<RevisionRecord[]>;
+  listRevisions(
+    id: string,
+    collection: RevisionRecord["collection"],
+    entityId: string,
+  ): Promise<RevisionRecord[]>;
   restoreRevision(id: string, revisionId: string): Promise<void>;
   runQualityCheck(id: string, chapterId: string): Promise<QualityIssue[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
-  resolveIssue(id: string, issueId: string, status: QualityIssue["status"]): Promise<void>;
+  resolveIssue(
+    id: string,
+    issueId: string,
+    status: QualityIssue["status"],
+  ): Promise<void>;
   saveChangeRequest(id: string, change: ChangeRequest): Promise<ChangeRequest>;
-  decideChangeRequest(id: string, changeId: string, decision: "批准" | "拒绝"): Promise<void>;
+  decideChangeRequest(
+    id: string,
+    changeId: string,
+    decision: "批准" | "拒绝",
+  ): Promise<void>;
   saveSchedule(id: string, item: ScheduleItem): Promise<ScheduleItem>;
   listRankings(): Promise<RankingSnapshot[]>;
   importRankingCsv(csvText: string, listName: string): Promise<RankingSnapshot>;
@@ -380,19 +443,35 @@ export interface AppApi {
   getRankingAnalytics(): Promise<RankingAnalytics>;
   listResearchBooks(): Promise<ResearchBook[]>;
   previewResearchFile(): Promise<ImportPreview | null>;
-  importResearchBook(preview: ImportPreview, genre: Genre, rightsConfirmed: boolean, cloudConsent: boolean): Promise<ResearchBook>;
+  importResearchBook(
+    preview: ImportPreview,
+    genre: Genre,
+    rightsConfirmed: boolean,
+    cloudConsent: boolean,
+  ): Promise<ResearchBook>;
   listInsights(): Promise<InsightPack[]>;
-  createInsight(input: Omit<InsightPack, "id" | "createdAt">): Promise<InsightPack>;
+  createInsight(
+    input: Omit<InsightPack, "id" | "createdAt">,
+  ): Promise<InsightPack>;
   deconstructResearchBook(bookId: string): Promise<InsightPack>;
   listResearchAnalyses(bookId: string): Promise<ResearchAnalysisRecord[]>;
   attachInsights(id: string, insightIds: string[]): Promise<void>;
   generateConcepts(id: string): Promise<ConceptCandidate[]>;
   generateChapterDraft(id: string, chapterId: string): Promise<Chapter>;
-  previewChapterBatch(id: string, chapterId: string): Promise<BatchGenerationPreview>;
+  previewChapterBatch(
+    id: string,
+    chapterId: string,
+  ): Promise<BatchGenerationPreview>;
   generateChapterBatch(id: string, chapterId: string): Promise<Chapter[]>;
   getAiSettings(): Promise<AiSettings>;
-  saveAiSettings(settings: Omit<AiSettings, "hasApiKey">, apiKey?: string): Promise<AiSettings>;
-  exportProject(id: string, format: "txt" | "md" | "docx"): Promise<string | null>;
+  saveAiSettings(
+    settings: Omit<AiSettings, "hasApiKey">,
+    apiKey?: string,
+  ): Promise<AiSettings>;
+  exportProject(
+    id: string,
+    format: "txt" | "md" | "docx",
+  ): Promise<string | null>;
   importMetricsCsv(id: string, csvText: string): Promise<number>;
   getReviewSuggestions(id: string): Promise<ReviewSuggestion[]>;
   createBackup(password: string): Promise<string | null>;

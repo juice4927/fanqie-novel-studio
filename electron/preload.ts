@@ -14,6 +14,7 @@ const api: AppApi = {
   savePlan: (id, plan) => invoke("savePlan", id, plan),
   approvePlan: (id, planId) => invoke("approvePlan", id, planId),
   saveChapter: (id, chapter) => invoke("saveChapter", id, chapter),
+  saveExpectation: (id, expectation) => invoke("saveExpectation", id, expectation),
   transitionChapter: (id, chapterId, status) => invoke("transitionChapter", id, chapterId, status),
   compileContext: (id, chapterId) => invoke("compileContext", id, chapterId),
   searchProject: (id, query) => invoke("searchProject", id, query),
