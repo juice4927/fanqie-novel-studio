@@ -42,6 +42,14 @@ test("starts the production Electron app and persists through the preload API", 
     expect(result.health).toMatchObject({ status: "正常", projectCount: 1, chapterCount: 5 });
     expect(existsSync(path.join(workspace, "catalog.sqlite"))).toBe(true);
     expect(existsSync(path.join(workspace, "projects", result.projectId, "project.sqlite"))).toBe(true);
+    await page.evaluate(() => {
+      window.location.href = "data:text/html,navigation-must-be-blocked";
+    });
+    await expect(page.getByRole("heading", { name: "多书总览" })).toBeVisible();
+    const geolocationPermission = await page.evaluate(async () =>
+      (await navigator.permissions.query({ name: "geolocation" })).state,
+    );
+    expect(geolocationPermission).toBe("denied");
   } finally {
     await application.close();
     rmSync(workspace, { recursive: true, force: true });
