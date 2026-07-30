@@ -45,7 +45,7 @@ describe("semantic quality review", () => {
       status: "待质检", batchMode: "逐章", isKeyChapter: false, revision: 1, updatedAt: new Date().toISOString(),
     } satisfies Chapter;
     const project = { summary: { id: "project-1", genre: "都市脑洞" } } as unknown as ProjectDetail;
-    const context = { contract: "", commercialGuidance: "", chapterIntent: "", expectationLedger: "", volumeGoal: "", rollingOutline: "", recentSummary: "", relevantFacts: "", forbiddenKnowledge: "密码仅反派知晓", authorStyle: "", estimatedTokens: 10 } satisfies ContextPackage;
+    const context = { contract: "", commercialGuidance: "", chapterIntent: "", expectationLedger: "", longTermMemory: "", volumeGoal: "", rollingOutline: "", recentSummary: "", relevantFacts: "", forbiddenKnowledge: "密码仅反派知晓", authorStyle: "", estimatedTokens: 10 } satisfies ContextPackage;
 
     const issues = await service.reviewChapter(project, chapter, context);
 
@@ -62,8 +62,27 @@ describe("semantic quality review", () => {
     const service = new AiService(database, () => "secret");
     const chapter = { id: "chapter-4", number: 4, title: "正常章节", outline: "目标：继续调查", content: "林舟检查了门锁。", wordCount: 8, status: "待质检", batchMode: "逐章", isKeyChapter: false, revision: 1, updatedAt: new Date().toISOString() } satisfies Chapter;
     const project = { summary: { id: "project-1", genre: "都市脑洞" } } as unknown as ProjectDetail;
-    const context = { contract: "", commercialGuidance: "", chapterIntent: "", expectationLedger: "", volumeGoal: "", rollingOutline: "", recentSummary: "", relevantFacts: "", forbiddenKnowledge: "", authorStyle: "", estimatedTokens: 10 } satisfies ContextPackage;
+    const context = { contract: "", commercialGuidance: "", chapterIntent: "", expectationLedger: "", longTermMemory: "", volumeGoal: "", rollingOutline: "", recentSummary: "", relevantFacts: "", forbiddenKnowledge: "", authorStyle: "", estimatedTokens: 10 } satisfies ContextPackage;
 
     expect((await service.reviewChapter(project, chapter, context))[0].severity).toBe("警告");
+  });
+});
+
+describe("chapter fact extraction", () => {
+  it("keeps only evidence-backed state candidates pending human confirmation", async () => {
+    const database = {
+      getAiSettings: () => ({ baseUrl: "https://model.invalid/v1", model: "test", embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
+      findAiJob: () => undefined, startAiJob: () => "job-facts", finishAiJob: vi.fn(),
+    } as unknown as WorkspaceDatabase;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ facts: [
+      { kind: "能力", subject: "林舟", predicate: "能力代价", value: "每次使用会失去一段近期记忆", knowledgeScope: "林舟", evidence: "每用一次能力，他就会失去一段近期记忆" },
+      { kind: "资源", subject: "林舟", predicate: "余额", value: "一百万元", knowledgeScope: "公开", evidence: "正文没有这句话" },
+    ] }) } }] }), { status: 200 })));
+    const service = new AiService(database, () => "secret");
+    const chapter = { id: "chapter-8", number: 8, title: "能力代价", outline: "确认能力规则", content: "林舟终于确认：每用一次能力，他就会失去一段近期记忆。", wordCount: 30, status: "已定稿", batchMode: "逐章", isKeyChapter: false, revision: 2, updatedAt: new Date().toISOString() } satisfies Chapter;
+    const project = { summary: { id: "project-1", genre: "都市脑洞" }, facts: [] } as unknown as ProjectDetail;
+    const facts = await service.extractChapterFacts(project, chapter);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({ kind: "能力", subject: "林舟", confidence: "待确认", evidenceChapter: 8, genreDimension: "定稿自动候选" });
   });
 });

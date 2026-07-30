@@ -60,3 +60,32 @@ export function aggregateStorySummaries(items: StorySummary[], maxCharacters: nu
   }
   return result.join("\n");
 }
+
+export function buildLongTermMemory(
+  summaries: StorySummary[],
+  chapterNumber: number,
+  maxCharacters = 12000,
+) {
+  const bounded = (content: string, budget: number) =>
+    content.length <= budget
+      ? content
+      : `${content.slice(0, Math.floor(budget * 0.35))}\n…\n${content.slice(-Math.floor(budget * 0.65))}`;
+  const book = summaries.find((summary) => summary.layer === "全书");
+  const volume = summaries
+    .filter((summary) => summary.layer === "分卷" && summary.fromChapter <= chapterNumber && summary.toChapter >= chapterNumber)
+    .at(-1);
+  const stages = summaries
+    .filter((summary) => summary.layer === "十章阶段" && summary.toChapter < chapterNumber)
+    .slice(-3);
+  const scale = Math.min(1, maxCharacters / 11500);
+  const bookBudget = Math.max(800, Math.floor(4000 * scale));
+  const volumeBudget = Math.max(600, Math.floor(3000 * scale));
+  const stageBudget = Math.max(400, Math.floor(1400 * scale));
+  const sections = [
+    book ? `【全书进展】\n${bounded(book.content, bookBudget)}` : "【全书进展】暂无全书摘要",
+    volume ? `【当前分卷记忆】\n${bounded(volume.content, volumeBudget)}` : "",
+    ...stages.map((summary) => `【近期阶段 ${summary.fromChapter}-${summary.toChapter}】\n${bounded(summary.content, stageBudget)}`),
+  ].filter(Boolean);
+  const output = sections.join("\n");
+  return output.slice(0, maxCharacters);
+}

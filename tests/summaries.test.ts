@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateStorySummaries, buildChapterSummary } from "../src/shared/summaries";
+import { aggregateStorySummaries, buildChapterSummary, buildLongTermMemory } from "../src/shared/summaries";
 import type { Chapter, StorySummary } from "../src/shared/types";
 
 function chapter(content: string): Chapter {
@@ -35,5 +35,21 @@ describe("structured story summaries", () => {
     expect(result).toContain("第8章");
     expect(result).toContain("问题8");
     expect(result.length).toBeLessThanOrEqual(220);
+  });
+
+  it("keeps book, current volume and recent stages in a bounded long-term memory", () => {
+    const summary = (id: string, layer: StorySummary["layer"], fromChapter: number, toChapter: number, content: string): StorySummary => ({ id, layer, title: id, fromChapter, toChapter, content, version: 1, updatedAt: new Date().toISOString() });
+    const summaries = [
+      summary("book", "全书", 1, 500, `核心终局与身份秘密。${"全书状态".repeat(900)}`),
+      summary("volume", "分卷", 401, 600, `当前卷目标：夺回北仓。${"分卷状态".repeat(700)}`),
+      ...Array.from({ length: 50 }, (_, index) => summary(`stage-${index}`, "十章阶段", index * 10 + 1, index * 10 + 10, `阶段${index}：${"变化".repeat(400)}`)),
+    ];
+    const result = buildLongTermMemory(summaries, 505, 12000);
+    expect(result).toContain("【全书进展】");
+    expect(result).toContain("核心终局与身份秘密");
+    expect(result).toContain("当前卷目标：夺回北仓");
+    expect(result).toContain("近期阶段 491-500");
+    expect(result).not.toContain("近期阶段 11-20");
+    expect(result.length).toBeLessThanOrEqual(12000);
   });
 });

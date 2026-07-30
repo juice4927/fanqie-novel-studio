@@ -27,6 +27,7 @@ import type {
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { findCurrentVolume } from "../shared/planning";
 import { compileCommercialGuidance } from "../shared/commercial-knowledge";
+import { buildLongTermMemory } from "../shared/summaries";
 
 interface DemoState {
   projects: ProjectDetail[];
@@ -701,6 +702,7 @@ export function createBrowserApi(): AppApi {
                 `${chapter.linkedExpectationIds?.includes(item.id) ? "[本章承接]" : "[待处理]"} ${item.title}｜第${item.sourceChapter}章提出｜预计第${item.expectedPayoffChapter ?? "未定"}章兑现`,
             )
             .join("\n") || "暂无跨章节期待",
+        longTermMemory: buildLongTermMemory(project.summaries, chapter.number),
         volumeGoal:
           findCurrentVolume(project.plans, chapter.number)?.goal ??
           "尚未批准当前卷纲",
@@ -784,6 +786,9 @@ export function createBrowserApi(): AppApi {
       persist();
       return issues;
     },
+    async extractChapterFacts() {
+      throw new Error("状态候选提取需要在桌面版配置 AI 后使用");
+    },
     async saveFact(projectId, fact: LedgerFact) {
       const project = getProject(state, projectId);
       const next = { ...fact, id: fact.id || id(), updatedAt: now() };
@@ -798,7 +803,9 @@ export function createBrowserApi(): AppApi {
         )
       )
         next.confidence = "有冲突";
-      project.facts.push(next);
+      const factIndex = project.facts.findIndex((item) => item.id === next.id);
+      if (factIndex >= 0) project.facts[factIndex] = next;
+      else project.facts.push(next);
       persist();
       return next;
     },

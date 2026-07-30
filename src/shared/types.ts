@@ -400,6 +400,7 @@ export interface ContextPackage {
   commercialGuidance: string;
   chapterIntent: string;
   expectationLedger: string;
+  longTermMemory: string;
   volumeGoal: string;
   rollingOutline: string;
   recentSummary: string;
@@ -464,6 +465,7 @@ export interface AppApi {
   ): Promise<RevisionRecord[]>;
   restoreRevision(id: string, revisionId: string): Promise<void>;
   runQualityCheck(id: string, chapterId: string): Promise<QualityIssue[]>;
+  extractChapterFacts(id: string, chapterId: string): Promise<LedgerFact[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
   resolveIssue(
     id: string,

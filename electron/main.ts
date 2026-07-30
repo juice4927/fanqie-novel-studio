@@ -31,6 +31,7 @@ import {
 } from "../src/shared/planning";
 import { readApiCredential, writeApiCredential } from "./credential-store";
 import { compileCommercialGuidance } from "../src/shared/commercial-knowledge";
+import { buildLongTermMemory } from "../src/shared/summaries";
 import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
 
 let mainWindow: BrowserWindow | null = null;
@@ -207,7 +208,7 @@ function compileContext(
     : 0;
   const activeFacts = project.facts.filter(
     (fact) =>
-      fact.confidence !== "有冲突" &&
+      fact.confidence === "已确认" &&
       fact.validFromChapter <= chapter.number &&
       (fact.validToChapter === null || fact.validToChapter >= chapter.number),
   );
@@ -265,6 +266,7 @@ function compileContext(
               `[待处理] ${item.title}｜第${item.sourceChapter}章提出｜预计第${item.expectedPayoffChapter ?? "未定"}章兑现｜${item.status}`,
           ),
       ].join("\n") || "暂无跨章节期待",
+    longTermMemory: buildLongTermMemory(project.summaries, chapter.number),
     volumeGoal: volume
       ? `${volume.title}\n目标：${volume.goal}\n矛盾：${volume.conflict}\n结果：${volume.outcome}`
       : "尚未批准当前卷纲",
@@ -499,9 +501,23 @@ function registerHandlers() {
   handle("saveExpectation", (id, expectation) =>
     database.saveExpectation(id, expectation),
   );
-  handle("transitionChapter", (id, chapterId, status) =>
-    database.transitionChapter(id, chapterId, status),
-  );
+  handle("transitionChapter", async (id, chapterId, status) => {
+    const saved = database.transitionChapter(id, chapterId, status);
+    if (status === "已定稿" && getApiKey()) {
+      try {
+        const project = database.getProject(id);
+        const candidates = await ai.extractChapterFacts(project, saved);
+        const existing = new Set(project.facts.map((fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`));
+        for (const fact of candidates) {
+          const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
+          if (!existing.has(key)) database.saveFact(id, fact);
+        }
+      } catch {
+        // Finalization must remain available if optional AI extraction fails.
+      }
+    }
+    return saved;
+  });
   handle("compileContext", (id, chapterId) => {
     const project = database.getProject(id);
     const chapter = project.chapters.find((item) => item.id === chapterId);
@@ -628,6 +644,17 @@ function registerHandlers() {
     if (chapter.status === "草稿")
       database.transitionChapter(id, chapterId, "待质检");
     return issues;
+  });
+  handle("extractChapterFacts", async (id, chapterId) => {
+    const project = database.getProject(id);
+    const chapter = project.chapters.find((item) => item.id === chapterId);
+    if (!chapter) throw new Error("章节不存在");
+    if (!chapter.content.trim()) throw new Error("章节还没有正文");
+    const candidates = await ai.extractChapterFacts(project, chapter);
+    const existing = new Set(project.facts.map((fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`));
+    return candidates
+      .filter((fact) => !existing.has(`${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`))
+      .map((fact) => database.saveFact(id, fact));
   });
   handle("saveFact", (id, fact) => database.saveFact(id, fact));
   handle("resolveIssue", (id, issueId, status) =>

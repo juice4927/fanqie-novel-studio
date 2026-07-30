@@ -6,6 +6,7 @@ import type {
   ContextPackage,
   Genre,
   InsightPack,
+  LedgerFact,
   MarketOpportunity,
   ProjectDetail,
   QualityIssue,
@@ -71,6 +72,17 @@ const QualityReviewSchema = z.object({
     category: z.string().min(1).max(40),
     message: z.string().min(1).max(500),
     evidence: z.string().max(500),
+  })).max(12),
+});
+
+const FactCandidateSchema = z.object({
+  facts: z.array(z.object({
+    kind: z.enum(["人物", "关系", "能力", "资源", "地点", "时间线", "秘密", "承诺", "伏笔", "支线", "事件"]),
+    subject: z.string().min(1).max(80),
+    predicate: z.string().min(1).max(80),
+    value: z.string().min(1).max(300),
+    knowledgeScope: z.string().max(200),
+    evidence: z.string().min(4).max(300),
   })).max(12),
 });
 
@@ -299,6 +311,34 @@ export class AiService {
       schema: DraftSchema,
     });
     return { ...chapter, title: result.title, content: result.content, status: "待质检", updatedAt: now() };
+  }
+
+  async extractChapterFacts(project: ProjectDetail, chapter: Chapter): Promise<LedgerFact[]> {
+    const result = await this.runJson({
+      projectId: project.summary.id,
+      taskType: "extract-chapter-facts",
+      inputSummary: `第${chapter.number}章状态候选`,
+      system: "你是长篇小说状态记录员。只提取本章正文明确发生且会影响后续连续性的持久状态变化。不得推测心理、补全设定或把临时动作当成长期事实；无可靠变化时返回空数组。",
+      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n已确认事实：${JSON.stringify(project.facts.filter((fact) => fact.confidence === "已确认").slice(0, 120))}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 facts；每项包含 kind、subject、predicate、value、knowledgeScope、evidence。evidence 必须是正文中的连续短句。秘密必须说明当前知情角色，公开事实的 knowledgeScope 写“公开”。`,
+      schema: FactCandidateSchema,
+    });
+    const compactContent = chapter.content.replace(/\s+/g, "");
+    return result.facts
+      .filter((fact) => compactContent.includes(fact.evidence.replace(/\s+/g, "")))
+      .map((fact) => ({
+        id: randomUUID(),
+        kind: fact.kind,
+        genreDimension: "定稿自动候选",
+        subject: fact.subject.trim(),
+        predicate: fact.predicate.trim(),
+        value: fact.value.trim(),
+        validFromChapter: chapter.number,
+        validToChapter: null,
+        evidenceChapter: chapter.number,
+        confidence: "待确认" as const,
+        knowledgeScope: fact.knowledgeScope.trim() || "公开",
+        updatedAt: now(),
+      }));
   }
 
   async reviewChapter(project: ProjectDetail, chapter: Chapter, context: ContextPackage): Promise<QualityIssue[]> {

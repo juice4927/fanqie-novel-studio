@@ -1730,6 +1730,7 @@ function LedgerPage({ project, api, reload, notify }: CommonProjectProps) {
   const visible = project.facts.filter(
     (fact) => filter === "全部" || fact.kind === filter,
   );
+  const pendingFacts = project.facts.filter((fact) => fact.confidence === "待确认");
   const currentChapter = Math.max(
     0,
     ...project.chapters.map((chapter) => chapter.number),
@@ -1780,6 +1781,13 @@ function LedgerPage({ project, api, reload, notify }: CommonProjectProps) {
         <Button icon={<Plus size={16} />} onClick={() => setModal(true)}>
           新增事实
         </Button>
+        {project.chapters.some((chapter) => chapter.status === "已定稿") && (
+          <Button variant="secondary" icon={<Sparkles size={16} />} onClick={async () => {
+            const chapter = project.chapters.filter((item) => item.status === "已定稿").at(-1)!;
+            try { const facts = await api.extractChapterFacts(project.summary.id, chapter.id); await reload(); notify(facts.length ? `已提取 ${facts.length} 条待确认状态` : "本章没有新的持久状态"); }
+            catch (error) { notify(String(error), "error"); }
+          }}>扫描最新定稿</Button>
+        )}
       </header>
       <div className="toolbar-row ledger-filter">
         <Segmented
@@ -1788,10 +1796,33 @@ function LedgerPage({ project, api, reload, notify }: CommonProjectProps) {
           onChange={setFilter}
         />
         <span>
+          {pendingFacts.length} 项待确认 · {" "}
           {project.facts.filter((fact) => fact.confidence === "有冲突").length}{" "}
           项冲突
         </span>
       </div>
+      {pendingFacts.length ? (
+        <section className="section-band pending-facts-panel">
+          <div className="section-heading">
+            <div>
+              <h2>定稿状态候选</h2>
+              <p>AI 只提出正文有证据的候选；确认后才会作为后续写作事实。</p>
+            </div>
+            <Badge tone="warning">{pendingFacts.length} 项待确认</Badge>
+          </div>
+          <div className="pending-facts-list">
+            {pendingFacts.slice(0, 12).map((fact) => (
+              <article key={fact.id}>
+                <span><Badge>{fact.kind}</Badge><strong>{fact.subject} · {fact.predicate}</strong><small>{fact.value}｜证据第{fact.evidenceChapter}章</small></span>
+                <Button variant="secondary" onClick={async () => {
+                  try { await api.saveFact(project.summary.id, { ...fact, confidence: "已确认" }); await reload(); notify("候选事实已确认"); }
+                  catch (error) { notify(String(error), "error"); }
+                }}>确认入账</Button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <section className="section-band genre-ledger-panel">
         <div className="section-heading">
           <div>

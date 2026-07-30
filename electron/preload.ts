@@ -21,6 +21,7 @@ const api: AppApi = {
   listRevisions: (id, collection, entityId) => invoke("listRevisions", id, collection, entityId),
   restoreRevision: (id, revisionId) => invoke("restoreRevision", id, revisionId),
   runQualityCheck: (id, chapterId) => invoke("runQualityCheck", id, chapterId),
+  extractChapterFacts: (id, chapterId) => invoke("extractChapterFacts", id, chapterId),
   saveFact: (id, fact) => invoke("saveFact", id, fact),
   resolveIssue: (id, issueId, status) => invoke("resolveIssue", id, issueId, status),
   saveChangeRequest: (id, change) => invoke("saveChangeRequest", id, change),
