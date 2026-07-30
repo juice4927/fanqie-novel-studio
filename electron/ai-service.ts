@@ -6,6 +6,7 @@ import type {
   ContextPackage,
   Genre,
   InsightPack,
+  MarketOpportunity,
   ProjectDetail,
   QualityIssue,
   ResearchAnalysisRecord,
@@ -275,14 +276,14 @@ export class AiService {
     return { insight, analyses };
   }
 
-  async generateConcepts(project: ProjectDetail, insights: InsightPack[]): Promise<ConceptCandidate[]> {
+  async generateConcepts(project: ProjectDetail, insights: InsightPack[], marketOpportunities: MarketOpportunity[] = []): Promise<ConceptCandidate[]> {
     if (!insights.length) throw new Error("请先为项目关联至少一个脱敏洞察包");
     const result = await this.runJson({
       projectId: project.summary.id,
       taskType: "generate-concepts",
       inputSummary: `${project.summary.title} 三案立项`,
       system: "你是原创中国商业网文策划。你只能使用输入中的抽象市场洞察，不得假定、复原或模仿任何样本作品。三个方案必须在主角身份、核心矛盾和长篇发动机上明显不同，并能持续制造逐级升级的期待与回报。",
-      user: `项目题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n商业知识：${compileCommercialGuidance(project.summary.genre, 1)}\n脱敏洞察：${JSON.stringify(insights)}\n输出 candidates 数组，每项包含 title、oneLinePitch、audience、coreConflict、differentiation、longFormCapacity、originalityRisk。longFormCapacity 必须说明冲突、资源/关系/地图或规则如何至少三轮升级。`,
+      user: `项目题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n商业知识：${compileCommercialGuidance(project.summary.genre, 1, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, fanqieCategoryKey: project.contract.fanqieCategoryKey })}\n番茄市场机会（仅作证据，不得机械追热点）：${JSON.stringify(marketOpportunities)}\n脱敏洞察：${JSON.stringify(insights)}\n输出 candidates 数组，每项包含 title、oneLinePitch、audience、coreConflict、differentiation、longFormCapacity、originalityRisk。longFormCapacity 必须说明冲突、资源/关系/地图或规则如何至少三轮升级；每个方案要说明如何借鉴市场机会的读者需求但避开同质化。`,
       schema: CandidateSchema,
     });
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));

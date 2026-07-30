@@ -6,6 +6,7 @@ import {
   resolveGenreStage,
 } from "../src/shared/commercial-knowledge";
 import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
+import { FANQIE_CATEGORY_PROFILES } from "../src/shared/fanqie-taxonomy";
 import { GENRES } from "../src/shared/types";
 
 describe("structured Chinese web-fiction genre packages", () => {
@@ -90,5 +91,25 @@ describe("structured Chinese web-fiction genre packages", () => {
         source.url.startsWith("https://"),
       ),
     ).toBe(true);
+  });
+
+  it("maps every current Fanqie category to an executable genre profile", () => {
+    expect(FANQIE_CATEGORY_PROFILES).toHaveLength(37);
+    expect(FANQIE_CATEGORY_PROFILES.filter((item) => item.channel === "男频")).toHaveLength(19);
+    expect(FANQIE_CATEGORY_PROFILES.filter((item) => item.channel === "女频")).toHaveLength(18);
+    for (const profile of FANQIE_CATEGORY_PROFILES) {
+      expect(GENRE_PLUGINS[profile.genre].subtypes.map((item) => item.name)).toContain(profile.recommendedSubtype);
+      expect(profile.openingFocus.length).toBeGreaterThan(8);
+      expect(profile.taboo.length).toBeGreaterThan(8);
+    }
+  });
+
+  it("injects selected Fanqie category rules into writing guidance", () => {
+    const guidance = compileCommercialGuidance("都市脑洞", 1, {
+      fanqieCategoryKey: "男频:262",
+    });
+    expect(guidance).toContain("番茄分类映射：男频·都市脑洞");
+    expect(guidance).toContain("三章内完成能力试验和现实收益");
+    expect(guidance).toContain("震惊循环和任务流水");
   });
 });

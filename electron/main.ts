@@ -202,6 +202,7 @@ function compileContext(
     contract: [
       `故事前提：${project.contract.premise}`,
       `题材子类型：${project.contract.genreSubtype || "未选择"}`,
+      `番茄分类：${project.contract.fanqieCategoryKey || "未选择"}`,
       `主角欲望：${project.contract.protagonistDesire}`,
       `读者承诺：${project.contract.readerPromise}`,
       `核心情绪：${project.contract.coreEmotion}`,
@@ -216,6 +217,7 @@ function compileContext(
         currentWords: project.summary.currentWords,
         targetWords: project.summary.targetWords,
         subtype: project.contract.genreSubtype,
+        fanqieCategoryKey: project.contract.fanqieCategoryKey,
       },
     ),
     chapterIntent: [
@@ -714,9 +716,13 @@ function registerHandlers() {
   );
   handle("generateConcepts", async (id): Promise<ConceptCandidate[]> => {
     const project = database.getProject(id);
+    const opportunities = analyzeRankings(database.listRankings()).marketOpportunities
+      .filter((item) => project.contract.fanqieCategoryKey ? item.categoryKey === project.contract.fanqieCategoryKey : item.genre === project.summary.genre)
+      .slice(0, 5);
     return ai.generateConcepts(
       project,
       database.getInsights(project.insightIds),
+      opportunities,
     );
   });
   handle("generateChapterDraft", async (id, chapterId) => {

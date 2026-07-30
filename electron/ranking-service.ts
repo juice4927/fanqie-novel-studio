@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { load } from "cheerio";
-import type { RankingAnalytics, RankingEntry, RankingSnapshot } from "../src/shared/types";
+import type { MarketOpportunity, RankingAnalytics, RankingEntry, RankingSnapshot } from "../src/shared/types";
+import { FANQIE_CATEGORY_PROFILES } from "../src/shared/fanqie-taxonomy";
 
 function parseCompactNumber(value: string) {
   const match = value.replace(/,/g, "").match(/([0-9]+(?:\.[0-9]+)?)\s*(万)?\s*字?/);
@@ -199,16 +200,7 @@ export function analyzeRankings(snapshots: RankingSnapshot[]): RankingAnalytics 
   const countBy = (values: string[]) => [...values.reduce((map, value) => map.set(value || "未知", (map.get(value || "未知") ?? 0) + 1), new Map<string, number>())]
     .map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
   const bands = entries.map((entry) => entry.words === 0 ? "未知" : entry.words < 300000 ? "30万以下" : entry.words < 1000000 ? "30–100万" : entry.words < 2000000 ? "100–200万" : "200万以上");
-  const latest = successful.at(-1);
-  const previous = successful.at(-2);
   const identity = (entry: RankingEntry) => `${entry.title}::${entry.author}`;
-  const previousMap = new Map(previous?.entries.map((entry) => [identity(entry), entry]) ?? []);
-  const latestKeys = new Set(latest?.entries.map(identity) ?? []);
-  const newEntrants = latest?.entries.filter((entry) => !previousMap.has(identity(entry))).map((entry) => entry.title) ?? [];
-  const movers = (latest?.entries ?? []).flatMap((entry) => {
-    const before = previousMap.get(identity(entry));
-    return before ? [{ title: entry.title, from: before.rank, to: entry.rank, change: before.rank - entry.rank }] : [];
-  }).filter((item) => item.change !== 0).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
   const appearances = new Map<string, { title: string; snapshots: number }>();
   for (const snapshot of successful) {
     const once = new Set<string>();
@@ -221,10 +213,74 @@ export function analyzeRankings(snapshots: RankingSnapshot[]): RankingAnalytics 
     }
   }
   const range = successful.length ? `${successful[0].capturedAt.slice(0, 10)} 至 ${successful.at(-1)!.capturedAt.slice(0, 10)}` : "暂无数据";
+  const profileForList = (listName: string) => {
+    const profile = FANQIE_CATEGORY_PROFILES.find((item) => listName.includes(item.channel) && listName.includes(item.name));
+    return profile;
+  };
+  const grouped = new Map<string, RankingSnapshot[]>();
+  for (const snapshot of successful) {
+    const list = grouped.get(snapshot.listName) ?? [];
+    list.push(snapshot);
+    grouped.set(snapshot.listName, list);
+  }
+  const comparableLists = [...grouped.values()].filter((list) => list.length >= 2);
+  const newEntrants = comparableLists.flatMap((list) => {
+    const latest = list.at(-1)!;
+    const previousKeys = new Set(list.at(-2)!.entries.map(identity));
+    return latest.entries.filter((entry) => !previousKeys.has(identity(entry))).map((entry) => entry.title);
+  });
+  const movers = comparableLists.flatMap((list) => {
+    const latest = list.at(-1)!;
+    const previousMap = new Map(list.at(-2)!.entries.map((entry) => [identity(entry), entry]));
+    return latest.entries.flatMap((entry) => {
+      const before = previousMap.get(identity(entry));
+      return before ? [{ title: entry.title, from: before.rank, to: entry.rank, change: before.rank - entry.rank }] : [];
+    });
+  }).filter((item) => item.change !== 0).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+  const marketOpportunities: MarketOpportunity[] = [...grouped.entries()].map(([listName, list]) => {
+    const latestSnapshot = list.at(-1)!;
+    const previousSnapshot = list.at(-2);
+    const latestEntries = latestSnapshot.entries;
+    const previousEntries = previousSnapshot?.entries ?? [];
+    const previousByIdentity = new Map(previousEntries.map((entry) => [identity(entry), entry]));
+    const newRate = previousEntries.length ? latestEntries.filter((entry) => !previousByIdentity.has(identity(entry))).length / latestEntries.length : 0;
+    const changes = latestEntries.flatMap((entry) => {
+      const before = previousByIdentity.get(identity(entry));
+      return before ? [before.rank - entry.rank] : [];
+    });
+    const averageRankChange = changes.length ? changes.reduce((sum, value) => sum + value, 0) / changes.length : 0;
+    const previousIdentities = new Set(previousEntries.map(identity));
+    const stabilityRate = latestEntries.length ? latestEntries.filter((entry) => previousIdentities.has(identity(entry))).length / latestEntries.length : 0;
+    const competition: MarketOpportunity["competition"] = stabilityRate >= 0.7 ? "高" : stabilityRate >= 0.4 ? "中" : "低";
+    const score = Math.round(Math.max(0, Math.min(100, 50 + newRate * 30 + Math.max(0, averageRankChange) * 4 - stabilityRate * 20 + (listName.includes("新书榜") ? 5 : 0))));
+    const profile = profileForList(listName);
+    const confidence: MarketOpportunity["confidence"] = list.length >= 7 ? "高" : list.length >= 3 ? "中" : "低";
+    const recommendation = score >= 65
+      ? `可作为${profile?.genre ?? "该题材"}候选方向：保留${profile?.coreFantasy ?? "题材核心幻想"}，用差异化主角、冲突发动机和开篇回报避开同质化。`
+      : score >= 50
+        ? `适合小规模验证：优先测试${profile?.openingFocus ?? "开篇承诺和首轮回报"}，连续采样后再决定是否扩张。`
+        : "竞争或动能暂不突出，不建议仅凭单次榜单追热点。";
+    return {
+      listName,
+      categoryKey: profile?.key,
+      categoryName: profile?.name ?? listName,
+      genre: profile?.genre ?? "都市脑洞",
+      snapshots: list.length,
+      latestSampleSize: latestEntries.length,
+      newEntrantRate: Math.round(newRate * 100),
+      averageRankChange: Math.round(averageRankChange * 10) / 10,
+      stabilityRate: Math.round(stabilityRate * 100),
+      competition,
+      opportunityScore: score,
+      confidence,
+      recommendation,
+    };
+  }).sort((a, b) => b.opportunityScore - a.opportunityScore);
   return {
     snapshotCount: successful.length, sampleSize: entries.length, timeRange: range,
     confidence: successful.length >= 7 && entries.length >= 100 ? "高" : successful.length >= 2 && entries.length >= 20 ? "中" : "低",
     genreDistribution: countBy(entries.map((entry) => entry.genre)), wordBands: countBy(bands), statusDistribution: countBy(entries.map((entry) => entry.status)),
     newEntrants, movers, continuousAppearances: [...appearances.values()].filter((item) => item.snapshots > 1).sort((a, b) => b.snapshots - a.snapshots),
+    marketOpportunities,
   };
 }

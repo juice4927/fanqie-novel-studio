@@ -1,5 +1,6 @@
 import type { Genre } from "./types";
 import { GENRE_PLUGINS, type GenreStage } from "./genre-plugins";
+import { getFanqieCategoryProfile } from "./fanqie-taxonomy";
 
 export const COMMERCIAL_KNOWLEDGE_VERSION =
   "cn-web-fiction.2026-07.v2-structured-genres";
@@ -64,6 +65,7 @@ export interface CommercialProgress {
   targetWords: number;
   stage?: GenreStage;
   subtype?: string;
+  fanqieCategoryKey?: string;
 }
 
 export function resolveGenreStage(
@@ -91,11 +93,13 @@ export function compileCommercialGuidance(
   const phase = resolveGenreStage(chapterNumber, progress);
   const phaseRule = plugin.stages[phase];
   const subtype = plugin.subtypes.find((item) => item.name === progress?.subtype);
+  const fanqieCategory = getFanqieCategoryProfile(progress?.fanqieCategoryKey);
   return [
     `知识库：${COMMERCIAL_KNOWLEDGE_VERSION}`,
     `当前阶段：${phase}（第${chapterNumber}章）`,
     `题材承诺：${plugin.readerPromise}`,
     subtype ? `当前子类型：${subtype.name}｜核心幻想：${subtype.coreFantasy}｜目标读者：${subtype.targetAudience}｜禁忌：${subtype.tabooBoundary}` : `可选子类型：${plugin.subtypes.map((item) => item.name).join("、")}`,
+    fanqieCategory ? `番茄分类映射：${fanqieCategory.channel}·${fanqieCategory.name}｜建议子类型：${fanqieCategory.recommendedSubtype}｜核心幻想：${fanqieCategory.coreFantasy}｜目标读者：${fanqieCategory.audience}｜开篇抓手：${fanqieCategory.openingFocus}｜禁忌：${fanqieCategory.taboo}` : "番茄分类映射：尚未选择，先按六套基础题材规则执行",
     `目标读者：${plugin.targetAudience.join("；")}`,
     `核心幻想：${plugin.coreFantasies.join("；")}`,
     `禁忌边界：${plugin.tabooBoundaries.join("；")}`,

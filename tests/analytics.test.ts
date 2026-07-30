@@ -17,6 +17,17 @@ describe("ranking analytics", () => {
     expect(result.continuousAppearances[0].snapshots).toBe(2);
   });
 
+  it("builds market opportunities only from repeated snapshots of the same list", () => {
+    const makeEntry = (snapshotId: string, rank: number, title: string) => ({ id: `${snapshotId}-${title}`, snapshotId, rank, title, author: "作者", genre: "都市脑洞", words: 500000, status: "连载", tags: [], sourceUrl: "" });
+    const snapshots: RankingSnapshot[] = [
+      { id: "old", source: "番茄小说官网", listName: "番茄男频阅读榜·都市脑洞", capturedAt: "2026-07-28T00:00:00Z", status: "成功", error: null, entries: [makeEntry("old", 3, "甲"), makeEntry("old", 2, "乙")] },
+      { id: "other", source: "番茄小说官网", listName: "番茄女频阅读榜·年代", capturedAt: "2026-07-29T00:00:00Z", status: "成功", error: null, entries: [makeEntry("other", 1, "无关作品")] },
+      { id: "new", source: "番茄小说官网", listName: "番茄男频阅读榜·都市脑洞", capturedAt: "2026-07-30T00:00:00Z", status: "成功", error: null, entries: [makeEntry("new", 1, "甲"), makeEntry("new", 2, "丙")] },
+    ];
+    const opportunity = analyzeRankings(snapshots).marketOpportunities.find((item) => item.categoryKey === "男频:262")!;
+    expect(opportunity).toMatchObject({ snapshots: 2, newEntrantRate: 50, stabilityRate: 50, averageRankChange: 2, genre: "都市脑洞" });
+  });
+
   it("captures only public page metadata", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(`<html><body><article class="book-item"><span class="rank">1</span><a href="/page/123" title="公开书名">公开书名</a><span class="author">公开作者</span><span>都市脑洞 88万字 连载</span></article></body></html>`, { status: 200, headers: { "content-type": "text/html" } })));
     const result = await capturePublicRankingPage("https://example.com/rank", "公开榜");

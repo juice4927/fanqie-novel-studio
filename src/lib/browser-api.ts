@@ -366,6 +366,7 @@ function browserRankingAnalytics(
     newEntrants: [],
     movers: [],
     continuousAppearances: [],
+    marketOpportunities: [],
   };
 }
 
@@ -421,7 +422,8 @@ export function createBrowserApi(): AppApi {
         },
         contract: {
           premise: "",
-          genreSubtype: "",
+        genreSubtype: "",
+        fanqieCategoryKey: "",
           protagonistDesire: "",
           readerPromise: "",
           coreEmotion: "",
@@ -687,6 +689,7 @@ export function createBrowserApi(): AppApi {
             currentWords: project.summary.currentWords,
             targetWords: project.summary.targetWords,
             subtype: project.contract.genreSubtype,
+            fanqieCategoryKey: project.contract.fanqieCategoryKey,
           },
         ),
         chapterIntent: `本章承诺：${chapter.chapterPromise || "未填写"}\n预期回报：${chapter.expectedPayoff || "未填写"}\n当前危机：${chapter.crisis || "未填写"}\n结尾期待：${chapter.endingExpectation || "未填写"}`,

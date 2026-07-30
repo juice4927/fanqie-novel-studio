@@ -87,6 +87,23 @@ export interface RankingAnalytics {
   newEntrants: string[];
   movers: Array<{ title: string; from: number; to: number; change: number }>;
   continuousAppearances: Array<{ title: string; snapshots: number }>;
+  marketOpportunities: MarketOpportunity[];
+}
+
+export interface MarketOpportunity {
+  listName: string;
+  categoryKey?: string;
+  categoryName: string;
+  genre: Genre;
+  snapshots: number;
+  latestSampleSize: number;
+  newEntrantRate: number;
+  averageRankChange: number;
+  stabilityRate: number;
+  competition: "低" | "中" | "高";
+  opportunityScore: number;
+  confidence: "低" | "中" | "高";
+  recommendation: string;
 }
 
 export interface ResearchBook {
@@ -135,6 +152,7 @@ export interface InsightPack {
 export interface StoryContract {
   premise: string;
   genreSubtype?: string;
+  fanqieCategoryKey?: string;
   protagonistDesire: string;
   readerPromise: string;
   coreEmotion: string;

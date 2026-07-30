@@ -49,6 +49,7 @@ import type {
 } from "../shared/types";
 import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
 import type { GenrePluginDefinition } from "../shared/genre-plugins";
+import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
 import {
   Badge,
   Button,
@@ -670,6 +671,10 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
     }
   };
   const genrePlugin = GENRE_PLUGINS[project.summary.genre];
+  const compatibleFanqieCategories = FANQIE_CATEGORY_PROFILES.filter(
+    (profile) => profile.genre === project.summary.genre,
+  );
+  const selectedFanqieCategory = getFanqieCategoryProfile(contract.fanqieCategoryKey);
   return (
     <div className="page project-page">
       <header className="page-header">
@@ -708,6 +713,39 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
         </div>
       </header>
       <section className="section-band bible-form">
+        <Field
+          label="番茄目标分类"
+          hint="把番茄官方细分类映射到本项目的生成、规划与质检规则"
+        >
+          <Select
+            value={contract.fanqieCategoryKey ?? ""}
+            onChange={(event) => {
+              const profile = getFanqieCategoryProfile(event.target.value);
+              setContract((current) => ({
+                ...current,
+                fanqieCategoryKey: event.target.value,
+                genreSubtype: profile?.recommendedSubtype ?? current.genreSubtype,
+              }));
+            }}
+          >
+            <option value="">尚未选择</option>
+            {(["男频", "女频"] as const).map((channel) => (
+              <optgroup key={channel} label={channel}>
+                {compatibleFanqieCategories.filter((item) => item.channel === channel).map((profile) => (
+                  <option key={profile.key} value={profile.key}>{profile.name}</option>
+                ))}
+              </optgroup>
+            ))}
+          </Select>
+        </Field>
+        {selectedFanqieCategory && (
+          <div className="fanqie-category-summary">
+            <div><span>核心幻想</span><strong>{selectedFanqieCategory.coreFantasy}</strong></div>
+            <div><span>目标读者</span><strong>{selectedFanqieCategory.audience}</strong></div>
+            <div><span>开篇抓手</span><strong>{selectedFanqieCategory.openingFocus}</strong></div>
+            <div><span>禁忌边界</span><strong>{selectedFanqieCategory.taboo}</strong></div>
+          </div>
+        )}
         <Field
           label="题材子类型"
           hint="决定本项目优先使用的核心幻想、目标受众和禁忌边界"

@@ -228,6 +228,7 @@ export class WorkspaceDatabase {
     const contract: StoryContract = {
       premise: "",
       genreSubtype: "",
+      fanqieCategoryKey: "",
       protagonistDesire: "",
       readerPromise: "",
       coreEmotion: "",
@@ -363,6 +364,7 @@ export class WorkspaceDatabase {
       JSON.stringify({
         premise: contract.premise,
         genreSubtype: contract.genreSubtype,
+        fanqieCategoryKey: contract.fanqieCategoryKey,
         protagonistDesire: contract.protagonistDesire,
         readerPromise: contract.readerPromise,
         coreEmotion: contract.coreEmotion,
@@ -373,6 +375,7 @@ export class WorkspaceDatabase {
       JSON.stringify({
         premise: previous.premise,
         genreSubtype: previous.genreSubtype,
+        fanqieCategoryKey: previous.fanqieCategoryKey,
         protagonistDesire: previous.protagonistDesire,
         readerPromise: previous.readerPromise,
         coreEmotion: previous.coreEmotion,

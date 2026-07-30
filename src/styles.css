@@ -805,6 +805,20 @@ p {
 }
 .ranking-links a:hover { text-decoration: underline; }
 .fanqie-ranking-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.market-opportunity-panel { padding: 22px 18px 8px; border-bottom: 1px solid var(--line); }
+.market-opportunity-panel .section-heading { margin-bottom: 14px; }
+.market-opportunity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.market-opportunity-grid article { padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-soft); }
+.opportunity-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.opportunity-head > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.opportunity-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opportunity-score { color: var(--accent); font-size: 20px; font-weight: 750; }
+.market-opportunity-grid p { min-height: 42px; margin: 10px 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.market-opportunity-grid small { color: var(--subtle); font-size: 10px; }
+.fanqie-category-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
+.fanqie-category-summary > div { padding: 12px; background: var(--surface-soft); }
+.fanqie-category-summary span { display: block; margin-bottom: 5px; color: var(--subtle); font-size: 10px; }
+.fanqie-category-summary strong { color: var(--ink); font-size: 11px; line-height: 1.55; }
 .rank-number {
   color: var(--accent);
   font-size: 15px;
@@ -2782,7 +2796,9 @@ p {
   }
   .genre-stage-grid,
   .subtype-summary,
-  .genre-knowledge-grid {
+  .genre-knowledge-grid,
+  .market-opportunity-grid,
+  .fanqie-category-summary {
     grid-template-columns: 1fr;
   }
   .genre-stage-grid article,

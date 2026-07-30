@@ -292,6 +292,28 @@ export function ResearchPage({
               </div>
             </div>
           )}
+          {analytics?.marketOpportunities.length ? (
+            <div className="market-opportunity-panel">
+              <div className="section-heading">
+                <div>
+                  <h2>榜单趋势与立项机会</h2>
+                  <p>按同一番茄榜单的连续快照估算动能与竞争，仅作选题证据，不替代人工判断。</p>
+                </div>
+              </div>
+              <div className="market-opportunity-grid">
+                {analytics.marketOpportunities.slice(0, 6).map((opportunity) => (
+                  <article key={opportunity.listName}>
+                    <div className="opportunity-head">
+                      <div><Badge tone="accent">{opportunity.genre}</Badge><strong>{opportunity.categoryName}</strong></div>
+                      <span className="opportunity-score">{opportunity.opportunityScore}</span>
+                    </div>
+                    <p>{opportunity.recommendation}</p>
+                    <small>{opportunity.snapshots}次快照 · 新晋率 {opportunity.newEntrantRate}% · 平均升位 {opportunity.averageRankChange} · 竞争{opportunity.competition}</small>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {rankings.length ? (
             rankings.map((snapshot) => (
               <div className="snapshot" key={snapshot.id}>
