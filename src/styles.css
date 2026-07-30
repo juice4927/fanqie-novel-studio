@@ -833,6 +833,8 @@ p {
 .pending-facts-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .pending-facts-list article > span { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 8px; min-width: 0; }
 .pending-facts-list article small { grid-column: 2; color: var(--subtle); }
+.planning-ai-summary { padding: 14px; border: 1px solid var(--line); background: var(--surface-muted); border-radius: 6px; }
+.planning-ai-summary p { margin: 6px 0 0; color: var(--muted); line-height: 1.6; }
 .rank-number {
   color: var(--accent);
   font-size: 15px;

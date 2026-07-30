@@ -497,6 +497,23 @@ function registerHandlers() {
   handle("approveContract", (id) => database.approveContract(id));
   handle("savePlan", (id, plan) => database.savePlan(id, plan));
   handle("approvePlan", (id, planId) => database.approvePlan(id, planId));
+  handle("generatePlanningDraft", async (id, input) => {
+    const project = database.getProject(id);
+    if (!project.contract.approved) throw new Error("必须先审批创作契约");
+    if (input.mode === "全书结构" && project.plans.some((plan) => plan.kind === "宏观阶段" || plan.kind === "分卷"))
+      throw new Error("当前已有宏观阶段或分卷；为避免重复，AI 不会覆盖现有结构");
+    const fromChapter = input.fromChapter ?? Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1));
+    const count = input.mode === "后续章纲" ? input.chapterCount ?? 10 : 0;
+    if (input.mode === "后续章纲" && project.chapters.some((chapter) => chapter.number >= fromChapter && chapter.number < fromChapter + count))
+      throw new Error(`第${fromChapter}–${fromChapter + count - 1}章范围内已有章节，AI 不会覆盖`);
+    const generated = await ai.generatePlanning(project, { ...input, fromChapter });
+    const latest = database.getProject(id);
+    if (generated.chapters.some((chapter) => latest.chapters.some((existing) => existing.number === chapter.number)))
+      throw new Error("生成期间章节范围发生变化，本次结果未保存，请重新生成");
+    const plans = generated.plans.map((plan) => database.savePlan(id, plan));
+    const chapters = generated.chapters.map((chapter) => database.saveChapter(id, chapter));
+    return { ...generated, plans, chapters };
+  });
   handle("saveChapter", (id, chapter) => database.saveChapter(id, chapter));
   handle("saveExpectation", (id, expectation) =>
     database.saveExpectation(id, expectation),

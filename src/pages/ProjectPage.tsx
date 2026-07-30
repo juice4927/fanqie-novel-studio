@@ -39,6 +39,7 @@ import type {
   LedgerFact,
   LedgerKind,
   PlanNode,
+  PlanningGenerationInput,
   ProjectDetail,
   ProjectStatus,
   ScheduleItem,
@@ -864,6 +865,9 @@ interface CommonProjectProps {
 
 function PlanningPage({ project, api, reload, notify }: CommonProjectProps) {
   const [modal, setModal] = useState(false);
+  const [aiModal, setAiModal] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiInput, setAiInput] = useState<PlanningGenerationInput>({ mode: project.plans.some((plan) => plan.kind === "宏观阶段" || plan.kind === "分卷") ? "后续章纲" : "全书结构", fromChapter: Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1)), chapterCount: 10 });
   const [kind, setKind] = useState<PlanNode["kind"]>("宏观阶段");
   const [draft, setDraft] = useState<PlanNode>({
     id: "",
@@ -907,9 +911,10 @@ function PlanningPage({ project, api, reload, notify }: CommonProjectProps) {
           <h1>分层规划台</h1>
           <p>远期只定目标，未来 30 章粗纲、5 章细纲和当前场景卡逐级收敛。</p>
         </div>
-        <Button icon={<Plus size={16} />} onClick={() => open("宏观阶段")}>
-          新建规划节点
-        </Button>
+        <div className="heading-actions">
+          <Button variant="secondary" icon={<Sparkles size={16} />} disabled={!project.contract.approved} onClick={() => setAiModal(true)}>AI 生成规划</Button>
+          <Button icon={<Plus size={16} />} onClick={() => open("宏观阶段")}>新建规划节点</Button>
+        </div>
       </header>
       <div className="plan-hierarchy">
         {grouped.map(({ group, items }) => (
@@ -1109,6 +1114,43 @@ function PlanningPage({ project, api, reload, notify }: CommonProjectProps) {
               >
                 保存节点
               </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {aiModal && (
+        <Modal title="AI 生成规划草稿" onClose={() => !aiBusy && setAiModal(false)} width={680}>
+          <div className="form-stack">
+            <Field label="生成范围" hint="AI 只新增草稿，不覆盖已有规划或章节">
+              <Segmented options={["全书结构", "后续章纲"] as const} value={aiInput.mode} onChange={(mode) => setAiInput({ ...aiInput, mode })} />
+            </Field>
+            {aiInput.mode === "全书结构" ? (
+              <p className="inline-warning">生成六个商业阶段与 3–6 个分卷。当前已有宏观阶段或分卷时会拒绝执行，防止重复结构。</p>
+            ) : (
+              <div className="form-grid two">
+                <Field label="起始章节">
+                  <Input type="number" min={1} value={aiInput.fromChapter ?? 1} onChange={(event) => setAiInput({ ...aiInput, fromChapter: Math.max(1, Number(event.target.value)) })} />
+                </Field>
+                <Field label="生成章数">
+                  <Select value={aiInput.chapterCount ?? 10} onChange={(event) => setAiInput({ ...aiInput, chapterCount: Number(event.target.value) as 10 | 30 })}><option value={10}>10 章</option><option value={30}>30 章</option></Select>
+                </Field>
+              </div>
+            )}
+            <div className="planning-ai-summary">
+              <strong>{aiInput.mode === "全书结构" ? "输出：六阶段 + 分卷" : `输出：第${aiInput.fromChapter}–${(aiInput.fromChapter ?? 1) + (aiInput.chapterCount ?? 10) - 1}章`}</strong>
+              <p>{aiInput.mode === "全书结构" ? "每个节点包含目标、核心矛盾、预期结果和目标字数。" : "同步建立滚动粗纲、逐章细纲、章节承诺、回报、危机、章末期待和兑现目标章。"}</p>
+            </div>
+            <div className="modal-actions">
+              <Button variant="secondary" disabled={aiBusy} onClick={() => setAiModal(false)}>取消</Button>
+              <Button disabled={aiBusy} icon={aiBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} onClick={async () => {
+                setAiBusy(true);
+                try {
+                  const result = await api.generatePlanningDraft(project.summary.id, aiInput);
+                  await reload(); setAiModal(false);
+                  notify(result.chapters.length ? `已生成 ${result.chapters.length} 章章纲和 ${result.plans.length} 个规划草稿` : `已生成 ${result.plans.length} 个全书结构草稿`);
+                } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
+                finally { setAiBusy(false); }
+              }}>{aiBusy ? "生成中" : "生成草稿"}</Button>
             </div>
           </div>
         </Modal>

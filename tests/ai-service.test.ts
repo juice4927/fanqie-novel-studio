@@ -86,3 +86,32 @@ describe("chapter fact extraction", () => {
     expect(facts[0]).toMatchObject({ kind: "能力", subject: "林舟", confidence: "待确认", evidenceChapter: 8, genreDimension: "定稿自动候选" });
   });
 });
+
+describe("AI planning", () => {
+  const planningProject = {
+    summary: { id: "project-plan", title: "测试长篇", genre: "年代重生", targetWords: 1000000, currentWords: 10000 },
+    contract: { approved: true, genreSubtype: "创业致富", fanqieCategoryKey: "女频:79", premise: "女主凭手艺创业", protagonistDesire: "建立工厂", readerPromise: "事业与关系共同成长", coreEmotion: "被尊重", ending: "建立品牌", immutableRules: [], prohibitedPatterns: [] },
+    plans: [], chapters: [], facts: [],
+  } as unknown as ProjectDetail;
+  const planningDatabase = () => ({
+    getAiSettings: () => ({ baseUrl: "https://model.invalid/v1", model: "test", embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
+    findAiJob: () => undefined, startAiJob: () => "job-plan", finishAiJob: vi.fn(),
+  } as unknown as WorkspaceDatabase);
+
+  it("maps a continuous chapter proposal to rough plans, detailed plans and chapter intents", async () => {
+    const chapters = Array.from({ length: 10 }, (_, index) => ({ title: `推进${index + 1}`, goal: `完成第${index + 1}个具体目标`, conflict: `面对第${index + 1}个现实阻碍`, outcome: `产生第${index + 1}个状态变化`, chapterPromise: `本章推进承诺${index + 1}`, expectedPayoff: `可见回报${index + 1}`, crisis: `限时危机${index + 1}`, endingExpectation: `下一问题${index + 1}`, payoffOffset: 2, isKeyChapter: index === 9 }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ batchGoal: "建立首个可以持续运转的生产小组", batchConflict: "原料渠道与家庭阻力同时升级并形成选择", batchOutcome: "获得稳定订单并建立明确的合作规则", chapters }) } }] }), { status: 200 })));
+    const result = await new AiService(planningDatabase(), () => "secret").generatePlanning(planningProject, { mode: "后续章纲", fromChapter: 6, chapterCount: 10 });
+    expect(result.chapters).toHaveLength(10);
+    expect(result.plans).toHaveLength(11);
+    expect(result.chapters[0]).toMatchObject({ number: 6, status: "章纲", expectationTargetChapter: 8 });
+    expect(result.chapters[9]).toMatchObject({ number: 15, isKeyChapter: true, batchMode: "逐章" });
+    expect(result.plans[0]).toMatchObject({ kind: "粗纲", ordinal: 6, status: "草稿" });
+  });
+
+  it("rejects an incomplete chapter batch before anything can be saved", async () => {
+    const one = { title: "唯一一章", goal: "完成一个足够明确的目标", conflict: "面对一个足够明确的阻碍", outcome: "产生一个足够明确的变化", chapterPromise: "向读者提供明确推进", expectedPayoff: "完成一次可见兑现", crisis: "必须当天解决问题", endingExpectation: "新的问题即将到来", payoffOffset: 1, isKeyChapter: false };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ batchGoal: "建立首个可以持续运转的生产小组", batchConflict: "原料渠道与家庭阻力同时升级并形成选择", batchOutcome: "获得稳定订单并建立明确的合作规则", chapters: [one] }) } }] }), { status: 200 })));
+    await expect(new AiService(planningDatabase(), () => "secret").generatePlanning(planningProject, { mode: "后续章纲", fromChapter: 6, chapterCount: 10 })).rejects.toThrow("预期 10 章");
+  });
+});

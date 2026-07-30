@@ -419,6 +419,20 @@ export interface BatchGenerationPreview {
   blockingReason: string | null;
 }
 
+export type PlanningGenerationMode = "全书结构" | "后续章纲";
+
+export interface PlanningGenerationInput {
+  mode: PlanningGenerationMode;
+  fromChapter?: number;
+  chapterCount?: 10 | 30;
+}
+
+export interface PlanningGenerationResult {
+  plans: PlanNode[];
+  chapters: Chapter[];
+  startChapter: number;
+}
+
 export interface SearchHit {
   id: string;
   type: "章节" | "规划" | "事实";
@@ -446,6 +460,7 @@ export interface AppApi {
   approveContract(id: string): Promise<StoryContract>;
   savePlan(id: string, plan: PlanNode): Promise<PlanNode>;
   approvePlan(id: string, planId: string): Promise<void>;
+  generatePlanningDraft(id: string, input: PlanningGenerationInput): Promise<PlanningGenerationResult>;
   saveChapter(id: string, chapter: Chapter): Promise<Chapter>;
   saveExpectation(
     id: string,

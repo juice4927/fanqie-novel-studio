@@ -8,6 +8,8 @@ import type {
   InsightPack,
   LedgerFact,
   MarketOpportunity,
+  PlanningGenerationInput,
+  PlanningGenerationResult,
   ProjectDetail,
   QualityIssue,
   ResearchAnalysisRecord,
@@ -84,6 +86,30 @@ const FactCandidateSchema = z.object({
     knowledgeScope: z.string().max(200),
     evidence: z.string().min(4).max(300),
   })).max(12),
+});
+
+const StructurePlanningSchema = z.object({
+  stages: z.array(z.object({
+    title: z.string().min(2).max(80), startChapter: z.number().int().positive(),
+    goal: z.string().min(10).max(500), conflict: z.string().min(10).max(500), outcome: z.string().min(10).max(500), targetWords: z.number().int().positive(),
+  })).length(6),
+  volumes: z.array(z.object({
+    title: z.string().min(2).max(80),
+    goal: z.string().min(10).max(500), conflict: z.string().min(10).max(500), outcome: z.string().min(10).max(500), targetWords: z.number().int().positive(),
+  })).min(3).max(6),
+});
+
+const ChapterPlanningSchema = z.object({
+  batchGoal: z.string().min(10).max(800),
+  batchConflict: z.string().min(10).max(800),
+  batchOutcome: z.string().min(10).max(800),
+  chapters: z.array(z.object({
+    title: z.string().min(2).max(80), goal: z.string().min(5).max(300),
+    conflict: z.string().min(5).max(300), outcome: z.string().min(5).max(300),
+    chapterPromise: z.string().min(5).max(300), expectedPayoff: z.string().min(5).max(300),
+    crisis: z.string().min(5).max(300), endingExpectation: z.string().min(5).max(300),
+    payoffOffset: z.number().int().min(1).max(30), isKeyChapter: z.boolean(),
+  })).min(1).max(30),
 });
 
 type InsightResult = z.infer<typeof InsightSchema>;
@@ -299,6 +325,43 @@ export class AiService {
       schema: CandidateSchema,
     });
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
+  }
+
+  async generatePlanning(project: ProjectDetail, input: PlanningGenerationInput): Promise<PlanningGenerationResult> {
+    if (!project.contract.approved) throw new Error("必须先审批创作契约");
+    const startChapter = input.fromChapter ?? Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1));
+    const shared = `项目：${project.summary.title}\n题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n创作契约：${JSON.stringify(project.contract)}\n商业规则：${compileCommercialGuidance(project.summary.genre, startChapter, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, subtype: project.contract.genreSubtype, fanqieCategoryKey: project.contract.fanqieCategoryKey })}\n已批准规划：${JSON.stringify(project.plans.filter((plan) => plan.status === "已批准"))}\n已有章节：${JSON.stringify(project.chapters.slice(-20).map((chapter) => ({ number: chapter.number, title: chapter.title, outline: chapter.outline, endingExpectation: chapter.endingExpectation })))}`;
+    if (input.mode === "全书结构") {
+      const result = await this.runJson({
+        projectId: project.summary.id, taskType: "generate-story-structure", inputSummary: `${project.summary.title} 六阶段与分卷`,
+        system: "你是中国商业网文总编。根据已审批契约规划六阶段和分卷，只细化结构，不写正文。阶段必须依次覆盖开篇、追读、扩张、中期、高潮、收束；总字数接近项目目标，冲突和回报逐层升级，终局必须兑现契约。",
+        user: `${shared}\n输出 stages（必须6项）和 volumes（3至6项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。不得照抄商业规则文字。`,
+        schema: StructurePlanningSchema,
+      });
+      return {
+        startChapter: 1,
+        chapters: [],
+        plans: [
+          ...result.stages.map((item, index) => ({ id: randomUUID(), kind: "宏观阶段" as const, title: item.title, ordinal: item.startChapter || index + 1, goal: item.goal, conflict: item.conflict, outcome: item.outcome, targetWords: item.targetWords, status: "草稿" as const, parentId: null })),
+          ...result.volumes.map((item, index) => ({ id: randomUUID(), kind: "分卷" as const, title: item.title, ordinal: index + 1, goal: item.goal, conflict: item.conflict, outcome: item.outcome, targetWords: item.targetWords, status: "草稿" as const, parentId: null })),
+        ],
+      };
+    }
+    const count = input.chapterCount ?? 10;
+    const result = await this.runJson({
+      projectId: project.summary.id, taskType: "generate-chapter-plans", inputSummary: `${project.summary.title} 第${startChapter}-${startChapter + count - 1}章章纲`,
+      system: "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。每章必须承接上一章状态，包含目标、阻碍、主动行动、结果影响和自然续读问题；回报类型要变化，禁止连续重复打脸、误会或突发事故。",
+      user: `${shared}\n从第${startChapter}章开始，严格输出${count}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
+      schema: ChapterPlanningSchema,
+    });
+    if (result.chapters.length !== count) throw new Error(`模型返回 ${result.chapters.length} 章，预期 ${count} 章，请重试`);
+    const roughPlan = { id: randomUUID(), kind: "粗纲" as const, title: `第${startChapter}–${startChapter + count - 1}章滚动粗纲`, ordinal: startChapter, goal: result.batchGoal, conflict: result.batchConflict, outcome: result.batchOutcome, targetWords: count * 2300, status: "草稿" as const, parentId: null };
+    const chapters = result.chapters.map((item, index) => {
+      const number = startChapter + index;
+      return { id: randomUUID(), number, title: item.title, outline: `目标：${item.goal}；冲突：${item.conflict}；结果：${item.outcome}`, content: "", wordCount: 0, status: "章纲" as const, batchMode: item.isKeyChapter ? "逐章" as const : "五章批次" as const, isKeyChapter: item.isKeyChapter, chapterPromise: item.chapterPromise, expectedPayoff: item.expectedPayoff, crisis: item.crisis, endingExpectation: item.endingExpectation, expectationTargetChapter: number + item.payoffOffset, revision: 0, updatedAt: now() };
+    });
+    const detailPlans = result.chapters.map((item, index) => ({ id: randomUUID(), kind: "细纲" as const, title: `第${startChapter + index}章 ${item.title}`, ordinal: startChapter + index, goal: item.goal, conflict: item.conflict, outcome: item.outcome, targetWords: 2300, status: "草稿" as const, parentId: roughPlan.id }));
+    return { startChapter, plans: [roughPlan, ...detailPlans], chapters };
   }
 
   async draftChapter(projectId: string, chapter: Chapter, context: ContextPackage): Promise<Chapter> {

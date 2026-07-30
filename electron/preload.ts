@@ -13,6 +13,7 @@ const api: AppApi = {
   approveContract: (id) => invoke("approveContract", id),
   savePlan: (id, plan) => invoke("savePlan", id, plan),
   approvePlan: (id, planId) => invoke("approvePlan", id, planId),
+  generatePlanningDraft: (id, input) => invoke("generatePlanningDraft", id, input),
   saveChapter: (id, chapter) => invoke("saveChapter", id, chapter),
   saveExpectation: (id, expectation) => invoke("saveExpectation", id, expectation),
   transitionChapter: (id, chapterId, status) => invoke("transitionChapter", id, chapterId, status),

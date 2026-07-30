@@ -547,6 +547,9 @@ export function createBrowserApi(): AppApi {
       if (plan) plan.status = "已批准";
       persist();
     },
+    async generatePlanningDraft() {
+      throw new Error("AI 规划生成需要在桌面版配置模型后使用");
+    },
     async saveChapter(projectId, chapter: Chapter) {
       const project = getProject(state, projectId);
       const existing = project.chapters.findIndex(
