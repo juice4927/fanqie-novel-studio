@@ -72,6 +72,30 @@ describe("structured Chinese web-fiction genre packages", () => {
     expect(guidance).toContain("政策、资金、渠道和竞争");
   });
 
+  it("combines narrative genres and elements without turning them into hard chapter gates", () => {
+    const guidance = compileCommercialGuidance("都市脑洞", 12, {
+      currentWords: 30000,
+      targetWords: 1000000,
+      secondaryGenres: ["悬疑", "群像"],
+      genreElements: ["现代都市", "探案", "无CP"],
+      customGenreDirection: "以基层医疗案件推动人物成长，不使用系统。",
+    });
+    expect(guidance).toContain("复合叙事类型：悬疑 + 群像");
+    expect(guidance).toContain("题材元素：现代都市、探案、无CP");
+    expect(guidance).toContain("以基层医疗案件推动人物成长，不使用系统");
+    expect(guidance).toContain("不要求每章覆盖");
+    expect(guidance).toContain("自定义创作方向优先于题材惯例");
+  });
+
+  it("keeps a custom subtype visible instead of replacing it with built-in options", () => {
+    const guidance = compileCommercialGuidance("都市脑洞", 8, {
+      subtype: "医疗探案群像",
+      customGenreDirection: "案件服务于人物成长。",
+    });
+    expect(guidance).toContain("当前自定义子类型：医疗探案群像");
+    expect(guidance).toContain("不强套内置子类型");
+  });
+
   it("uses the same structured package for deconstruction", () => {
     const framework = compileDeconstructionFramework("古言宅斗");
     expect(framework).toContain("证据链");

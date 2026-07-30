@@ -323,6 +323,9 @@ function compileContext(
     contract: [
       `故事前提：${project.contract.premise}`,
       `题材子类型：${project.contract.genreSubtype || "未选择"}`,
+      `复合叙事类型：${project.contract.secondaryGenres?.join(" + ") || "未选择"}`,
+      `题材元素：${project.contract.genreElements?.join("、") || "未选择"}`,
+      `自定义创作方向：${project.contract.customGenreDirection || "未填写"}`,
       `番茄分类：${project.contract.fanqieCategoryKey || "未选择"}`,
       `主角欲望：${project.contract.protagonistDesire}`,
       `读者承诺：${project.contract.readerPromise}`,
@@ -340,6 +343,9 @@ function compileContext(
         targetWords: project.summary.targetWords,
         subtype: project.contract.genreSubtype,
         fanqieCategoryKey: project.contract.fanqieCategoryKey,
+        secondaryGenres: project.contract.secondaryGenres,
+        genreElements: project.contract.genreElements,
+        customGenreDirection: project.contract.customGenreDirection,
       },
     ),
     chapterIntent: [
@@ -642,6 +648,9 @@ function registerHandlers() {
       premise: concept.premise,
       genreSubtype: concept.genreSubtype,
       fanqieCategoryKey: "",
+      secondaryGenres: input.secondaryGenres ?? [],
+      genreElements: input.genreElements ?? [],
+      customGenreDirection: input.customGenreDirection ?? "",
       protagonistDesire: concept.protagonistDesire,
       readerPromise: concept.readerPromise,
       coreEmotion: concept.coreEmotion,
@@ -1241,10 +1250,26 @@ function createWindow() {
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+  const openExternalHttpUrl = (value: string) => {
+    try {
+      const url = new URL(value);
+      if ((url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password) {
+        void shell.openExternal(url.toString());
+      }
+    } catch {
+      // Ignore malformed and unsupported external URLs.
+    }
+  };
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) void shell.openExternal(url);
+    openExternalHttpUrl(url);
     return { action: "deny" };
   });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    event.preventDefault();
+    openExternalHttpUrl(url);
+  });
+  mainWindow.webContents.session.setPermissionCheckHandler(() => false);
+  mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
 }
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {

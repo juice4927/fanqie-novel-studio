@@ -1,9 +1,10 @@
 import type { Genre } from "./types";
 import { GENRE_PLUGINS, type GenreStage } from "./genre-plugins";
 import { getFanqieCategoryProfile } from "./fanqie-taxonomy";
+import { compileGenreComposition, type GenreComposition } from "./genre-composition";
 
 export const COMMERCIAL_KNOWLEDGE_VERSION =
-  "cn-web-fiction.2026-07.v2-structured-genres";
+  "cn-web-fiction.2026-07.v3-composable-genres";
 
 export interface CommercialKnowledgeSource {
   title: string;
@@ -60,7 +61,7 @@ const CORE_LOOP = [
   "续读问题：在回报后产生可理解、可解决的下一轮危机或期待",
 ];
 
-export interface CommercialProgress {
+export interface CommercialProgress extends GenreComposition {
   currentWords: number;
   targetWords: number;
   stage?: GenreStage;
@@ -98,7 +99,12 @@ export function compileCommercialGuidance(
     `知识库：${COMMERCIAL_KNOWLEDGE_VERSION}`,
     `当前阶段：${phase}（第${chapterNumber}章）`,
     `题材承诺：${plugin.readerPromise}`,
-    subtype ? `当前子类型：${subtype.name}｜核心幻想：${subtype.coreFantasy}｜目标读者：${subtype.targetAudience}｜禁忌：${subtype.tabooBoundary}` : `可选子类型：${plugin.subtypes.map((item) => item.name).join("、")}`,
+    compileGenreComposition(progress),
+    subtype
+      ? `当前子类型：${subtype.name}｜核心幻想：${subtype.coreFantasy}｜目标读者：${subtype.targetAudience}｜禁忌：${subtype.tabooBoundary}`
+      : progress?.subtype
+        ? `当前自定义子类型：${progress.subtype}｜以创作契约中的读者承诺、人物动机和自定义方向确定具体规则，不强套内置子类型。`
+        : `可选子类型：${plugin.subtypes.map((item) => item.name).join("、")}`,
     fanqieCategory ? `番茄分类映射：${fanqieCategory.channel}·${fanqieCategory.name}｜建议子类型：${fanqieCategory.recommendedSubtype}｜核心幻想：${fanqieCategory.coreFantasy}｜目标读者：${fanqieCategory.audience}｜开篇抓手：${fanqieCategory.openingFocus}｜禁忌：${fanqieCategory.taboo}` : "番茄分类映射：尚未选择，先按六套基础题材规则执行",
     ...(fanqieCategory ? [
       `分类冲突发动机：${fanqieCategory.conflictEngine}`,

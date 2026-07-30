@@ -398,7 +398,9 @@ export function createBrowserApi(): AppApi {
         nextPublishAt: null, riskLevel: "正常", updatedAt: now(),
       },
       contract: {
-        premise: "", genreSubtype: "", fanqieCategoryKey: "", protagonistDesire: "",
+        premise: "", genreSubtype: "", fanqieCategoryKey: "",
+        secondaryGenres: input.secondaryGenres ?? [], genreElements: input.genreElements ?? [],
+        customGenreDirection: input.customGenreDirection ?? "", protagonistDesire: "",
         readerPromise: "", coreEmotion: "", ending: "", immutableRules: [],
         prohibitedPatterns: [], version: 1, approved: false, updatedAt: now(),
         aestheticProfile: normalizeAestheticProfile(),
@@ -467,6 +469,8 @@ export function createBrowserApi(): AppApi {
       const project = getProject(state, created.id);
       project.contract = {
         ...project.contract, premise: concept.premise, genreSubtype: concept.genreSubtype,
+        secondaryGenres: input.secondaryGenres ?? [], genreElements: input.genreElements ?? [],
+        customGenreDirection: input.customGenreDirection ?? "",
         protagonistDesire: concept.protagonistDesire, readerPromise: concept.readerPromise,
         coreEmotion: concept.coreEmotion, ending: concept.ending,
         immutableRules: concept.immutableRules, prohibitedPatterns: concept.prohibitedPatterns,
@@ -695,6 +699,9 @@ export function createBrowserApi(): AppApi {
             targetWords: project.summary.targetWords,
             subtype: project.contract.genreSubtype,
             fanqieCategoryKey: project.contract.fanqieCategoryKey,
+            secondaryGenres: project.contract.secondaryGenres,
+            genreElements: project.contract.genreElements,
+            customGenreDirection: project.contract.customGenreDirection,
           },
         ),
         chapterIntent: `本章承诺：${chapter.chapterPromise || "未填写"}\n预期回报：${chapter.expectedPayoff || "未填写"}\n当前危机：${chapter.crisis || "未填写"}\n结尾期待：${chapter.endingExpectation || "未填写"}`,

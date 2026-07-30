@@ -27,7 +27,7 @@ test("navigates through research and the complete project workflow", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "商业知识" }).click();
   await expect(
-    page.getByText("cn-web-fiction.2026-07.v2-structured-genres"),
+    page.getByText("cn-web-fiction.2026-07.v3-composable-genres"),
   ).toBeVisible();
   for (const genre of [
     "都市脑洞",

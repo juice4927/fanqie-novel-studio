@@ -62,6 +62,27 @@ describe("IPC runtime validation", () => {
     expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, longTaskTimeoutMinutes: 20 }])).toThrow("参数无效");
   });
 
+  it("validates composable genre inputs with bounded selections", () => {
+    const input = {
+      genre: "都市脑洞",
+      targetWords: 1000000,
+      updateCadence: "每日 2 章",
+      seed: "医疗悬疑群像",
+      secondaryGenres: ["悬疑", "群像"],
+      genreElements: ["现代都市", "探案", "无CP"],
+      customGenreDirection: "不使用系统",
+    };
+    expect(validateIpcArgs("generateBookConcepts", [input])).toEqual([input]);
+    expect(() => validateIpcArgs("generateBookConcepts", [{
+      ...input,
+      secondaryGenres: ["悬疑", "群像", "成长", "经营"],
+    }])).toThrow("参数无效");
+    expect(() => validateIpcArgs("generateBookConcepts", [{
+      ...input,
+      secondaryGenres: ["不存在的类型"],
+    }])).toThrow("参数无效");
+  });
+
   it("accepts a strict per-project aesthetic profile", () => {
     const contract = {
       premise: "前提", protagonistDesire: "欲望", readerPromise: "承诺", coreEmotion: "情绪", ending: "终局",

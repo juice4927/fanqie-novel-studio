@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { GENRES } from "../src/shared/types";
+import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import type { AppApi } from "../src/shared/types";
 
 const id = z.string().trim().min(1).max(200);
@@ -8,6 +9,9 @@ const mediumText = z.string().max(10_000);
 const longText = z.string().max(200_000);
 const timestamp = z.string().max(64);
 const genre = z.enum(GENRES);
+const secondaryGenres = z.array(z.enum(NARRATIVE_GENRES)).max(3).optional();
+const genreElements = z.array(shortText).max(8).optional();
+const customGenreDirection = z.string().max(2000).optional();
 const positiveInt = z.number().int().positive().max(10_000_000);
 const httpUrl = z.url().max(2000).refine((value) => /^https?:\/\//i.test(value), "只允许 HTTP/HTTPS 地址");
 
@@ -17,6 +21,9 @@ const createProject = z.object({
   targetWords: z.number().int().min(10_000).max(20_000_000),
   updateCadence: z.string().trim().min(1).max(100),
   safeStockLine: z.number().int().min(0).max(1000).optional(),
+  secondaryGenres,
+  genreElements,
+  customGenreDirection,
 }).strict();
 
 const bookConceptInput = z.object({
@@ -24,6 +31,9 @@ const bookConceptInput = z.object({
   targetWords: z.number().int().min(10_000).max(20_000_000),
   updateCadence: z.string().trim().min(1).max(100),
   seed: z.string().max(5000),
+  secondaryGenres,
+  genreElements,
+  customGenreDirection,
 }).strict();
 
 const bookConcept = z.object({
@@ -46,6 +56,9 @@ const contract = z.object({
   premise: mediumText,
   genreSubtype: shortText.optional(),
   fanqieCategoryKey: shortText.optional(),
+  secondaryGenres,
+  genreElements,
+  customGenreDirection,
   protagonistDesire: mediumText,
   readerPromise: mediumText,
   coreEmotion: mediumText,

@@ -1,3 +1,5 @@
+import type { GenreComposition, NarrativeGenre } from "./genre-composition";
+
 export const GENRES = [
   "都市脑洞",
   "玄幻/仙侠",
@@ -185,7 +187,7 @@ export interface AestheticProfileSuggestion {
   rationale: string[];
 }
 
-export interface StoryContract {
+export interface StoryContract extends GenreComposition {
   premise: string;
   genreSubtype?: string;
   fanqieCategoryKey?: string;
@@ -455,12 +457,14 @@ export interface ConceptCandidate {
   originalityRisk: "低" | "中" | "高";
 }
 
-export interface BookConceptInput {
+export interface BookConceptInput extends GenreComposition {
   genre: Genre;
   targetWords: number;
   updateCadence: string;
   seed: string;
 }
+
+export type { NarrativeGenre };
 
 export interface BookConceptCandidate {
   id: string;
@@ -478,7 +482,7 @@ export interface BookConceptCandidate {
   longFormEngine: string;
 }
 
-export interface CreateProjectInput {
+export interface CreateProjectInput extends GenreComposition {
   title: string;
   genre: Genre;
   targetWords: number;

@@ -56,6 +56,7 @@ import { AutosaveCoordinator, chapterDraftSignature, clearRecoveredChapter, read
 import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
 import type { GenrePluginDefinition } from "../shared/genre-plugins";
 import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
+import { GENRE_ELEMENT_GROUPS, NARRATIVE_GENRES } from "../shared/genre-composition";
 import {
   Badge,
   Button,
@@ -671,6 +672,9 @@ function LightbulbIcon() {
 function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
   const normalizeContract = (value: StoryContract): StoryContract => ({
     ...value,
+    secondaryGenres: value.secondaryGenres ?? [],
+    genreElements: value.genreElements ?? [],
+    customGenreDirection: value.customGenreDirection ?? "",
     aestheticProfile: normalizeAestheticProfile(value.aestheticProfile),
   });
   const [contract, setContract] = useState<StoryContract>(() => normalizeContract(project.contract));
@@ -766,7 +770,7 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
               setContract((current) => ({
                 ...current,
                 fanqieCategoryKey: event.target.value,
-                genreSubtype: profile?.recommendedSubtype ?? current.genreSubtype,
+                genreSubtype: current.genreSubtype || profile?.recommendedSubtype || "",
               }));
             }}
           >
@@ -790,17 +794,19 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
         )}
         <Field
           label="题材子类型"
-          hint="决定本项目优先使用的核心幻想、目标受众和禁忌边界"
+          hint="可采用推荐项，也可输入更贴合作品的原创概括"
         >
-          <Select
+          <Input
+            list="genre-subtype-options"
             value={contract.genreSubtype ?? ""}
             onChange={(event) => set("genreSubtype", event.target.value)}
-          >
-            <option value="">尚未选择</option>
+            placeholder="例如：医疗探案、宗门经营、职场群像"
+          />
+          <datalist id="genre-subtype-options">
             {genrePlugin.subtypes.map((subtype) => (
-              <option key={subtype.name}>{subtype.name}</option>
+              <option key={subtype.name} value={subtype.name} />
             ))}
-          </Select>
+          </datalist>
         </Field>
         {contract.genreSubtype &&
           genrePlugin.subtypes.find(
@@ -830,6 +836,21 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
               })()}
             </div>
           )}
+        <div className="genre-composer contract-genre-composer">
+          <Field label="复合叙事类型" hint="最多选择 3 项；只描述故事如何运转，不改变平台分类">
+            <div className="genre-option-grid">
+              {NARRATIVE_GENRES.map((genre) => <label key={genre} className="check-row"><input type="checkbox" checked={contract.secondaryGenres?.includes(genre) ?? false} disabled={!(contract.secondaryGenres?.includes(genre)) && (contract.secondaryGenres?.length ?? 0) >= 3} onChange={() => setContract((current) => { const selected = current.secondaryGenres ?? []; return { ...current, secondaryGenres: selected.includes(genre) ? selected.filter((item) => item !== genre) : [...selected, genre] }; })} />{genre}</label>)}
+            </div>
+          </Field>
+          {GENRE_ELEMENT_GROUPS.map((group) => <Field key={group.label} label={group.label} hint="按需选择，规则编译时不会要求全部同时出现">
+            <div className="genre-option-grid">
+              {group.elements.map((element) => <label key={element} className="check-row"><input type="checkbox" checked={contract.genreElements?.includes(element) ?? false} disabled={!(contract.genreElements?.includes(element)) && (contract.genreElements?.length ?? 0) >= 8} onChange={() => setContract((current) => { const selected = current.genreElements ?? []; return { ...current, genreElements: selected.includes(element) ? selected.filter((item) => item !== element) : [...selected, element] }; })} />{element}</label>)}
+            </div>
+          </Field>)}
+          <Field label="自定义创作方向" hint="优先于题材惯例，用来写混合逻辑、反套路方向和明确边界">
+            <Textarea rows={3} value={contract.customGenreDirection ?? ""} onChange={(event) => set("customGenreDirection", event.target.value)} placeholder="例如：以基层医疗案件推动群像成长，不使用系统，不把恋爱作为主线" />
+          </Field>
+        </div>
         <div className="form-grid two">
           <Field label="故事前提">
             <Textarea
