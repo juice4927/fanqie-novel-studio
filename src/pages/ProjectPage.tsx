@@ -1138,7 +1138,7 @@ function PlanningPage({ project, api, reload, notify }: CommonProjectProps) {
             )}
             <div className="planning-ai-summary">
               <strong>{aiInput.mode === "全书结构" ? "输出：六阶段 + 分卷" : `输出：第${aiInput.fromChapter}–${(aiInput.fromChapter ?? 1) + (aiInput.chapterCount ?? 10) - 1}章`}</strong>
-              <p>{aiInput.mode === "全书结构" ? "每个节点包含目标、核心矛盾、预期结果和目标字数。" : "同步建立滚动粗纲、逐章细纲、章节承诺、回报、危机、章末期待和兑现目标章。"}</p>
+              <p>{aiInput.mode === "全书结构" ? "每个节点包含目标、核心矛盾、预期结果和目标字数。" : "同步建立滚动粗纲、逐章细纲、每章三张场景卡，以及章节承诺、回报、危机、章末期待和兑现目标章。"}</p>
             </div>
             <div className="modal-actions">
               <Button variant="secondary" disabled={aiBusy} onClick={() => setAiModal(false)}>取消</Button>
@@ -1147,7 +1147,7 @@ function PlanningPage({ project, api, reload, notify }: CommonProjectProps) {
                 try {
                   const result = await api.generatePlanningDraft(project.summary.id, aiInput);
                   await reload(); setAiModal(false);
-                  notify(result.chapters.length ? `已生成 ${result.chapters.length} 章章纲和 ${result.plans.length} 个规划草稿` : `已生成 ${result.plans.length} 个全书结构草稿`);
+                  notify(result.chapters.length ? `已生成 ${result.chapters.length} 章章纲、细纲和场景卡，共 ${result.plans.length} 个规划草稿` : `已生成 ${result.plans.length} 个全书结构草稿`);
                 } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
                 finally { setAiBusy(false); }
               }}>{aiBusy ? "生成中" : "生成草稿"}</Button>

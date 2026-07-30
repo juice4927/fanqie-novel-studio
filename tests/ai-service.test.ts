@@ -103,10 +103,13 @@ describe("AI planning", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ batchGoal: "建立首个可以持续运转的生产小组", batchConflict: "原料渠道与家庭阻力同时升级并形成选择", batchOutcome: "获得稳定订单并建立明确的合作规则", chapters }) } }] }), { status: 200 })));
     const result = await new AiService(planningDatabase(), () => "secret").generatePlanning(planningProject, { mode: "后续章纲", fromChapter: 6, chapterCount: 10 });
     expect(result.chapters).toHaveLength(10);
-    expect(result.plans).toHaveLength(11);
+    expect(result.plans).toHaveLength(41);
     expect(result.chapters[0]).toMatchObject({ number: 6, status: "章纲", expectationTargetChapter: 8 });
     expect(result.chapters[9]).toMatchObject({ number: 15, isKeyChapter: true, batchMode: "逐章" });
     expect(result.plans[0]).toMatchObject({ kind: "粗纲", ordinal: 6, status: "草稿" });
+    expect(result.plans.filter((plan) => plan.kind === "细纲")).toHaveLength(10);
+    expect(result.plans.filter((plan) => plan.kind === "场景卡")).toHaveLength(30);
+    expect(result.plans.find((plan) => plan.kind === "场景卡")).toMatchObject({ parentId: result.plans[1].id, status: "草稿" });
   });
 
   it("rejects an incomplete chapter batch before anything can be saved", async () => {

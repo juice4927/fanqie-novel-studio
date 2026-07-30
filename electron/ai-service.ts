@@ -178,6 +178,7 @@ export class AiService {
     system: string;
     user: string;
     schema: z.ZodType<T>;
+    timeoutMs?: number;
   }): Promise<T> {
     const settings = this.database.getAiSettings();
     const apiKey = this.getApiKey();
@@ -194,7 +195,8 @@ export class AiService {
       try {
         const endpoint = `${settings.baseUrl.replace(/\/$/, "")}/chat/completions`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+        const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
         let response: Response;
         try {
           response = await fetch(endpoint, {
@@ -212,12 +214,16 @@ export class AiService {
           }),
           });
         } catch (error) {
-          if (controller.signal.aborted) throw new Error(`模型请求超时（${Math.ceil(this.requestTimeoutMs / 1000)} 秒）`);
+          if (controller.signal.aborted) throw new Error(`模型请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`);
           throw error;
         } finally {
           clearTimeout(timeout);
         }
-        if (!response.ok) throw new Error(`模型接口返回 ${response.status}: ${(await response.text()).slice(0, 300)}`);
+        if (!response.ok) {
+          const detail = (await response.text()).slice(0, 300);
+          if ([429, 502, 503, 504].includes(response.status)) throw new Error(`模型服务暂时不可用 ${response.status}: ${detail}`);
+          throw new Error(`模型接口返回 ${response.status}: ${detail}`);
+        }
         const body = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
         const raw = body.choices?.[0]?.message?.content;
         if (!raw) throw new Error("模型没有返回内容");
@@ -230,6 +236,8 @@ export class AiService {
           this.database.finishAiJob(jobId, "", lastError);
           throw new Error(lastError);
         }
+        if (lastError.startsWith("模型服务暂时不可用") && attempt < 2)
+          await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
         repairInstruction = `\n上一次输出校验失败：${lastError}。请修复结构并重新输出完整 JSON。`;
       }
     }
@@ -337,6 +345,7 @@ export class AiService {
         system: "你是中国商业网文总编。根据已审批契约规划六阶段和分卷，只细化结构，不写正文。阶段必须依次覆盖开篇、追读、扩张、中期、高潮、收束；总字数接近项目目标，冲突和回报逐层升级，终局必须兑现契约。",
         user: `${shared}\n输出 stages（必须6项）和 volumes（3至6项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。不得照抄商业规则文字。`,
         schema: StructurePlanningSchema,
+        timeoutMs: 300_000,
       });
       return {
         startChapter: 1,
@@ -353,6 +362,7 @@ export class AiService {
       system: "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。每章必须承接上一章状态，包含目标、阻碍、主动行动、结果影响和自然续读问题；回报类型要变化，禁止连续重复打脸、误会或突发事故。",
       user: `${shared}\n从第${startChapter}章开始，严格输出${count}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
       schema: ChapterPlanningSchema,
+      timeoutMs: 300_000,
     });
     if (result.chapters.length !== count) throw new Error(`模型返回 ${result.chapters.length} 章，预期 ${count} 章，请重试`);
     const roughPlan = { id: randomUUID(), kind: "粗纲" as const, title: `第${startChapter}–${startChapter + count - 1}章滚动粗纲`, ordinal: startChapter, goal: result.batchGoal, conflict: result.batchConflict, outcome: result.batchOutcome, targetWords: count * 2300, status: "草稿" as const, parentId: null };
@@ -361,7 +371,16 @@ export class AiService {
       return { id: randomUUID(), number, title: item.title, outline: `目标：${item.goal}；冲突：${item.conflict}；结果：${item.outcome}`, content: "", wordCount: 0, status: "章纲" as const, batchMode: item.isKeyChapter ? "逐章" as const : "五章批次" as const, isKeyChapter: item.isKeyChapter, chapterPromise: item.chapterPromise, expectedPayoff: item.expectedPayoff, crisis: item.crisis, endingExpectation: item.endingExpectation, expectationTargetChapter: number + item.payoffOffset, revision: 0, updatedAt: now() };
     });
     const detailPlans = result.chapters.map((item, index) => ({ id: randomUUID(), kind: "细纲" as const, title: `第${startChapter + index}章 ${item.title}`, ordinal: startChapter + index, goal: item.goal, conflict: item.conflict, outcome: item.outcome, targetWords: 2300, status: "草稿" as const, parentId: roughPlan.id }));
-    return { startChapter, plans: [roughPlan, ...detailPlans], chapters };
+    const scenePlans = result.chapters.flatMap((item, index) => {
+      const number = startChapter + index;
+      const parentId = detailPlans[index].id;
+      return [
+        { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·入场与压力`, ordinal: number * 10 + 1, goal: `让主角明确并主动推进：${item.goal}`, conflict: item.crisis, outcome: "落下本章必须处理的具体压力与第一步行动", targetWords: 700, status: "草稿" as const, parentId },
+        { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·对抗与选择`, ordinal: number * 10 + 2, goal: "让行动遭遇有效反作用，并迫使主角作出有代价的选择", conflict: item.conflict, outcome: item.outcome, targetWords: 900, status: "草稿" as const, parentId },
+        { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·回报与转向`, ordinal: number * 10 + 3, goal: `兑现或推进：${item.expectedPayoff}`, conflict: "回报必须改变人物、关系、资源或局势，不能停在口头胜利", outcome: `${item.outcome}；章末转向：${item.endingExpectation}`, targetWords: 700, status: "草稿" as const, parentId },
+      ];
+    });
+    return { startChapter, plans: [roughPlan, ...detailPlans, ...scenePlans], chapters };
   }
 
   async draftChapter(projectId: string, chapter: Chapter, context: ContextPackage): Promise<Chapter> {
