@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { load } from "cheerio";
-import type { MarketOpportunity, RankingAnalytics, RankingEntry, RankingSnapshot } from "../src/shared/types";
+import { GENRES, type MarketOpportunity, type RankingAnalytics, type RankingEntry, type RankingSnapshot } from "../src/shared/types";
 import { FANQIE_CATEGORY_PROFILES } from "../src/shared/fanqie-taxonomy";
 
 function parseCompactNumber(value: string) {
@@ -16,21 +16,150 @@ function clean(value: string) {
 const PUBLIC_PAGE_LIMIT = 5_000_000;
 const FANQIE_BOOK_LIMIT = 20;
 const FANQIE_CONCURRENCY = 4;
+const FANQIE_OPENING_CHAPTER_LIMIT = 10;
+const PUBLIC_PAGE_TIMEOUT_MS = 30_000;
 
-async function fetchPublicHtml(url: URL) {
-  const response = await fetch(url, {
-    redirect: "follow",
-    headers: {
-      "User-Agent": "NovelStudio/0.1 public-metadata-reader",
-      Accept: "text/html,application/xhtml+xml",
-    },
+// Fanqie's public reader uses a fixed Source Han Sans subset with remapped codepoints.
+// Keep the mapping local so public chapter text is never sent to a third-party decoder.
+const FANQIE_ENCODED_CHARS = "";
+const FANQIE_DECODED_CHARS = "D在主特家军然表场4要只v和6别还g现儿岁此象月3出战工相o男直失世F都平文什VO将真T那当会立些u是十张学气大爱两命全后东性通被1它乐接而感车山公了常以何可话先pi叫轻M士w着变尔快l个说少色里安花远7难师放t报认面道S克地度I好机U民写把万同水新没书电吃像斯5为y白几日教看但第加候作上拉住有法r事应位利你声身国问马女他Y比父xAHNsX边美对所金活回意到z从j知又内因点Q三定8Rb正或夫向德听更得告并本q过记L让打f人就者去原满体做经K走如孩cG给使物最笑部员等受k行一条果动光门头见往自解成处天能于名其发总母的死手入路进心来h时力多开已许d至由很界n小与Z想代么分生口再妈望次西风种带J实情才这E我神格长觉间年眼无不亲关结0友信下却重己老2音字m呢明之前高PB目太e9起稜她也W用方子英每理便四数期中C外样a海们任";
+const FANQIE_CHAR_MAP = new Map([...FANQIE_ENCODED_CHARS].map((char, index) => [char, [...FANQIE_DECODED_CHARS][index]]));
+
+export interface PublicOpeningSample {
+  title: string;
+  author: string;
+  sourceUrl: string;
+  chapters: Array<{ title: string; content: string; wordCount: number }>;
+}
+
+export async function fetchPublicHtml(url: URL, options: { timeoutMs?: number; attempts?: number } = {}) {
+  const attempts = Math.max(1, options.attempts ?? 2);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, options.timeoutMs ?? PUBLIC_PAGE_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        redirect: "follow",
+        headers: {
+          "User-Agent": "NovelStudio/0.1 public-metadata-reader",
+          Accept: "text/html,application/xhtml+xml",
+        },
+      });
+      if (!response.ok) throw new Error(`公开页返回 HTTP ${response.status}`);
+      const length = Number(response.headers.get("content-length") ?? 0);
+      if (length > PUBLIC_PAGE_LIMIT) throw new Error("公开页超过 5MB 安全限制");
+      if (!response.body) return "";
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let bytes = 0;
+      let html = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > PUBLIC_PAGE_LIMIT) {
+          controller.abort();
+          throw new Error("公开页超过 5MB 安全限制");
+        }
+        html += decoder.decode(value, { stream: true });
+      }
+      return html + decoder.decode();
+    } catch (error) {
+      lastError = timedOut ? new Error(`公开页请求超时（${Math.ceil((options.timeoutMs ?? PUBLIC_PAGE_TIMEOUT_MS) / 1000)} 秒）`) : error;
+      const message = lastError instanceof Error ? lastError.message : String(lastError);
+      if (/HTTP 4\d\d|超过 5MB/.test(message) || attempt === attempts - 1) throw lastError;
+      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw lastError;
+}
+
+export function decodeFanqiePublicText(value: string) {
+  return [...value].map((char) => FANQIE_CHAR_MAP.get(char) ?? char).join("");
+}
+
+function fanqieReaderState($: ReturnType<typeof load>) {
+  const script = $("script").map((_index, element) => $(element).html() ?? "").get()
+    .find((value) => value.includes("window.__INITIAL_STATE__="));
+  const marker = "window.__INITIAL_STATE__=";
+  const start = script ? script.indexOf(marker) + marker.length : -1;
+  if (!script || start < marker.length) throw new Error("公开阅读页缺少章节状态");
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  let end = -1;
+  for (let index = start; index < script.length; index += 1) {
+    const char = script[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}" && --depth === 0) { end = index + 1; break; }
+  }
+  if (end < 0) throw new Error("公开阅读页章节状态不完整");
+  return JSON.parse(script.slice(start, end)) as {
+    reader?: { chapterData?: { needPay?: number; order?: string; title?: string } };
+  };
+}
+
+export async function captureFanqieOpeningSample(sourceUrl: string): Promise<PublicOpeningSample> {
+  const detailUrl = new URL(sourceUrl);
+  if (!(detailUrl.hostname === "fanqienovel.com" || detailUrl.hostname.endsWith(".fanqienovel.com")) || !detailUrl.pathname.startsWith("/page/"))
+    throw new Error("只支持番茄小说官方详情页");
+  const detailHtml = await fetchPublicHtml(detailUrl);
+  const detail = load(detailHtml);
+  const title = fanqieBookTitle(detail);
+  if (!title) throw new Error("番茄详情页缺少书名");
+  const author = clean(detail(".author-name-text").first().text()) || clean(detail(".author-name").first().text()) || "未知";
+  const discoveredLinks = detail('a[href*="/reader/"]').map((_index, element) => {
+    const label = clean(detail(element).text());
+    const order = Number(label.match(/^第\s*(\d+)\s*章/)?.[1]);
+    const href = detail(element).attr("href");
+    return href && order >= 1 && order <= FANQIE_OPENING_CHAPTER_LIMIT
+      ? { order, url: new URL(href, detailUrl) }
+      : null;
+  }).get().filter((item): item is { order: number; url: URL } => item !== null);
+  const byOrder = new Map(discoveredLinks.map((item) => [item.order, item]));
+  const links = Array.from({ length: FANQIE_OPENING_CHAPTER_LIMIT }, (_value, index) => byOrder.get(index + 1));
+  if (links.some((item) => !item)) throw new Error("详情页未完整提供公开的前 10 章");
+
+  const chapters = await mapWithConcurrency(links as Array<{ order: number; url: URL }>, 3, async ({ order, url }) => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const html = await fetchPublicHtml(url, { attempts: 1 });
+        const page = load(html);
+        const chapterData = fanqieReaderState(page).reader?.chapterData;
+        if (!chapterData || Number(chapterData.needPay ?? 1) !== 0)
+          throw new Error(`第 ${order} 章需要登录或付费，已停止读取`);
+        if (Number(chapterData.order) !== order) throw new Error(`第 ${order} 章返回了不一致的章节序号`);
+        const paragraphs = page(".muye-reader-content p").map((_index, element) => clean(page(element).text())).get().filter(Boolean);
+        const content = decodeFanqiePublicText(paragraphs.join("\n"));
+        if (!content || /[\uE000-\uF8FF]/.test(content)) throw new Error(`第 ${order} 章公开正文无法可靠识别`);
+        return {
+          title: clean(chapterData.title ?? "") || `第${order}章`,
+          content,
+          wordCount: content.replace(/\s/g, "").length,
+        };
+      } catch (error) {
+        if (error instanceof Error && /登录或付费/.test(error.message)) throw error;
+        lastError = error;
+      }
+    }
+    throw new Error(`第 ${order} 章读取失败：${lastError instanceof Error ? lastError.message : String(lastError)}`);
   });
-  if (!response.ok) throw new Error(`公开页返回 HTTP ${response.status}`);
-  const length = Number(response.headers.get("content-length") ?? 0);
-  if (length > PUBLIC_PAGE_LIMIT) throw new Error("公开页超过 5MB 安全限制");
-  const html = await response.text();
-  if (html.length > PUBLIC_PAGE_LIMIT) throw new Error("公开页超过 5MB 安全限制");
-  return html;
+  if (chapters.length < FANQIE_OPENING_CHAPTER_LIMIT)
+    throw new Error(`公开开篇仅识别到 ${chapters.length} 章，未保存不完整样本`);
+  return { title, author, sourceUrl: detailUrl.toString(), chapters };
 }
 
 function fanqieBookTitle($: ReturnType<typeof load>) {
@@ -60,7 +189,8 @@ export function parseFanqieDetailPage(
   const synopsis = description
     .replace(new RegExp(`^番茄小说提供${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}完整版在线免费阅读，精彩小说尽在番茄小说网。`), "")
     .trim();
-  const readerHref = $("a[href*='/reader/']").first().attr("href");
+  const readerHref = $("a[href*='/reader/']").filter((_index, element) => /^第\s*1\s*章/.test(clean($(element).text()))).first().attr("href")
+    ?? $("a[href*='/reader/']").first().attr("href");
   return {
     id: randomUUID(),
     snapshotId,
@@ -73,7 +203,7 @@ export function parseFanqieDetailPage(
     tags,
     sourceUrl: detailUrl.toString(),
     synopsis,
-    officialReaderUrl: officialReaderUrl || (readerHref ? new URL(readerHref, detailUrl).toString() : undefined),
+    officialReaderUrl: readerHref ? new URL(readerHref, detailUrl).toString() : officialReaderUrl,
     platform: "番茄小说",
   };
 }
@@ -262,6 +392,7 @@ export function analyzeRankings(snapshots: RankingSnapshot[]): RankingAnalytics 
     const uncertainty = list.length >= 7 ? 8 : list.length >= 3 ? 13 : 20;
     const scoreRange: [number, number] | null = score === null ? null : [Math.max(0, score - uncertainty), Math.min(100, score + uncertainty)];
     const profile = profileForList(listName);
+    const inferredGenre: MarketOpportunity["genre"] = GENRES.find((genre) => latestEntries.some((entry) => entry.genre === genre)) ?? "待校对";
     const confidence: MarketOpportunity["confidence"] = list.length >= 7 ? "高" : list.length >= 3 ? "中" : "低";
     const sampleWarning = list.length === 1 ? "仅有一次快照，只能建立榜单基线，不能判断趋势。" : list.length === 2 ? "仅有两个时间点，变化可能来自短期波动。" : list.length < 7 ? "样本尚未覆盖完整周周期，结论需继续复核。" : null;
     const recommendation = score === null
@@ -275,7 +406,7 @@ export function analyzeRankings(snapshots: RankingSnapshot[]): RankingAnalytics 
       listName,
       categoryKey: profile?.key,
       categoryName: profile?.name ?? listName,
-      genre: profile?.genre ?? "都市脑洞",
+      genre: profile?.genre ?? inferredGenre,
       snapshots: list.length,
       latestSampleSize: latestEntries.length,
       newEntrantRate: Math.round(newRate * 100),

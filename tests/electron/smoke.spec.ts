@@ -54,7 +54,12 @@ test("starts the packaged Windows application", async () => {
   const workspace = mkdtempSync(path.join(os.tmpdir(), "novel-packaged-smoke-"));
   const application = await electron.launch({
     executablePath,
-    env: { ...process.env, NODE_ENV: "test", NOVEL_STUDIO_WORKSPACE: workspace },
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      NOVEL_STUDIO_WORKSPACE: workspace,
+      NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK: "1",
+    },
   });
   try {
     const page = await application.firstWindow();

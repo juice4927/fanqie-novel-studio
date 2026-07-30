@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
+  AestheticProfileSuggestion,
   Chapter,
   BookConceptCandidate,
   BookConceptInput,
@@ -20,9 +21,11 @@ import type {
 import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
 import { WorkspaceDatabase, now } from "./database";
 import { compileCommercialGuidance, compileDeconstructionFramework } from "../src/shared/commercial-knowledge";
-import { inferProviderCapabilities, parseProviderUsage, providerError, rejectsJsonMode } from "./ai-provider";
+import { aiEndpoint, inferProviderCapabilities, JsonStringFieldExtractor, normalizeProviderUrl, parseProviderUsage, parseResponsesOutput, providerError, readChatCompletionStream, readResponsesStream, rejectsJsonMode, rejectsStreaming, usesResponsesApi } from "./ai-provider";
 import { PROMPT_VERSION } from "../src/shared/prompt-version";
 import { contextForModel } from "../src/shared/context-diagnostics";
+import { parseStoryNumber } from "../src/shared/story-constraints";
+import { compileAestheticGuidance } from "../src/shared/aesthetic-profile";
 
 export function abortableDelay(milliseconds: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -96,6 +99,20 @@ const DraftSchema = z.object({
   content: z.string().min(500),
 });
 
+const AestheticProfileSuggestionSchema = z.object({
+  profile: z.object({
+    narrativeDistance: z.enum(["贴身", "适中", "远距"]),
+    emotionalTemperature: z.enum(["冷峻", "克制", "均衡", "热烈"]),
+    proseTexture: z.string().min(2).max(300),
+    dialogueStyle: z.string().min(2).max(300),
+    emotionalExpression: z.string().min(2).max(300),
+    signatureTechniques: z.array(z.string().min(2).max(120)).min(2).max(8),
+    avoidPatterns: z.array(z.string().min(2).max(120)).min(2).max(8),
+  }),
+  diagnosis: z.string().min(10).max(600),
+  rationale: z.array(z.string().min(4).max(240)).min(2).max(6),
+});
+
 const QualityReviewSchema = z.object({
   issues: z.array(z.object({
     severity: z.enum(["硬性", "警告", "建议"]),
@@ -141,6 +158,8 @@ const ChapterPlanningSchema = z.object({
 });
 
 type InsightResult = z.infer<typeof InsightSchema>;
+const DECONSTRUCT_BATCH_SIZE = 5;
+const CHAPTER_PLANNING_BATCH_SIZE = 10;
 
 function insightText(insight: InsightResult) {
   return `读者需求：${insight.audienceNeed}\n开篇承诺：${insight.openingPromise}\n冲突发动机：${insight.conflictEngine}\n情绪节奏：${insight.emotionalRhythm}\n留存手段：${insight.retentionDevices}\n长篇发动机：${insight.longFormEngine}\n市场空位：${insight.marketGap}\n风险：${insight.risks}`;
@@ -200,6 +219,8 @@ export class AiService {
     private readonly database: WorkspaceDatabase,
     private readonly getApiKey: () => string,
     private readonly requestTimeoutMs = 120_000,
+    private readonly longTaskTimeoutOverrideMs = 0,
+    private readonly log: (level: "info" | "warn" | "error", event: string, data: Record<string, unknown>) => void = () => {},
   ) {}
 
   cancelJob(id: string) {
@@ -219,137 +240,291 @@ export class AiService {
     schema: z.ZodType<T>;
     timeoutMs?: number;
     retryContext?: string;
+    stream?: boolean;
+    longTask?: boolean;
+    reasoningEffort?: "low" | "medium" | "high";
+    onAttempt?: (attempt: number) => void;
+    onDelta?: (delta: string, attempt: number) => void;
   }): Promise<T> {
     const settings = this.database.getAiSettings();
     const apiKey = this.getApiKey();
     if (!apiKey) throw new Error("尚未配置 AI API 密钥");
+    const provider = normalizeProviderUrl(settings.baseUrl);
     const inputHash = hashInput(`${options.system}\n${options.user}`);
-    const cached = this.database.findAiJob(options.taskType, inputHash, PROMPT_VERSION, settings.model);
+    const cached = this.database.findAiJob(options.taskType, inputHash, PROMPT_VERSION, provider, settings.model);
     if (cached) return options.schema.parse(JSON.parse(cached));
     const jobId = this.database.startAiJob(
-      options.projectId, options.taskType, inputHash, PROMPT_VERSION, settings.baseUrl, settings.model, options.inputSummary,
+      options.projectId, options.taskType, inputHash, PROMPT_VERSION, provider, settings.model, options.inputSummary,
       options.retryContext,
     );
     const startedAt = Date.now();
     let lastError = "模型输出不符合结构要求";
     let repairInstruction = "";
-    let useJsonMode = inferProviderCapabilities(settings.baseUrl).jsonMode;
+    const useResponses = usesResponsesApi(settings.model);
+    let useJsonMode = !useResponses && inferProviderCapabilities(settings.baseUrl).jsonMode;
+    let useStreaming = options.stream ?? false;
+    let includeStreamUsage = useStreaming;
     let usage = { inputTokens: 0, outputTokens: 0 };
+    let headersAt: string | null = null;
+    let firstTokenAt: string | null = null;
+    let chunkCount = 0;
+    let attemptCount = 0;
     const controller = new AbortController();
+    const configuredLongTimeoutMs = Math.min(15, Math.max(5, settings.longTaskTimeoutMinutes ?? 10)) * 60_000;
+    const timeoutMs = options.timeoutMs ?? (options.longTask ? this.longTaskTimeoutOverrideMs || configuredLongTimeoutMs : this.requestTimeoutMs);
+    const deadline = startedAt + timeoutMs;
+    const responseSchema = useResponses ? (() => {
+      const { $schema: _metaSchema, ...schema } = z.toJSONSchema(options.schema) as Record<string, unknown>;
+      return {
+        type: "json_schema",
+        name: options.taskType.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "structured_response",
+        strict: true,
+        schema,
+      };
+    })() : null;
     this.activeRequests.set(jobId, controller);
+    const telemetry = (status?: "失败" | "已取消") => ({
+      ...usage,
+      actualCost: usage.inputTokens / 1_000_000 * settings.inputPricePerMillion + usage.outputTokens / 1_000_000 * settings.outputPricePerMillion,
+      durationMs: Date.now() - startedAt,
+      status,
+      headersAt,
+      firstTokenAt,
+      completedAt: new Date().toISOString(),
+      chunkCount,
+      attemptCount,
+    });
+    const persistLiveTelemetry = () => this.database.updateAiJobTelemetry?.(jobId, { headersAt, firstTokenAt, chunkCount, attemptCount });
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      let attemptStartedAt = Date.now();
       try {
-        const endpoint = `${settings.baseUrl.replace(/\/$/, "")}/chat/completions`;
-        const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
-        let timedOut = false;
-        const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
-        let response: Response;
+        const endpoint = aiEndpoint(settings.baseUrl, settings.model);
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) throw new Error(`模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`);
+        let timeoutError = "";
+        const totalTimeout = setTimeout(() => { timeoutError = `模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`; controller.abort(); }, remainingMs);
+        let idleTimeout: ReturnType<typeof setTimeout> | null = null;
+        const resetIdleTimeout = () => {
+          if (!useStreaming) return;
+          if (idleTimeout) clearTimeout(idleTimeout);
+          const idleMs = Math.min(options.longTask ? 180_000 : 90_000, remainingMs);
+          idleTimeout = setTimeout(() => { timeoutError = `模型请求超时：流式响应连续 ${Math.ceil(idleMs / 1000)} 秒无数据`; controller.abort(); }, idleMs);
+        };
+        resetIdleTimeout();
+        attemptCount += 1;
+        const httpAttempt = attemptCount;
+        attemptStartedAt = Date.now();
+        let attemptChunkCount = 0;
+        let attemptFirstContentAt: string | null = null;
+        options.onAttempt?.(httpAttempt);
+        const contentExtractor = options.onDelta
+          ? new JsonStringFieldExtractor("content", (delta) => options.onDelta?.(delta, httpAttempt))
+          : null;
+        this.log("info", "ai.request.attempt_started", { jobId, taskType: options.taskType, attempt: httpAttempt, endpoint, streaming: useStreaming });
         try {
-          response = await fetch(endpoint, {
-          method: "POST",
-          signal: controller.signal,
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({
-            model: settings.model,
-            temperature: options.taskType === "draft-chapter" ? 0.85 : 0.35,
-            ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
-            messages: [
-              { role: "system", content: `${options.system}\n只返回合法 JSON，不使用 Markdown。` },
-              { role: "user", content: `${options.user}${repairInstruction}` },
-            ],
-          }),
+          const response = await fetch(endpoint, {
+            method: "POST",
+            signal: controller.signal,
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify(useResponses ? {
+              model: settings.model,
+              reasoning: { effort: options.reasoningEffort ?? "medium" },
+              ...(useStreaming ? { stream: true } : {}),
+              instructions: `${options.system}\n只返回合法 JSON，不使用 Markdown。`,
+              input: `${options.user}${repairInstruction}`,
+              text: { format: responseSchema },
+            } : {
+              model: settings.model,
+              temperature: options.taskType === "draft-chapter" ? 0.85 : 0.35,
+              ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
+              ...(useStreaming ? { stream: true } : {}),
+              ...(useStreaming && includeStreamUsage ? { stream_options: { include_usage: true } } : {}),
+              messages: [
+                { role: "system", content: `${options.system}\n只返回合法 JSON，不使用 Markdown。` },
+                { role: "user", content: `${options.user}${repairInstruction}` },
+              ],
+            }),
           });
+          const currentHeadersAt = new Date().toISOString();
+          headersAt ??= currentHeadersAt;
+          persistLiveTelemetry();
+          this.log("info", "ai.request.headers_received", {
+            jobId, taskType: options.taskType, attempt: httpAttempt, status: response.status,
+            headersLatencyMs: Date.now() - attemptStartedAt,
+          });
+          if (!response.ok) {
+            const detail = (await response.text()).slice(0, 300);
+            if (!useResponses && includeStreamUsage && response.status === 400 && /stream.?options|include.?usage/i.test(detail)) {
+              this.log("warn", "ai.request.compatibility_retry", { jobId, taskType: options.taskType, attempt: httpAttempt, reason: "stream_options unsupported" });
+              includeStreamUsage = false;
+              attempt -= 1;
+              continue;
+            }
+            if (useStreaming && rejectsStreaming(response.status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", { jobId, taskType: options.taskType, attempt: httpAttempt, reason: "streaming unsupported" });
+              useStreaming = false;
+              includeStreamUsage = false;
+              attempt -= 1;
+              continue;
+            }
+            if (useJsonMode && rejectsJsonMode(response.status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", { jobId, taskType: options.taskType, attempt: httpAttempt, reason: "JSON mode unsupported" });
+              useJsonMode = false;
+              attempt -= 1;
+              continue;
+            }
+            throw new Error(providerError(response.status, detail));
+          }
+          let raw: string;
+          if (useStreaming && /text\/event-stream/i.test(response.headers.get("content-type") ?? "")) {
+            const onActivity = () => { chunkCount += 1; attemptChunkCount += 1; resetIdleTimeout(); };
+            const onContent = (delta: string) => {
+              if (!attemptFirstContentAt) {
+                attemptFirstContentAt = new Date().toISOString();
+                this.log("info", "ai.request.first_content", {
+                  jobId, taskType: options.taskType, attempt: httpAttempt, ttftMs: Date.now() - attemptStartedAt,
+                });
+              }
+              if (!firstTokenAt) {
+                firstTokenAt = attemptFirstContentAt;
+                persistLiveTelemetry();
+              }
+              contentExtractor?.push(delta);
+            };
+            const streamed = useResponses
+              ? await readResponsesStream(response, onActivity, onContent)
+              : await readChatCompletionStream(response, onActivity, onContent);
+            raw = streamed.content;
+            usage = streamed.usage;
+          } else {
+            const body = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }>; choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } };
+            usage = parseProviderUsage(body);
+            raw = useResponses ? parseResponsesOutput(body) : body.choices?.[0]?.message?.content ?? "";
+          }
+          if (!raw) throw new Error("模型没有返回内容");
+          const parsed = options.schema.parse(JSON.parse(stripCodeFence(raw)));
+          this.database.finishAiJob(jobId, JSON.stringify(parsed), undefined, telemetry());
+          this.log("info", "ai.request.attempt_completed", {
+            jobId, taskType: options.taskType, attempt: httpAttempt, durationMs: Date.now() - attemptStartedAt,
+            chunkCount: attemptChunkCount, totalChunkCount: chunkCount, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+          });
+          this.activeRequests.delete(jobId);
+          return parsed;
         } catch (error) {
           if (controller.signal.aborted) {
             if (this.cancelledJobs.has(jobId)) throw new Error("任务已取消");
-            if (timedOut) throw new Error(`模型请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`);
+            if (timeoutError) throw new Error(timeoutError);
           }
           throw error;
         } finally {
-          clearTimeout(timeout);
+          clearTimeout(totalTimeout);
+          if (idleTimeout) clearTimeout(idleTimeout);
         }
-        if (!response.ok) {
-          const detail = (await response.text()).slice(0, 300);
-          if (useJsonMode && rejectsJsonMode(response.status, detail)) {
-            useJsonMode = false;
-            attempt -= 1;
-            continue;
-          }
-          throw new Error(providerError(response.status, detail));
-        }
-        const body = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } };
-        usage = parseProviderUsage(body);
-        const raw = body.choices?.[0]?.message?.content;
-        if (!raw) throw new Error("模型没有返回内容");
-        const parsed = options.schema.parse(JSON.parse(stripCodeFence(raw)));
-        this.database.finishAiJob(jobId, JSON.stringify(parsed), undefined, {
-          ...usage,
-          actualCost: usage.inputTokens / 1_000_000 * settings.inputPricePerMillion + usage.outputTokens / 1_000_000 * settings.outputPricePerMillion,
-          durationMs: Date.now() - startedAt,
-        });
-        this.activeRequests.delete(jobId);
-        return parsed;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
+        this.log("error", "ai.request.attempt_failed", {
+          jobId, taskType: options.taskType, attempt: attemptCount, durationMs: Date.now() - startedAt, error: lastError,
+          attemptDurationMs: Date.now() - attemptStartedAt,
+        });
         if (lastError === "任务已取消") {
-          this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt, status: "已取消" });
+          this.database.finishAiJob(jobId, "", lastError, { ...telemetry("已取消"), actualCost: 0 });
           this.cancelledJobs.delete(jobId);
           this.activeRequests.delete(jobId);
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型请求超时")) {
-          this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt });
+          this.database.finishAiJob(jobId, "", lastError, { ...telemetry("失败"), actualCost: 0 });
+          this.activeRequests.delete(jobId);
+          throw new Error(lastError);
+        }
+        if (lastError.startsWith("模型接口返回")) {
+          this.database.finishAiJob(jobId, "", lastError, { ...telemetry("失败"), actualCost: 0 });
           this.activeRequests.delete(jobId);
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型服务暂时不可用") && attempt < 2) {
           try {
-            await abortableDelay(1000 * 2 ** attempt, controller.signal);
+            const remainingMs = Math.max(0, deadline - Date.now());
+            const delayMs = Math.min(1000 * 2 ** attempt, remainingMs);
+            this.log("warn", "ai.request.retry_scheduled", { jobId, taskType: options.taskType, attempt: attemptCount, nextAttempt: attemptCount + 1, delayMs, reason: lastError });
+            await abortableDelay(delayMs, controller.signal);
           } catch {
             lastError = "任务已取消";
-            this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt, status: "已取消" });
+            this.database.finishAiJob(jobId, "", lastError, { ...telemetry("已取消"), actualCost: 0 });
             this.cancelledJobs.delete(jobId);
             this.activeRequests.delete(jobId);
             throw new Error(lastError);
           }
         }
+        if (!lastError.startsWith("模型服务暂时不可用") && attempt < 2)
+          this.log("warn", "ai.request.retry_scheduled", { jobId, taskType: options.taskType, attempt: attemptCount, nextAttempt: attemptCount + 1, delayMs: 0, reason: lastError });
         repairInstruction = `\n上一次输出校验失败：${lastError}。请修复结构并重新输出完整 JSON。`;
       }
     }
-    this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt });
+    this.database.finishAiJob(jobId, "", lastError, { ...telemetry("失败"), actualCost: 0 });
     this.activeRequests.delete(jobId);
     throw new Error(lastError);
   }
 
   async deconstruct(book: ResearchBook, chapters: Array<{ ordinal: number; title: string; content: string; wordCount: number }>): Promise<{ insight: InsightPack; analyses: ResearchAnalysisRecord[] }> {
     if (!book.cloudConsent || !this.getApiKey()) return this.localInsight(book, chapters);
-    const partials: InsightResult[] = [];
+    const partials: Array<{ fromChapter: number; toChapter: number; insight: InsightResult }> = [];
     const analyses: ResearchAnalysisRecord[] = [];
-    for (let start = 0; start < chapters.length; start += 10) {
-      const batch = chapters.slice(start, start + 10);
+    for (let start = 0; start < chapters.length; start += DECONSTRUCT_BATCH_SIZE) {
+      const batch = chapters.slice(start, start + DECONSTRUCT_BATCH_SIZE);
       const sanitizedBatch = sanitizeResearchBatch(batch);
-      const result = await this.runJson({
-        projectId: null,
-        taskType: "deconstruct-batch",
-        inputSummary: `${book.title} 第${start + 1}-${start + batch.length}章脱敏分析`,
-        system: `你是中国商业网文结构研究员。只能抽象情节机制和读者体验，不得复述句子、输出作品专名、角色名、独特设定名或模仿文风。\n${compileDeconstructionFramework(book.genre)}`,
-        user: `题材：${book.genre}\n章节范围：${start + 1}-${start + batch.length}\n输出 chapters 数组，逐章给出 ordinal、finding、conflict、hook、stateChange、risk、enteringExpectation、protagonistGoal、coreInterest、emotionalPayoff、payoffImpact、nextExpectation；没有证据时写“证据不足”，不得臆测。再输出 synthesis，字段为 audienceNeed、openingPromise、conflictEngine、emotionalRhythm、retentionDevices、longFormEngine、marketGap、risks、confidence。所有结论必须抽象，不得引用原句或专名。\n` +
-          batch.map((chapter, index) => `【章节${chapter.ordinal}】\n${sanitizedBatch[index]}`).join("\n"),
-        schema: BatchAnalysisSchema,
-      });
-      partials.push(result.synthesis);
+      const fromChapter = batch[0].ordinal;
+      const toChapter = batch.at(-1)!.ordinal;
+      let result: z.infer<typeof BatchAnalysisSchema>;
+      try {
+        result = await this.runJson({
+          projectId: null,
+          taskType: "deconstruct-batch",
+          inputSummary: `${book.title} 第${fromChapter}-${toChapter}章脱敏分析`,
+          system: `你是中国商业网文结构研究员。只能抽象情节机制和读者体验，不得复述句子、输出作品专名、角色名、独特设定名或模仿文风。\n${compileDeconstructionFramework(book.genre)}`,
+          user: `题材：${book.genre}\n章节范围：${fromChapter}-${toChapter}\n输出 chapters 数组，逐章给出 ordinal、finding、conflict、hook、stateChange、risk、enteringExpectation、protagonistGoal、coreInterest、emotionalPayoff、payoffImpact、nextExpectation；没有证据时写“证据不足”，不得臆测。再输出 synthesis，字段为 audienceNeed、openingPromise、conflictEngine、emotionalRhythm、retentionDevices、longFormEngine、marketGap、risks、confidence。所有结论必须抽象，不得引用原句或专名。\n` +
+            batch.map((chapter, index) => `【章节${chapter.ordinal}】\n${sanitizedBatch[index]}`).join("\n"),
+          schema: BatchAnalysisSchema,
+          longTask: true,
+          stream: true,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`第${fromChapter}-${toChapter}章拆解失败：${message}。已完成批次会保留，重新拆书可从缓存继续。`);
+      }
+      partials.push({ fromChapter, toChapter, insight: result.synthesis });
       for (const finding of result.chapters) analyses.push({ id: randomUUID(), bookId: book.id, layer: "章节", fromChapter: finding.ordinal, toChapter: finding.ordinal, findings: `进入期待：${finding.enteringExpectation}\n主角目标：${finding.protagonistGoal}\n核心利益：${finding.coreInterest}\n结构：${finding.finding}\n冲突：${finding.conflict}\n情绪回报：${finding.emotionalPayoff}\n回报影响：${finding.payoffImpact}\n下一期待：${finding.nextExpectation}\n章末钩子：${finding.hook}\n状态变化：${finding.stateChange}\n风险：${finding.risk}`, evidenceChapters: [finding.ordinal], confidence: result.synthesis.confidence, createdAt: now() });
-      analyses.push({ id: randomUUID(), bookId: book.id, layer: "十章阶段", fromChapter: batch[0].ordinal, toChapter: batch.at(-1)!.ordinal, findings: insightText(result.synthesis), evidenceChapters: batch.map((chapter) => chapter.ordinal), confidence: result.synthesis.confidence, createdAt: now() });
+    }
+
+    const stages: Array<{ fromChapter: number; toChapter: number; insight: InsightResult }> = [];
+    for (let start = 0; start < partials.length; start += 2) {
+      const group = partials.slice(start, start + 2);
+      const fromChapter = group[0].fromChapter;
+      const toChapter = group.at(-1)!.toChapter;
+      const stage = group.length === 1 ? group[0].insight : await this.runJson({
+        projectId: null,
+        taskType: "deconstruct-stage",
+        inputSummary: `${book.title} 第${fromChapter}-${toChapter}章阶段汇总`,
+        system: "你是网络小说开篇阶段研究员。输入只有两个脱敏小批次结论，合并重复规律并保留阶段变化，不得还原作品内容。",
+        user: `题材：${book.genre}\n范围：第${fromChapter}-${toChapter}章\n请汇总为同字段 JSON：\n${JSON.stringify(group.map((item) => item.insight))}`,
+        schema: InsightSchema,
+        longTask: true,
+        stream: true,
+      });
+      stages.push({ fromChapter, toChapter, insight: stage });
+      analyses.push({ id: randomUUID(), bookId: book.id, layer: "十章阶段", fromChapter, toChapter, findings: insightText(stage), evidenceChapters: chapters.filter((chapter) => chapter.ordinal >= fromChapter && chapter.ordinal <= toChapter).map((chapter) => chapter.ordinal), confidence: stage.confidence, createdAt: now() });
     }
     const volumes: InsightResult[] = [];
-    for (let start = 0; start < partials.length; start += 10) {
-      const group = partials.slice(start, start + 10);
-      const fromChapter = start * 10 + 1;
-      const toChapter = Math.min(chapters.length, (start + group.length) * 10);
-      const volume = group.length === 1 ? group[0] : await this.runJson({
+    for (let start = 0; start < stages.length; start += 10) {
+      const group = stages.slice(start, start + 10);
+      const fromChapter = group[0].fromChapter;
+      const toChapter = group.at(-1)!.toChapter;
+      const volume = group.length === 1 ? group[0].insight : await this.runJson({
         projectId: null, taskType: "deconstruct-volume", inputSummary: `${book.title} 第${fromChapter}-${toChapter}章分卷汇总`,
         system: "你是长篇小说分卷结构研究员。输入只有脱敏十章阶段结论，输出同字段抽象汇总，不得还原作品内容。",
-        user: `题材：${book.genre}\n范围：第${fromChapter}-${toChapter}章\n${JSON.stringify(group)}`, schema: InsightSchema,
+        user: `题材：${book.genre}\n范围：第${fromChapter}-${toChapter}章\n${JSON.stringify(group.map((item) => item.insight))}`, schema: InsightSchema,
+        longTask: true,
+        stream: true,
       });
       volumes.push(volume);
       analyses.push({ id: randomUUID(), bookId: book.id, layer: "分卷", fromChapter, toChapter, findings: insightText(volume), evidenceChapters: chapters.slice(fromChapter - 1, toChapter).map((chapter) => chapter.ordinal), confidence: volume.confidence, createdAt: now() });
@@ -361,6 +536,8 @@ export class AiService {
       system: "你是网络小说市场分析师。输入只包含抽象拆解结论。合并重复规律，保留阶段变化和风险，禁止推测或还原原作专名与具体表达。",
       user: `题材：${book.genre}\n请汇总为同字段 JSON：\n${JSON.stringify(volumes)}`,
       schema: InsightSchema,
+      longTask: true,
+      stream: true,
     });
     analyses.push({ id: randomUUID(), bookId: book.id, layer: "全书", fromChapter: 1, toChapter: chapters.length, findings: insightText(aggregate), evidenceChapters: chapters.map((chapter) => chapter.ordinal), confidence: aggregate.confidence, createdAt: now() });
     return { insight: {
@@ -420,12 +597,17 @@ export class AiService {
       system: "你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案必须在主角身份、核心矛盾、关系结构和长篇发动机上显著不同；书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。",
       user: `频道题材：${input.genre}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n题材子类型（genreSubtype 必须从中选择）：${plugin.subtypes.map((item) => item.name).join("、")}\n核心幻想：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords })}\n输出 candidates，严格三项。每项包含 title、premise、genreSubtype、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`,
       schema: BookConceptSchema,
-      timeoutMs: 300_000,
+      longTask: true,
+      stream: true,
     });
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
   }
 
-  async generatePlanning(project: ProjectDetail, input: PlanningGenerationInput): Promise<PlanningGenerationResult> {
+  async generatePlanning(
+    project: ProjectDetail,
+    input: PlanningGenerationInput,
+    onChapterBatch?: (batch: PlanningGenerationResult) => void | Promise<void>,
+  ): Promise<PlanningGenerationResult> {
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
     const startChapter = input.fromChapter ?? Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1));
     const shared = `项目：${project.summary.title}\n题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n创作契约：${JSON.stringify(project.contract)}\n商业规则：${compileCommercialGuidance(project.summary.genre, startChapter, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, subtype: project.contract.genreSubtype, fanqieCategoryKey: project.contract.fanqieCategoryKey })}\n已批准规划：${JSON.stringify(project.plans.filter((plan) => plan.status === "已批准"))}\n已有章节：${JSON.stringify(project.chapters.slice(-20).map((chapter) => ({ number: chapter.number, title: chapter.title, outline: chapter.outline, endingExpectation: chapter.endingExpectation })))}`;
@@ -435,7 +617,8 @@ export class AiService {
         system: "你是中国商业网文总编。根据已审批契约规划六阶段和分卷，只细化结构，不写正文。阶段必须依次覆盖开篇、追读、扩张、中期、高潮、收束；总字数接近项目目标，冲突和回报逐层升级，终局必须兑现契约。",
         user: `${shared}\n输出 stages（必须6项）和 volumes（3至6项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。不得照抄商业规则文字。`,
         schema: StructurePlanningSchema,
-        timeoutMs: 300_000,
+        longTask: true,
+        stream: true,
       });
       return {
         startChapter: 1,
@@ -447,42 +630,114 @@ export class AiService {
       };
     }
     const count = input.chapterCount ?? 10;
-    const result = await this.runJson({
-      projectId: project.summary.id, taskType: "generate-chapter-plans", inputSummary: `${project.summary.title} 第${startChapter}-${startChapter + count - 1}章章纲`,
-      system: "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。每章必须承接上一章状态，包含目标、阻碍、主动行动、结果影响和自然续读问题；回报类型要变化，禁止连续重复打脸、误会或突发事故。",
-      user: `${shared}\n从第${startChapter}章开始，严格输出${count}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
-      schema: ChapterPlanningSchema,
-      timeoutMs: 300_000,
-    });
-    if (result.chapters.length !== count) throw new Error(`模型返回 ${result.chapters.length} 章，预期 ${count} 章，请重试`);
-    const roughPlan = { id: randomUUID(), kind: "粗纲" as const, title: `第${startChapter}–${startChapter + count - 1}章滚动粗纲`, ordinal: startChapter, goal: result.batchGoal, conflict: result.batchConflict, outcome: result.batchOutcome, targetWords: count * 2300, status: "草稿" as const, parentId: null };
-    const chapters = result.chapters.map((item, index) => {
-      const number = startChapter + index;
-      return { id: randomUUID(), number, title: item.title, outline: `目标：${item.goal}；冲突：${item.conflict}；结果：${item.outcome}`, content: "", wordCount: 0, status: "章纲" as const, batchMode: item.isKeyChapter ? "逐章" as const : "五章批次" as const, isKeyChapter: item.isKeyChapter, chapterPromise: item.chapterPromise, expectedPayoff: item.expectedPayoff, crisis: item.crisis, endingExpectation: item.endingExpectation, expectationTargetChapter: number + item.payoffOffset, revision: 0, updatedAt: now() };
-    });
-    const detailPlans = result.chapters.map((item, index) => ({ id: randomUUID(), kind: "细纲" as const, title: `第${startChapter + index}章 ${item.title}`, ordinal: startChapter + index, goal: item.goal, conflict: item.conflict, outcome: item.outcome, targetWords: 2300, status: "草稿" as const, parentId: roughPlan.id }));
-    const scenePlans = result.chapters.flatMap((item, index) => {
-      const number = startChapter + index;
-      const parentId = detailPlans[index].id;
-      return [
-        { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·入场与压力`, ordinal: number * 10 + 1, goal: `让主角明确并主动推进：${item.goal}`, conflict: item.crisis, outcome: "落下本章必须处理的具体压力与第一步行动", targetWords: 700, status: "草稿" as const, parentId },
-        { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·对抗与选择`, ordinal: number * 10 + 2, goal: "让行动遭遇有效反作用，并迫使主角作出有代价的选择", conflict: item.conflict, outcome: item.outcome, targetWords: 900, status: "草稿" as const, parentId },
-        { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·回报与转向`, ordinal: number * 10 + 3, goal: `兑现或推进：${item.expectedPayoff}`, conflict: "回报必须改变人物、关系、资源或局势，不能停在口头胜利", outcome: `${item.outcome}；章末转向：${item.endingExpectation}`, targetWords: 700, status: "草稿" as const, parentId },
-      ];
-    });
-    return { startChapter, plans: [roughPlan, ...detailPlans, ...scenePlans], chapters };
+    const batches: PlanningGenerationResult[] = [];
+    for (let offset = 0; offset < count; offset += CHAPTER_PLANNING_BATCH_SIZE) {
+      const batchStart = startChapter + offset;
+      const batchCount = Math.min(CHAPTER_PLANNING_BATCH_SIZE, count - offset);
+      const priorChapters = batches.flatMap((batch) => batch.chapters).map((chapter) => ({
+        number: chapter.number,
+        title: chapter.title,
+        outline: chapter.outline,
+        endingExpectation: chapter.endingExpectation,
+      }));
+      const result = await this.runJson({
+        projectId: project.summary.id, taskType: "generate-chapter-plans", inputSummary: `${project.summary.title} 第${batchStart}-${batchStart + batchCount - 1}章章纲`,
+        system: "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。每章必须承接上一章状态，包含目标、阻碍、主动行动、结果影响和自然续读问题；回报类型要变化，禁止连续重复打脸、误会或突发事故。",
+        user: `${shared}\n本次任务前面刚生成且必须承接的章纲：${JSON.stringify(priorChapters)}\n从第${batchStart}章开始，严格输出${batchCount}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
+        schema: ChapterPlanningSchema,
+        longTask: true,
+        stream: true,
+      });
+      if (result.chapters.length !== batchCount) throw new Error(`模型返回 ${result.chapters.length} 章，预期 ${batchCount} 章，请重试`);
+      const roughPlan = { id: randomUUID(), kind: "粗纲" as const, title: `第${batchStart}–${batchStart + batchCount - 1}章滚动粗纲`, ordinal: batchStart, goal: result.batchGoal, conflict: result.batchConflict, outcome: result.batchOutcome, targetWords: batchCount * 2300, status: "草稿" as const, parentId: null };
+      const chapters = result.chapters.map((item, index) => {
+        const number = batchStart + index;
+        return { id: randomUUID(), number, title: item.title, outline: `目标：${item.goal}；冲突：${item.conflict}；结果：${item.outcome}`, content: "", wordCount: 0, status: "章纲" as const, batchMode: item.isKeyChapter ? "逐章" as const : "五章批次" as const, isKeyChapter: item.isKeyChapter, chapterPromise: item.chapterPromise, expectedPayoff: item.expectedPayoff, crisis: item.crisis, endingExpectation: item.endingExpectation, expectationTargetChapter: number + item.payoffOffset, revision: 0, updatedAt: now() };
+      });
+      const detailPlans = result.chapters.map((item, index) => ({ id: randomUUID(), kind: "细纲" as const, title: `第${batchStart + index}章 ${item.title}`, ordinal: batchStart + index, goal: item.goal, conflict: item.conflict, outcome: item.outcome, targetWords: 2300, status: "草稿" as const, parentId: roughPlan.id }));
+      const scenePlans = result.chapters.flatMap((item, index) => {
+        const number = batchStart + index;
+        const parentId = detailPlans[index].id;
+        return [
+          { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·入场与压力`, ordinal: number * 10 + 1, goal: `让主角明确并主动推进：${item.goal}`, conflict: item.crisis, outcome: "落下本章必须处理的具体压力与第一步行动", targetWords: 700, status: "草稿" as const, parentId },
+          { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·对抗与选择`, ordinal: number * 10 + 2, goal: "让行动遭遇有效反作用，并迫使主角作出有代价的选择", conflict: item.conflict, outcome: item.outcome, targetWords: 900, status: "草稿" as const, parentId },
+          { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·回报与转向`, ordinal: number * 10 + 3, goal: `兑现或推进：${item.expectedPayoff}`, conflict: "回报必须改变人物、关系、资源或局势，不能停在口头胜利", outcome: `${item.outcome}；章末转向：${item.endingExpectation}`, targetWords: 700, status: "草稿" as const, parentId },
+        ];
+      });
+      const batch = { startChapter: batchStart, plans: [roughPlan, ...detailPlans, ...scenePlans], chapters };
+      await onChapterBatch?.(batch);
+      batches.push(batch);
+    }
+    return {
+      startChapter,
+      plans: batches.flatMap((batch) => batch.plans),
+      chapters: batches.flatMap((batch) => batch.chapters),
+    };
   }
 
-  async draftChapter(projectId: string, chapter: Chapter, context: ContextPackage, retryContext?: string): Promise<Chapter> {
+  async suggestAestheticProfile(
+    project: ProjectDetail,
+  ): Promise<AestheticProfileSuggestion> {
+    const approvedPlans = project.plans
+      .filter((plan) => plan.status === "已批准")
+      .slice(-30)
+      .map((plan) => ({
+        kind: plan.kind,
+        title: plan.title,
+        goal: plan.goal,
+        conflict: plan.conflict,
+        outcome: plan.outcome,
+      }));
+    const manuscriptSamples = project.chapters
+      .filter((chapter) => ["已定稿", "待发布", "已发布"].includes(chapter.status) && chapter.content.trim())
+      .slice(-6)
+      .map((chapter) => ({
+        chapter: chapter.number,
+        title: chapter.title,
+        outline: chapter.outline,
+        content: chapter.content.slice(0, 2800),
+      }));
+    return this.runJson({
+      projectId: project.summary.id,
+      taskType: "suggest-aesthetic-profile",
+      inputSummary: "生成本书专属审美优化提案",
+      system: [
+        "你是中文长篇商业小说的审美总编。为当前这一部作品建立专属、可执行、内部一致的审美档案。",
+        "依据作品契约、题材、规划和本书自己的定稿样本判断，不套用全局风格模板，不模仿研究样本或特定作者。",
+        "优化不是一律升温、降温或增加辞藻。先识别这本书真正需要的叙事距离、情绪温度与表达质地，再明确可执行手法和避用模式。",
+        "现有正文只用于诊断本书已经形成的倾向；有价值的特征可以保留，机械、单调或与读者承诺冲突的特征应校正。",
+        "所有字段必须具体到写作时能执行，避免‘细腻生动、增强代入感’等空泛表述。",
+      ].join("\n"),
+      user: `作品：${project.summary.title}\n题材：${project.summary.genre}\n创作契约：${JSON.stringify(project.contract)}\n已批准规划：${JSON.stringify(approvedPlans)}\n本书定稿样本：${manuscriptSamples.length ? JSON.stringify(manuscriptSamples) : "暂无；请依据契约和规划保守提案"}\n输出 profile、diagnosis 和 rationale。diagnosis 说明当前审美倾向及主要风险；rationale 给出本方案最关键的取舍依据。`,
+      schema: AestheticProfileSuggestionSchema,
+      longTask: true,
+      stream: true,
+      reasoningEffort: "medium",
+    });
+  }
+
+  async draftChapter(
+    projectId: string,
+    chapter: Chapter,
+    context: ContextPackage,
+    retryContext?: string,
+    onStream?: (event: { type: "attempt-start"; attempt: number } | { type: "delta"; attempt: number; delta: string } | { type: "complete"; attempt: number }) => void,
+  ): Promise<Chapter> {
+    let currentAttempt = 0;
     const result = await this.runJson({
       projectId,
       taskType: "draft-chapter",
       inputSummary: `第${chapter.number}章 ${chapter.title || "未命名"}`,
-      system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑和契约。",
-      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标 1800-2600 汉字。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响；留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
+      system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、项目审美、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑、契约或本书审美。不要自行套用清冷、热烈、幽默或煽情等固定风格模板。",
+      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标 1800-2600 汉字。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响。按上下文中的项目审美决定叙事距离、情绪温度、文字质地、对话和情绪表达。留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
       schema: DraftSchema,
       retryContext,
+      timeoutMs: 300_000,
+      stream: true,
+      onAttempt: (attempt) => { currentAttempt = attempt; onStream?.({ type: "attempt-start", attempt }); },
+      onDelta: (delta, attempt) => onStream?.({ type: "delta", attempt, delta }),
     });
+    onStream?.({ type: "complete", attempt: currentAttempt });
     return { ...chapter, title: result.title, content: result.content, status: "待质检", updatedAt: now() };
   }
 
@@ -496,22 +751,56 @@ export class AiService {
       schema: FactCandidateSchema,
     });
     const compactContent = chapter.content.replace(/\s+/g, "");
+    const activeFacts = project.facts
+      .filter((fact) =>
+        fact.confidence === "已确认" &&
+        fact.validFromChapter < chapter.number &&
+        (fact.validToChapter === null || fact.validToChapter >= chapter.number)
+      )
+      .sort((left, right) => right.validFromChapter - left.validFromChapter);
     return result.facts
       .filter((fact) => compactContent.includes(fact.evidence.replace(/\s+/g, "")))
-      .map((fact) => ({
-        id: randomUUID(),
-        kind: fact.kind,
-        genreDimension: "定稿自动候选",
-        subject: fact.subject.trim(),
-        predicate: fact.predicate.trim(),
-        value: fact.value.trim(),
-        validFromChapter: chapter.number,
-        validToChapter: null,
-        evidenceChapter: chapter.number,
-        confidence: "待确认" as const,
-        knowledgeScope: fact.knowledgeScope.trim() || "公开",
-        updatedAt: now(),
-      }));
+      .map((fact) => {
+        const subject = fact.subject.trim();
+        const predicate = fact.predicate.trim();
+        const value = fact.value.trim();
+        const replaced = activeFacts.find((current) =>
+          current.kind === fact.kind &&
+          current.subject === subject &&
+          current.predicate === predicate &&
+          (current.value !== value || current.knowledgeScope !== (fact.knowledgeScope.trim() || "公开"))
+        );
+        const knowledgeScope = fact.knowledgeScope.trim() || "公开";
+        const previousNumber = replaced && fact.kind === "资源" ? parseStoryNumber(replaced.value) : null;
+        const nextNumber = fact.kind === "资源" ? parseStoryNumber(value) : null;
+        const numericDelta = previousNumber !== null && nextNumber !== null
+          ? nextNumber - previousNumber
+          : null;
+        const changeType = numericDelta !== null
+          ? "数值变化" as const
+          : replaced?.value === value && replaced.knowledgeScope !== knowledgeScope
+            ? "知情范围变更" as const
+            : replaced
+              ? "状态替换" as const
+              : "新增" as const;
+        return {
+          id: randomUUID(),
+          kind: fact.kind,
+          genreDimension: replaced ? `定稿${changeType}候选` : "定稿自动候选",
+          subject,
+          predicate,
+          value,
+          validFromChapter: chapter.number,
+          validToChapter: null,
+          evidenceChapter: chapter.number,
+          confidence: "待确认" as const,
+          knowledgeScope,
+          replacesFactId: replaced?.id ?? null,
+          changeType,
+          numericDelta,
+          updatedAt: now(),
+        };
+      });
   }
 
   async reviewChapter(project: ProjectDetail, chapter: Chapter, context: ContextPackage): Promise<QualityIssue[]> {
@@ -522,12 +811,17 @@ export class AiService {
       system: [
         "你是中文长篇网络小说的严格审校员。只报告能够引用本章证据的问题，不做文风偏好式改写。",
         "检查：章纲兑现、人物动机、事件因果、设定与状态一致性、角色知识边界、重复信息、节奏停滞、读者承诺、具体压力、主动行动、情绪回报、回报实际影响与章末推动力。",
+        `项目审美设定：${compileAestheticGuidance(project.contract?.aestheticProfile)}`,
+        "审美质检必须以本项目设定为标准，不得把某一种叙事温度或人物表达方式当成通用优点。只有正文与明确设定冲突，或在未设专项审美时出现严重影响可读性的失衡，才标记审美类问题并引用证据。",
         `题材专项检查：${GENRE_PLUGINS[project.summary.genre].qualityChecks.join("；")}。`,
         "只有正文明确违反已审批契约、事实账本或知识边界时才标记为硬性；可以优化但不构成矛盾的问题标记为警告或建议。",
         "evidence 必须是本章中的简短原文或明确的契约/事实条目。没有可验证问题时返回空数组。",
       ].join("\n"),
       user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(contextForModel(context))}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 issues 数组，每项包含 severity、category、message、evidence。`,
       schema: QualityReviewSchema,
+      longTask: true,
+      stream: true,
+      reasoningEffort: "low",
     });
     const evidenceSource = [chapter.content, context.contract, context.volumeGoal, context.rollingOutline, context.relevantFacts, context.forbiddenKnowledge]
       .join("\n").replace(/\s+/g, "");
@@ -545,5 +839,41 @@ export class AiService {
         createdAt: now(),
       };
     });
+  }
+
+  async reviseChapter(
+    project: ProjectDetail,
+    chapter: Chapter,
+    context: ContextPackage,
+    issues: readonly QualityIssue[],
+  ): Promise<Chapter> {
+    const pending = issues.filter((issue) => issue.status === "待处理");
+    if (!pending.length) throw new Error("本章没有可供 AI 修订的待处理问题");
+    const result = await this.runJson({
+      projectId: project.summary.id,
+      taskType: "revise-chapter-quality",
+      inputSummary: `第${chapter.number}章按质检修订`,
+      system: [
+        "你是中文长篇商业网文修订编辑。只修复列出的质检问题，保留原章目标、事件结果、人物动机、叙事视角和未被指出的有效内容。",
+        "不得改纲、增加上下文之外的关键设定、改变已确认事实或泄露角色未知秘密。硬性问题必须修复；警告和建议在不破坏原意时修复。",
+        `项目审美设定：${compileAestheticGuidance(project.contract?.aestheticProfile)}`,
+        "若问题涉及审美或叙事温度，只按本项目设定修复，不得擅自把人物改得更克制、更热烈、更幽默或更煽情。",
+        "输出完整修订稿，不输出修改说明。title 没有必要时保持不变。",
+      ].join("\n"),
+      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(contextForModel(context))}\n待处理问题：${JSON.stringify(pending.map((issue) => ({ severity: issue.severity, category: issue.category, message: issue.message, evidence: issue.evidence })))}\n原正文：\n${chapter.content.slice(0, 16000)}\n输出 title 和完整 content。`,
+      schema: DraftSchema,
+      longTask: true,
+      stream: true,
+      reasoningEffort: "low",
+    });
+    if (result.content.trim() === chapter.content.trim())
+      throw new Error("模型未产生有效修订，请检查质检问题后重试");
+    return {
+      ...chapter,
+      title: result.title,
+      content: result.content,
+      status: "待质检",
+      updatedAt: now(),
+    };
   }
 }

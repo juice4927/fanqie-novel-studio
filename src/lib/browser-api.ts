@@ -27,6 +27,7 @@ import type {
   ScheduleItem,
   StoryContract,
 } from "../shared/types";
+import { compileAestheticGuidance, normalizeAestheticProfile } from "../shared/aesthetic-profile";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { findCurrentVolume } from "../shared/planning";
 import { compileCommercialGuidance } from "../shared/commercial-knowledge";
@@ -143,6 +144,7 @@ function seedProject(): ProjectDetail {
         "每次主动改变结果都会丢失等量近期记忆",
       ],
       prohibitedPatterns: ["无代价升级", "用梦境撤销已发生剧情"],
+      aestheticProfile: normalizeAestheticProfile(),
       version: 2,
       approved: true,
       updatedAt: now(),
@@ -315,6 +317,7 @@ function seed(): DemoState {
       hasApiKey: false,
       inputPricePerMillion: 0,
       outputPricePerMillion: 0,
+      longTaskTimeoutMinutes: 10,
     },
   };
 }
@@ -398,6 +401,7 @@ export function createBrowserApi(): AppApi {
         premise: "", genreSubtype: "", fanqieCategoryKey: "", protagonistDesire: "",
         readerPromise: "", coreEmotion: "", ending: "", immutableRules: [],
         prohibitedPatterns: [], version: 1, approved: false, updatedAt: now(),
+        aestheticProfile: normalizeAestheticProfile(),
       },
       plans: [], chapters: [], facts: [], issues: [], changes: [], schedule: [], metrics: [], experiments: [],
       insightIds: [], summaries: [], expectations: [],
@@ -510,12 +514,16 @@ export function createBrowserApi(): AppApi {
       if (approval) approval.status = "已应用";
       project.contract = {
         ...contract,
+        aestheticProfile: normalizeAestheticProfile(contract.aestheticProfile),
         version: project.contract.version + 1,
         approved: false,
         updatedAt: now(),
       };
       persist();
       return project.contract;
+    },
+    async suggestAestheticProfile() {
+      throw new Error("AI 审美优化需要在桌面版配置模型后使用");
     },
     async approveContract(projectId) {
       const project = getProject(state, projectId);
@@ -666,13 +674,19 @@ export function createBrowserApi(): AppApi {
       chapter.status = status;
       chapter.updatedAt = now();
       persist();
-      return chapter;
+      return {
+        chapter,
+        ledgerExtraction: {
+          status: status === "已定稿" ? "未配置" as const : "不适用" as const,
+          candidateCount: 0,
+        },
+      };
     },
     async compileContext(projectId, chapterId): Promise<ContextPackage> {
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((item) => item.id === chapterId)!;
       const result: ContextPackage = {
-        contract: JSON.stringify(project.contract, null, 2),
+        contract: `${JSON.stringify(project.contract, null, 2)}\n项目审美：\n${compileAestheticGuidance(project.contract.aestheticProfile)}`,
         commercialGuidance: compileCommercialGuidance(
           project.summary.genre,
           chapter.number,
@@ -707,6 +721,7 @@ export function createBrowserApi(): AppApi {
           .map((item) => `第${item.number}章：${item.outline}`)
           .join("\n"),
         relevantFacts: project.facts
+          .filter((fact) => fact.confidence === "已确认")
           .map(
             (fact) =>
               `[${fact.genreDimension || fact.kind}] ${fact.subject} ${fact.predicate} ${fact.value}`,
@@ -714,7 +729,7 @@ export function createBrowserApi(): AppApi {
           .join("\n"),
         forbiddenKnowledge:
           project.facts
-            .filter((fact) => fact.kind === "秘密")
+            .filter((fact) => fact.kind === "秘密" && fact.confidence === "已确认")
             .map((fact) => `${fact.value}｜${fact.knowledgeScope}`)
             .join("\n") || "无",
         authorStyle:
@@ -781,16 +796,33 @@ export function createBrowserApi(): AppApi {
       persist();
       return issues;
     },
+    async reviseChapterFromQuality() {
+      throw new Error("AI 修订正文需要在桌面版配置模型后使用");
+    },
     async extractChapterFacts() {
       throw new Error("状态候选提取需要在桌面版配置 AI 后使用");
     },
     async saveFact(projectId, fact: LedgerFact) {
       const project = getProject(state, projectId);
       const next = { ...fact, id: fact.id || id(), updatedAt: now() };
+      const replacement = next.confidence === "已确认" && next.replacesFactId
+        ? project.facts.find((item) =>
+            item.id === next.replacesFactId &&
+            item.confidence === "已确认" &&
+            item.validFromChapter < next.validFromChapter &&
+            (item.value !== next.value || item.knowledgeScope !== next.knowledgeScope)
+          )
+        : undefined;
+      if (replacement) {
+        replacement.validToChapter = next.validFromChapter - 1;
+        replacement.updatedAt = now();
+      }
       if (
+        next.confidence !== "已忽略" &&
         project.facts.some(
           (item) =>
             item.id !== next.id &&
+            item.id !== next.replacesFactId &&
             item.subject === next.subject &&
             item.predicate === next.predicate &&
             item.validToChapter === null &&
@@ -931,6 +963,9 @@ export function createBrowserApi(): AppApi {
       state.books.unshift(book);
       persist();
       return book;
+    },
+    async importPublicResearchSample() {
+      throw new Error("公开试读采集仅在桌面版运行");
     },
     async listInsights() {
       return structuredClone(state.insights);

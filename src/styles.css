@@ -810,6 +810,11 @@ p {
   text-decoration: none;
 }
 .ranking-links a:hover { text-decoration: underline; }
+.ranking-links .link-button { border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+.ranking-links .link-button:hover { text-decoration: underline; }
+.source-preview { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-soft); }
+.source-preview span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.source-preview strong, .source-preview small { overflow-wrap: anywhere; }
 .fanqie-ranking-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .market-opportunity-panel { padding: 22px 18px 8px; border-bottom: 1px solid var(--line); }
 .market-opportunity-panel .section-heading { margin-bottom: 14px; }
@@ -839,6 +844,7 @@ p {
 .pending-facts-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .pending-facts-list article > span { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 8px; min-width: 0; }
 .pending-facts-list article small { grid-column: 2; color: var(--subtle); }
+.pending-facts-list .inline-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .planning-ai-summary { padding: 14px; border: 1px solid var(--line); background: var(--surface-muted); border-radius: 6px; }
 .planning-ai-summary p { margin: 6px 0 0; color: var(--muted); line-height: 1.6; }
 .rank-number {
@@ -1358,6 +1364,44 @@ p {
 }
 .form-grid.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.bible-subsection-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.bible-subsection-heading h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.bible-subsection-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.aesthetic-suggestion {
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-muted);
+}
+.aesthetic-suggestion > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.aesthetic-suggestion p,
+.aesthetic-suggestion ul {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.aesthetic-suggestion ul {
+  padding-left: 18px;
 }
 .modal-actions {
   display: flex;
@@ -2603,6 +2647,8 @@ p {
 }
 
 .review-queue article.active { border-color: var(--teal); }
+.review-queue-actions { display: grid; gap: 6px; }
+.review-queue-actions .button { width: 100%; }
 .review-queue article > button {
   display: flex;
   min-width: 0;
@@ -3073,6 +3119,10 @@ p {
   .page-header .heading-actions .button {
     flex: 1;
   }
+  .bible-subsection-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
   .stat-grid {
     grid-template-columns: 1fr;
   }
@@ -3088,6 +3138,13 @@ p {
     flex-direction: column;
   }
   .toolbar-actions .button {
+    flex: 1;
+  }
+  .pending-facts-list article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .pending-facts-list .inline-actions .button {
     flex: 1;
   }
   .research-book {

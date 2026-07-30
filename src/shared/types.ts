@@ -106,7 +106,7 @@ export interface MarketOpportunity {
   listName: string;
   categoryKey?: string;
   categoryName: string;
-  genre: Genre;
+  genre: Genre | "待校对";
   snapshots: number;
   latestSampleSize: number;
   newEntrantRate: number;
@@ -129,7 +129,9 @@ export interface ResearchBook {
   title: string;
   author: string;
   genre: Genre;
-  sourceType: "TXT" | "EPUB" | "DOCX" | "粘贴";
+  sourceType: "TXT" | "EPUB" | "DOCX" | "粘贴" | "公开试读";
+  sourceUrl?: string;
+  sampleScope?: string;
   chapterCount: number;
   wordCount: number;
   rightsConfirmed: boolean;
@@ -167,6 +169,22 @@ export interface InsightPack {
   createdAt: string;
 }
 
+export interface AestheticProfile {
+  narrativeDistance: "贴身" | "适中" | "远距";
+  emotionalTemperature: "冷峻" | "克制" | "均衡" | "热烈";
+  proseTexture: string;
+  dialogueStyle: string;
+  emotionalExpression: string;
+  signatureTechniques: string[];
+  avoidPatterns: string[];
+}
+
+export interface AestheticProfileSuggestion {
+  profile: AestheticProfile;
+  diagnosis: string;
+  rationale: string[];
+}
+
 export interface StoryContract {
   premise: string;
   genreSubtype?: string;
@@ -177,6 +195,7 @@ export interface StoryContract {
   ending: string;
   immutableRules: string[];
   prohibitedPatterns: string[];
+  aestheticProfile?: AestheticProfile;
   version: number;
   approved: boolean;
   updatedAt: string;
@@ -254,9 +273,21 @@ export interface LedgerFact {
   validFromChapter: number;
   validToChapter: number | null;
   evidenceChapter: number;
-  confidence: "待确认" | "已确认" | "有冲突";
+  confidence: "待确认" | "已确认" | "有冲突" | "已忽略";
   knowledgeScope: string;
+  replacesFactId?: string | null;
+  changeType?: "新增" | "状态替换" | "数值变化" | "知情范围变更";
+  numericDelta?: number | null;
   updatedAt: string;
+}
+
+export interface ChapterTransitionResult {
+  chapter: Chapter;
+  ledgerExtraction: {
+    status: "不适用" | "未配置" | "已完成" | "失败";
+    candidateCount: number;
+    message?: string;
+  };
 }
 
 export interface QualityIssue {
@@ -363,6 +394,7 @@ export interface AiSettings {
   hasApiKey: boolean;
   inputPricePerMillion: number;
   outputPricePerMillion: number;
+  longTaskTimeoutMinutes: number;
 }
 
 export type AiJobStatus = "运行中" | "成功" | "失败" | "已取消" | "已中断";
@@ -380,11 +412,21 @@ export interface AiJobRecord {
   outputTokens: number;
   actualCost: number;
   durationMs: number;
+  headersAt: string | null;
+  firstTokenAt: string | null;
+  completedAt: string | null;
+  chunkCount: number;
+  attemptCount: number;
   error: string | null;
   retryable: boolean;
   createdAt: string;
   updatedAt: string;
 }
+
+export type ChapterDraftStreamEvent =
+  | { type: "attempt-start"; attempt: number }
+  | { type: "delta"; attempt: number; delta: string }
+  | { type: "complete"; attempt: number };
 
 export interface ProjectDetail {
   summary: ProjectSummary;
@@ -595,6 +637,7 @@ export interface AppApi {
   getProject(id: string): Promise<ProjectDetail>;
   updateProject(id: string, patch: ProjectPatch): Promise<ProjectSummary>;
   saveContract(id: string, contract: StoryContract): Promise<StoryContract>;
+  suggestAestheticProfile(id: string): Promise<AestheticProfileSuggestion>;
   approveContract(id: string): Promise<StoryContract>;
   savePlan(id: string, plan: PlanNode): Promise<PlanNode>;
   approvePlan(id: string, planId: string): Promise<void>;
@@ -608,7 +651,7 @@ export interface AppApi {
     id: string,
     chapterId: string,
     status: ChapterStatus,
-  ): Promise<Chapter>;
+  ): Promise<ChapterTransitionResult>;
   compileContext(id: string, chapterId: string): Promise<ContextPackage>;
   searchProject(id: string, query: string, offset?: number, limit?: number): Promise<SearchHit[]>;
   listRevisions(
@@ -618,6 +661,7 @@ export interface AppApi {
   ): Promise<RevisionRecord[]>;
   restoreRevision(id: string, revisionId: string): Promise<void>;
   runQualityCheck(id: string, chapterId: string): Promise<QualityIssue[]>;
+  reviseChapterFromQuality(id: string, chapterId: string): Promise<Chapter>;
   extractChapterFacts(id: string, chapterId: string): Promise<LedgerFact[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
   resolveIssue(
@@ -648,6 +692,11 @@ export interface AppApi {
     rightsConfirmed: boolean,
     cloudConsent: boolean,
   ): Promise<ResearchBook>;
+  importPublicResearchSample(
+    sourceUrl: string,
+    genre: Genre,
+    cloudConsent: boolean,
+  ): Promise<ResearchBook>;
   listInsights(): Promise<InsightPack[]>;
   createInsight(
     input: Omit<InsightPack, "id" | "createdAt">,
@@ -656,7 +705,11 @@ export interface AppApi {
   listResearchAnalyses(bookId: string): Promise<ResearchAnalysisRecord[]>;
   attachInsights(id: string, insightIds: string[]): Promise<void>;
   generateConcepts(id: string): Promise<ConceptCandidate[]>;
-  generateChapterDraft(id: string, chapterId: string): Promise<Chapter>;
+  generateChapterDraft(
+    id: string,
+    chapterId: string,
+    onStream?: (event: ChapterDraftStreamEvent) => void,
+  ): Promise<Chapter>;
   previewChapterBatch(
     id: string,
     chapterId: string,

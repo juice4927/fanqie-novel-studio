@@ -87,6 +87,7 @@ function UploadIcon() { return <FileOutput size={16} />; }
 export function QualityPage({ project, api, reload, notify }: CommonProjectProps) {
   const [changeModal, setChangeModal] = useState(false);
   const [reviewChapterId, setReviewChapterId] = useState("all");
+  const [chapterAction, setChapterAction] = useState<{ id: string; kind: "质检" | "修订" } | null>(null);
   const [change, setChange] = useState<ChangeRequest>({
     id: "",
     targetKind: "创作契约",
@@ -213,10 +214,29 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
                   <span>第 {chapter.number} 章</span><strong>{chapter.title || "未命名章"}</strong>
                   <small>{chapter.status} · 硬性 {issues.filter((issue) => issue.severity === "硬性").length} · 其他 {issues.filter((issue) => issue.severity !== "硬性").length}</small>
                 </button>
-                <Button variant="secondary" onClick={async () => {
-                  try { await api.runQualityCheck(project.summary.id, chapter.id); await reload(); setReviewChapterId(chapter.id); notify(`第${chapter.number}章质检已更新`); }
-                  catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
-                }}>运行质检</Button>
+                <div className="review-queue-actions">
+                  <Button variant="secondary" disabled={Boolean(chapterAction)} onClick={async () => {
+                    setChapterAction({ id: chapter.id, kind: "质检" });
+                    try { await api.runQualityCheck(project.summary.id, chapter.id); await reload(); setReviewChapterId(chapter.id); notify(`第${chapter.number}章质检已更新`); }
+                    catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
+                    finally { setChapterAction(null); }
+                  }}>{chapterAction?.id === chapter.id && chapterAction.kind === "质检" ? "质检中" : "运行质检"}</Button>
+                  {issues.length > 0 && !["已定稿", "待发布", "已发布"].includes(chapter.status) && (
+                    <Button icon={<Sparkles size={14} />} disabled={Boolean(chapterAction)} onClick={async () => {
+                      setChapterAction({ id: chapter.id, kind: "修订" });
+                      try {
+                        const revised = await api.reviseChapterFromQuality(project.summary.id, chapter.id);
+                        await reload();
+                        setReviewChapterId(chapter.id);
+                        notify(`第${chapter.number}章 AI 修订已保存为 v${revised.revision}，请重新质检`);
+                      } catch (error) {
+                        notify(error instanceof Error ? error.message : String(error), "error");
+                      } finally {
+                        setChapterAction(null);
+                      }
+                    }}>{chapterAction?.id === chapter.id && chapterAction.kind === "修订" ? "修订中" : "AI 修订"}</Button>
+                  )}
+                </div>
               </article>
             ))}
           </div>

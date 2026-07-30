@@ -51,7 +51,7 @@ describe("per-book isolation and gates", () => {
     databases.push(database);
     expect(database.listProjects()[0]).toMatchObject({ id: "legacy-project", title: "旧版作品", safeStockLine: 10 });
     const inspection = new DatabaseSync(path.join(root, "catalog.sqlite"));
-    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(4);
+    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(6);
     expect((inspection.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some((column) => column.name === "safe_stock_line")).toBe(true);
     inspection.close();
   });
@@ -65,11 +65,26 @@ describe("per-book isolation and gates", () => {
     expect(JSON.stringify(saved)).not.toContain("password");
   });
 
+  it("persists the configurable long AI task timeout", () => {
+    const database = createDatabase();
+    expect(database.getAiSettings().longTaskTimeoutMinutes).toBe(10);
+    const { hasApiKey: _hasApiKey, ...current } = database.getAiSettings();
+    expect(database.saveAiSettings({ ...current, longTaskTimeoutMinutes: 15 }).longTaskTimeoutMinutes).toBe(15);
+  });
+
   it("records AI usage and marks abandoned running jobs as interrupted", () => {
     const database = createDatabase();
     const id = database.startAiJob(null, "draft-chapter", "hash", "prompt", "provider", "model", "第1章");
-    database.finishAiJob(id, "{}", undefined, { inputTokens: 120, outputTokens: 80, actualCost: 0.012, durationMs: 345 });
-    expect(database.listAiJobs()[0]).toMatchObject({ id, status: "成功", inputTokens: 120, outputTokens: 80, actualCost: 0.012, durationMs: 345 });
+    database.finishAiJob(id, "{}", undefined, {
+      inputTokens: 120, outputTokens: 80, actualCost: 0.012, durationMs: 345,
+      headersAt: "2026-07-30T10:00:01.000Z", firstTokenAt: "2026-07-30T10:00:02.000Z",
+      completedAt: "2026-07-30T10:00:03.000Z", chunkCount: 42, attemptCount: 2,
+    });
+    expect(database.listAiJobs()[0]).toMatchObject({
+      id, status: "成功", inputTokens: 120, outputTokens: 80, actualCost: 0.012, durationMs: 345,
+      headersAt: "2026-07-30T10:00:01.000Z", firstTokenAt: "2026-07-30T10:00:02.000Z",
+      completedAt: "2026-07-30T10:00:03.000Z", chunkCount: 42, attemptCount: 2,
+    });
     const abandoned = database.startAiJob(null, "draft-chapter", "hash-2", "prompt", "provider", "model", "第2章");
     const root = database.root;
     database.close();
@@ -87,7 +102,8 @@ describe("per-book isolation and gates", () => {
     database.finishAiJob(second, "{\"content\":\"成功\"}");
     expect(database.listAiJobs().filter((job) => [first, second].includes(job.id))).toHaveLength(2);
     expect(database.listAiJobs().find((job) => job.id === first)).toMatchObject({ status: "失败", retryable: true });
-    expect(database.findAiJob("draft-chapter", "same-hash", "prompt", "model")).toBe("{\"content\":\"成功\"}");
+    expect(database.findAiJob("draft-chapter", "same-hash", "prompt", "provider", "model")).toBe("{\"content\":\"成功\"}");
+    expect(database.findAiJob("draft-chapter", "same-hash", "prompt", "other-provider", "model")).toBeNull();
   });
 
   it("detects and rebuilds incomplete chapter search indexes", () => {
@@ -234,6 +250,49 @@ describe("per-book isolation and gates", () => {
     expect(database.searchRelevantFacts(project.id, "北仓控制方", 3, 2).some((fact) => fact.subject === "北仓")).toBe(true);
   });
 
+  it("atomically ends the previous state when a replacement candidate is confirmed", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "状态替换", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
+    const previous = database.saveFact(project.id, { id: "", kind: "地点", subject: "林舟", predicate: "所在地", value: "北京", validFromChapter: 1, validToChapter: null, evidenceChapter: 1, confidence: "已确认", knowledgeScope: "公开", updatedAt: now() });
+    const candidate = database.saveFact(project.id, { id: "", kind: "地点", subject: "林舟", predicate: "所在地", value: "上海", validFromChapter: 8, validToChapter: null, evidenceChapter: 8, confidence: "待确认", knowledgeScope: "公开", replacesFactId: previous.id, updatedAt: now() });
+
+    expect(candidate.confidence).toBe("待确认");
+    expect(database.getProject(project.id).facts.find((fact) => fact.id === previous.id)?.validToChapter).toBeNull();
+    const confirmed = database.saveFact(project.id, { ...candidate, confidence: "已确认" });
+    const facts = database.getProject(project.id).facts;
+
+    expect(confirmed.confidence).toBe("已确认");
+    expect(facts.find((fact) => fact.id === previous.id)?.validToChapter).toBe(7);
+    expect(facts.find((fact) => fact.id === confirmed.id)?.validFromChapter).toBe(8);
+  });
+
+  it("keeps ignored candidates out of conflicts without changing active state", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "忽略候选", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
+    const current = database.saveFact(project.id, { id: "", kind: "人物", subject: "林舟", predicate: "身份", value: "维修员", validFromChapter: 1, validToChapter: null, evidenceChapter: 1, confidence: "已确认", knowledgeScope: "公开", updatedAt: now() });
+
+    const ignored = database.saveFact(project.id, { id: "", kind: "人物", subject: "林舟", predicate: "身份", value: "律师", validFromChapter: 4, validToChapter: null, evidenceChapter: 4, confidence: "已忽略", knowledgeScope: "公开", updatedAt: now() });
+    const facts = database.getProject(project.id).facts;
+
+    expect(ignored.confidence).toBe("已忽略");
+    expect(facts.find((fact) => fact.id === current.id)?.validToChapter).toBeNull();
+    expect(facts.some((fact) => fact.confidence === "有冲突")).toBe(false);
+    expect(database.searchRelevantFacts(project.id, "律师", 4).some((fact) => fact.id === ignored.id)).toBe(false);
+  });
+
+  it("versions a secret when its knowledge scope expands", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "秘密传播", genre: "悬疑/脑洞", targetWords: 3000000, updateCadence: "每日1章" });
+    const privateFact = database.saveFact(project.id, { id: "", kind: "秘密", subject: "仓库密钥", predicate: "真实位置", value: "藏在旧钟背面", validFromChapter: 2, validToChapter: null, evidenceChapter: 2, confidence: "已确认", knowledgeScope: "林舟", updatedAt: now() });
+
+    const sharedFact = database.saveFact(project.id, { id: "", kind: "秘密", subject: "仓库密钥", predicate: "真实位置", value: "藏在旧钟背面", validFromChapter: 9, validToChapter: null, evidenceChapter: 9, confidence: "已确认", knowledgeScope: "林舟、苏晚", replacesFactId: privateFact.id, changeType: "知情范围变更", updatedAt: now() });
+    const facts = database.getProject(project.id).facts;
+
+    expect(sharedFact.confidence).toBe("已确认");
+    expect(facts.find((fact) => fact.id === privateFact.id)?.validToChapter).toBe(8);
+    expect(facts.find((fact) => fact.id === sharedFact.id)?.knowledgeScope).toBe("林舟、苏晚");
+  });
+
   it("persists review experiments without applying story changes", () => {
     const database = createDatabase();
     const project = database.createProject({ title: "实验测试", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
@@ -266,6 +325,26 @@ describe("research firewall", () => {
 });
 
 describe("approval gates", () => {
+  it("persists each project's aesthetic profile in the story contract", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "审美隔离", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    const saved = database.saveContract(project.id, {
+      ...database.getProject(project.id).contract,
+      aestheticProfile: {
+        narrativeDistance: "贴身", emotionalTemperature: "热烈",
+        proseTexture: "明快", dialogueStyle: "短促", emotionalExpression: "直接",
+        signatureTechniques: ["多人交锋"], avoidPatterns: ["旁白说教"],
+      },
+    });
+
+    expect(saved.aestheticProfile).toMatchObject({
+      narrativeDistance: "贴身",
+      emotionalTemperature: "热烈",
+      proseTexture: "明快",
+    });
+    expect(database.getProject(project.id).contract.aestheticProfile).toEqual(saved.aestheticProfile);
+  });
+
   it("requires an approved change request before editing an approved contract", () => {
     const database = createDatabase();
     const project = database.createProject({ title: "门禁测试", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });

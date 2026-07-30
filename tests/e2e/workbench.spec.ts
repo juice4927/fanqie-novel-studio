@@ -172,6 +172,7 @@ test("shows automatic backup controls without exposing stored secrets", async ({
   await expect(page.getByText("启用自动备份", { exact: true })).toBeVisible();
   await expect(page.getByLabel("自动备份专用密码")).toHaveValue("");
   await expect(page.getByRole("button", { name: "立即备份" })).toBeDisabled();
+  await expect(page.getByLabel("长任务总时限")).toHaveValue("10");
   await page.getByRole("button", { name: "运行健康检查" }).click();
   await expect(page.getByRole("article").getByText("浏览器预览数据", { exact: true })).toBeVisible();
   await expect(page.getByText("localStorage 数据可读取；SQLite 完整性检查仅在桌面版可用")).toBeVisible();
@@ -191,6 +192,13 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await expect(page.getByRole("heading", { name: "离婚当天，我接手了倒闭供销社" })).toBeVisible();
   await page.getByRole("button", { name: /故事圣经/ }).click();
   await expect(page.getByLabel("故事前提")).toHaveValue(/被夺走婚房的基层职员/);
+  await expect(page.getByRole("heading", { name: "审美设定" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "AI 优化本书审美" })).toBeVisible();
+  await expect(page.getByLabel("叙事距离")).toHaveValue("适中");
+  await expect(page.getByLabel("情绪温度")).toHaveValue("均衡");
+  await expect(page.getByLabel("文字质地")).toBeVisible();
+  await expect(page.getByLabel("对话风格")).toBeVisible();
+  await expect(page.getByLabel("情绪表达")).toBeVisible();
   await expect(page.getByRole("button", { name: "审批契约" })).toBeVisible();
 });
 

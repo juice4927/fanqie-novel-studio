@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:electron": "playwright test --config playwright.electron.config.ts",
-    "dist:win": "npm run build && electron-builder --win nsis"
+    "dist:win": "npm run build && electron-builder --win nsis --publish never",
+    "release:win": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
@@ -56,6 +57,7 @@
   "build": {
     "appId": "cn.local.fanqie.novelstudio",
     "productName": "长篇创作工作台",
+    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release"
     },
@@ -69,14 +71,6 @@
       "target": "nsis",
       "signAndEditExecutable": true
     },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "${env.GH_OWNER}",
-        "repo": "${env.GH_REPO}",
-        "releaseType": "release"
-      }
-    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

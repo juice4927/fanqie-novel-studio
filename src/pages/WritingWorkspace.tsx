@@ -158,6 +158,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   }, [project, selectedId]);
   const dirty = chapterDraftSignature(draft) !== lastSavedSignature.current;
   useEffect(() => {
+    if (busy) return;
     if (!dirty) {
       setSaveStatus("saved");
       return;
@@ -171,7 +172,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
       autosaveRef.current?.enqueue(snapshot);
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [api, dirty, draft, notify, project.summary.id]);
+  }, [api, busy, dirty, draft, notify, project.summary.id]);
   useEffect(() => {
     const preventUnsavedExit = (event: BeforeUnloadEvent) => {
       if (chapterDraftSignature(draftRef.current) === lastSavedSignature.current) return;
@@ -383,16 +384,36 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             disabled={!draft.id || busy}
             icon={<Sparkles size={16} />}
             onClick={async () => {
+              const beforeGeneration = draftRef.current;
+              let streamedContent = "";
+              let streamedAttempt = 0;
               setBusy(true);
               try {
                 const result = await api.generateChapterDraft(
                   project.summary.id,
                   draft.id,
+                  (event) => {
+                    if (event.type === "attempt-start") {
+                      streamedAttempt = event.attempt;
+                      streamedContent = "";
+                    } else if (event.type === "delta" && event.attempt === streamedAttempt) {
+                      streamedContent += event.delta;
+                    } else return;
+                    const streamedDraft = { ...beforeGeneration, content: streamedContent };
+                    draftRef.current = streamedDraft;
+                    setDraft(streamedDraft);
+                  },
                 );
+                draftRef.current = result;
+                lastSavedSignature.current = chapterDraftSignature(result);
+                clearRecoveredChapter(project.summary.id, result);
                 setDraft(result);
+                setSaveStatus("saved");
                 await reload();
                 notify("AI 草稿已生成，尚未定稿");
               } catch (error) {
+                draftRef.current = beforeGeneration;
+                setDraft(beforeGeneration);
                 notify(
                   error instanceof Error ? error.message : String(error),
                   "error",
@@ -460,13 +481,21 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               icon={<Check size={16} />}
               onClick={async () => {
                 try {
-                  await api.transitionChapter(
+                  const result = await api.transitionChapter(
                     project.summary.id,
                     draft.id,
                     "已定稿",
                   );
                   await reload();
-                  notify("章节已定稿");
+                  if (result.ledgerExtraction.status === "已完成") {
+                    notify(result.ledgerExtraction.candidateCount
+                      ? `章节已定稿，生成 ${result.ledgerExtraction.candidateCount} 条待确认状态`
+                      : "章节已定稿，本章没有新的持久状态");
+                  } else if (result.ledgerExtraction.status === "失败") {
+                    notify(`章节已定稿，但状态扫描失败：${result.ledgerExtraction.message ?? "未知错误"}`, "error");
+                  } else {
+                    notify("章节已定稿；未配置 AI，未扫描状态候选");
+                  }
                 } catch (error) {
                   notify(
                     error instanceof Error ? error.message : String(error),
@@ -586,6 +615,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           <Textarea
             className="manuscript"
             value={draft.content}
+            disabled={busy}
             onChange={(event) =>
               setDraft({ ...draft, content: event.target.value })
             }

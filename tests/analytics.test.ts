@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { analyzeMetrics, parseMetricsCsv, summarizeMetrics } from "../src/shared/metrics";
 import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
-import { analyzeRankings, capturePublicRankingPage, parseFanqieDetailPage } from "../electron/ranking-service";
+import { analyzeRankings, captureFanqieOpeningSample, capturePublicRankingPage, decodeFanqiePublicText, fetchPublicHtml, parseFanqieDetailPage } from "../electron/ranking-service";
 import type { RankingSnapshot } from "../src/shared/types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -38,6 +38,26 @@ describe("ranking analytics", () => {
     expect(opportunity.sampleWarning).toContain("不能判断趋势");
   });
 
+  it("does not label an unknown list as urban fantasy", () => {
+    const snapshots: RankingSnapshot[] = [{ id: "one", source: "test", listName: "未分类榜单", capturedAt: "2026-07-30T00:00:00Z", status: "成功", error: null, entries: [{ id: "a", snapshotId: "one", rank: 1, title: "甲", author: "作者", genre: "未知小类", words: 500000, status: "连载", tags: [], sourceUrl: "" }] }];
+    expect(analyzeRankings(snapshots).marketOpportunities[0].genre).toBe("待校对");
+  });
+
+  it("times out stalled public page requests", async () => {
+    vi.stubGlobal("fetch", vi.fn((_input: string | URL | Request, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    })));
+    await expect(fetchPublicHtml(new URL("https://example.com/rank"), { timeoutMs: 5, attempts: 1 })).rejects.toThrow("公开页请求超时");
+  });
+
+  it("stops reading a public page as soon as the body exceeds the limit", async () => {
+    const chunks = [new Uint8Array(3_000_000), new Uint8Array(2_000_001)];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({
+      start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); },
+    }))));
+    await expect(fetchPublicHtml(new URL("https://example.com/rank"), { attempts: 1 })).rejects.toThrow("超过 5MB");
+  });
+
   it("captures only public page metadata", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(`<html><body><article class="book-item"><span class="rank">1</span><a href="/page/123" title="公开书名">公开书名</a><span class="author">公开作者</span><span>都市脑洞 88万字 连载</span></article></body></html>`, { status: 200, headers: { "content-type": "text/html" } })));
     const result = await capturePublicRankingPage("https://example.com/rank", "公开榜");
@@ -70,6 +90,22 @@ describe("ranking analytics", () => {
     expect(snapshot.status).toBe("成功");
     expect(snapshot.entries[0]).toMatchObject({ title: "正常书名", author: "公开作者", genre: "都市脑洞", platform: "番茄小说" });
     expect(snapshot.entries[0].title).not.toContain("");
+  });
+
+  it("reads exactly ten free public opening chapters and decodes reader text", async () => {
+    const detailHtml = `<h1>开篇样本</h1><span class="author-name-text">作者甲</span>${Array.from({ length: 10 }, (_, index) => `<a href="/reader/${index + 1}">第${index + 1}章 标题${index + 1}</a>`).join("")}`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/page/")) return new Response(detailHtml, { status: 200 });
+      const order = Number(url.split("/").at(-1));
+      const state = { reader: { chapterData: { needPay: 0, order: String(order), title: `第${order}章 标题${order}` } } };
+      return new Response(`<div class="muye-reader-content"><div><p></p><p>公开正文${order}</p></div></div><script>window.__INITIAL_STATE__=${JSON.stringify(state)};</script>`, { status: 200 });
+    }));
+    const sample = await captureFanqieOpeningSample("https://fanqienovel.com/page/123");
+    expect(sample).toMatchObject({ title: "开篇样本", author: "作者甲" });
+    expect(sample.chapters).toHaveLength(10);
+    expect(sample.chapters[0]).toMatchObject({ title: "第1章 标题1", content: "1年\n公开正文1" });
+    expect(decodeFanqiePublicText("")).toBe("1955年");
   });
 });
 

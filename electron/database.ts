@@ -33,6 +33,7 @@ import type {
   StorySummary,
   SystemHealthReport,
 } from "../src/shared/types";
+import { normalizeAestheticProfile } from "../src/shared/aesthetic-profile";
 import { cosineSimilarity, localEmbedding } from "./semantic";
 import {
   aggregateStorySummaries,
@@ -46,6 +47,7 @@ import {
 } from "../src/shared/chapter-lifecycle";
 import { hasColumn, runMigrations } from "./migration-runner";
 import { AiAuditRepository } from "./repositories/ai-audit-repository";
+import type { AiJobCompletion } from "./repositories/ai-audit-repository";
 import { RevisionRepository } from "./repositories/revision-repository";
 import { SearchRepository } from "./repositories/search-repository";
 import { ProjectRepository } from "./repositories/project-repository";
@@ -169,6 +171,19 @@ export class WorkspaceDatabase {
         if (!hasColumn(db, "ai_jobs", "retry_context")) db.exec("ALTER TABLE ai_jobs ADD COLUMN retry_context TEXT");
         db.exec("CREATE INDEX IF NOT EXISTS idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, model, status, updated_at)");
       },
+      (db) => {
+        db.exec("DROP INDEX IF EXISTS idx_global_ai_jobs_cache");
+        db.exec("CREATE INDEX idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, provider, model, status, updated_at)");
+      },
+      (db) => {
+        for (const column of [
+          "headers_at TEXT", "first_token_at TEXT", "completed_at TEXT",
+          "chunk_count INTEGER NOT NULL DEFAULT 0", "attempt_count INTEGER NOT NULL DEFAULT 0",
+        ]) {
+          const name = column.split(" ")[0];
+          if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
+        }
+      },
     ]);
   }
 
@@ -290,6 +305,7 @@ export class WorkspaceDatabase {
       ending: "",
       immutableRules: [],
       prohibitedPatterns: [],
+      aestheticProfile: normalizeAestheticProfile(),
       version: 1,
       approved: false,
       updatedAt: timestamp,
@@ -481,6 +497,7 @@ export class WorkspaceDatabase {
         ending: contract.ending,
         immutableRules: contract.immutableRules,
         prohibitedPatterns: contract.prohibitedPatterns,
+        aestheticProfile: normalizeAestheticProfile(contract.aestheticProfile),
       }) !==
       JSON.stringify({
         premise: previous.premise,
@@ -492,6 +509,7 @@ export class WorkspaceDatabase {
         ending: previous.ending,
         immutableRules: previous.immutableRules,
         prohibitedPatterns: previous.prohibitedPatterns,
+        aestheticProfile: normalizeAestheticProfile(previous.aestheticProfile),
       });
     if (!changed) return previous;
     if (
@@ -502,6 +520,7 @@ export class WorkspaceDatabase {
     }
     const next = {
       ...contract,
+      aestheticProfile: normalizeAestheticProfile(contract.aestheticProfile),
       approved: false,
       version: previous.version + 1,
       updatedAt: now(),
@@ -746,26 +765,54 @@ export class WorkspaceDatabase {
 
   saveFact(id: string, fact: LedgerFact) {
     const db = this.projectDb(id);
-    const next = { ...fact, id: fact.id || randomUUID(), updatedAt: now() };
-    const conflicts = this.listRecords<LedgerFact>(db, "facts").filter(
-      (item) =>
-        item.id !== next.id &&
-        item.subject === next.subject &&
-        item.predicate === next.predicate &&
-        item.validToChapter === null &&
-        next.validToChapter === null &&
-        item.value !== next.value,
-    );
-    if (conflicts.length) next.confidence = "有冲突";
-    this.saveRecord(db, "facts", next.id, next);
-    this.saveEmbedding(
-      db,
-      "facts",
-      next.id,
-      `${next.kind} ${next.genreDimension ?? ""} ${next.subject} ${next.predicate} ${next.value} ${next.knowledgeScope}`,
-    );
-    this.touchProject(id);
-    return next;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const next = { ...fact, id: fact.id || randomUUID(), updatedAt: now() };
+      const facts = this.listRecords<LedgerFact>(db, "facts");
+      const proposedReplacement = next.replacesFactId
+        ? facts.find((item) =>
+            item.id === next.replacesFactId &&
+            item.confidence === "已确认" &&
+            item.subject === next.subject &&
+            item.predicate === next.predicate &&
+            (item.value !== next.value || item.knowledgeScope !== next.knowledgeScope) &&
+            item.validFromChapter < next.validFromChapter &&
+            (item.validToChapter === null || item.validToChapter >= next.validFromChapter)
+          )
+        : undefined;
+      const replacement = next.confidence === "已确认" ? proposedReplacement : undefined;
+      if (replacement) {
+        this.saveRecord(db, "facts", replacement.id, {
+          ...replacement,
+          validToChapter: next.validFromChapter - 1,
+          updatedAt: now(),
+        });
+      }
+      const conflicts = facts.filter(
+        (item) =>
+          item.id !== next.id &&
+          item.id !== proposedReplacement?.id &&
+          item.subject === next.subject &&
+          item.predicate === next.predicate &&
+          item.validToChapter === null &&
+          next.validToChapter === null &&
+          item.value !== next.value,
+      );
+      if (next.confidence !== "已忽略" && conflicts.length) next.confidence = "有冲突";
+      this.saveRecord(db, "facts", next.id, next);
+      this.saveEmbedding(
+        db,
+        "facts",
+        next.id,
+        `${next.kind} ${next.genreDimension ?? ""} ${next.subject} ${next.predicate} ${next.value} ${next.knowledgeScope}`,
+      );
+      db.exec("COMMIT");
+      this.touchProject(id);
+      return next;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
   }
 
   searchRelevantFacts(
@@ -794,6 +841,7 @@ export class WorkspaceDatabase {
       )
       .filter(
         ({ fact }) =>
+          (fact.confidence === "已确认" || fact.confidence === "有冲突") &&
           fact.validFromChapter <= chapterNumber &&
           (fact.validToChapter === null ||
             fact.validToChapter >= chapterNumber),
@@ -1061,9 +1109,10 @@ export class WorkspaceDatabase {
     taskType: string,
     inputHash: string,
     promptVersion: string,
+    provider: string,
     model: string,
   ) {
-    return this.aiAudit.findSuccessful(taskType, inputHash, promptVersion, model);
+    return this.aiAudit.findSuccessful(taskType, inputHash, promptVersion, provider, model);
   }
 
   startAiJob(
@@ -1079,7 +1128,11 @@ export class WorkspaceDatabase {
     return this.aiAudit.start(projectId, taskType, inputHash, promptVersion, provider, model, inputSummary, retryContext);
   }
 
-  finishAiJob(id: string, output: string, error?: string, usage?: { inputTokens: number; outputTokens: number; actualCost: number; durationMs: number; status?: "失败" | "已取消" }) {
+  updateAiJobTelemetry(id: string, telemetry: Pick<AiJobCompletion, "headersAt" | "firstTokenAt" | "chunkCount" | "attemptCount">) {
+    this.aiAudit.updateTelemetry(id, telemetry);
+  }
+
+  finishAiJob(id: string, output: string, error?: string, usage?: AiJobCompletion) {
     this.aiAudit.finish(id, output, error, usage);
     this.aiAudit.prune();
   }
@@ -1109,6 +1162,7 @@ export class WorkspaceDatabase {
     const outputPricePerMillion = Number(
       this.getSetting("ai.outputPricePerMillion", "0"),
     );
+    const longTaskTimeoutMinutes = Math.min(15, Math.max(5, Number(this.getSetting("ai.longTaskTimeoutMinutes", "10")) || 10));
     return {
       baseUrl,
       model,
@@ -1116,6 +1170,7 @@ export class WorkspaceDatabase {
       hasApiKey: false,
       inputPricePerMillion,
       outputPricePerMillion,
+      longTaskTimeoutMinutes,
     };
   }
 
@@ -1131,6 +1186,7 @@ export class WorkspaceDatabase {
       "ai.outputPricePerMillion",
       String(settings.outputPricePerMillion),
     );
+    this.setSetting("ai.longTaskTimeoutMinutes", String(settings.longTaskTimeoutMinutes));
     return this.getAiSettings();
   }
 

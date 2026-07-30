@@ -10,6 +10,7 @@ import {
   Lightbulb,
   Link2,
   LoaderCircle,
+  ScanText,
   Clock3,
   Play,
   Trash2,
@@ -23,6 +24,7 @@ import type {
   ImportPreview,
   InsightPack,
   RankingAnalytics,
+  RankingEntry,
   RankingSnapshot,
   RankingCaptureSchedule,
   ResearchAnalysisRecord,
@@ -46,6 +48,7 @@ import {
   COMMERCIAL_KNOWLEDGE_VERSION,
 } from "../shared/commercial-knowledge";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
+import { FANQIE_CATEGORY_PROFILES } from "../shared/fanqie-taxonomy";
 
 type ResearchTab = "榜单快照" | "样本拆书" | "脱敏洞察" | "商业知识";
 
@@ -130,6 +133,10 @@ export function ResearchPage({
   const [rights, setRights] = useState(false);
   const [cloud, setCloud] = useState(false);
   const [busyBook, setBusyBook] = useState<string | null>(null);
+  const [publicSampleEntry, setPublicSampleEntry] = useState<RankingEntry | null>(null);
+  const [publicSampleGenre, setPublicSampleGenre] = useState<Genre>("都市脑洞");
+  const [publicSampleCloud, setPublicSampleCloud] = useState(false);
+  const [readingPublicSample, setReadingPublicSample] = useState(false);
   const [analysisBook, setAnalysisBook] = useState<ResearchBook | null>(null);
   const [analyses, setAnalyses] = useState<ResearchAnalysisRecord[]>([]);
   const [pendingDeconstruct, setPendingDeconstruct] =
@@ -214,6 +221,35 @@ export function ResearchPage({
     }
     setAiSettings(await api.getAiSettings());
     setPendingDeconstruct(book);
+  };
+
+  const openPublicSample = (snapshot: RankingSnapshot, entry: RankingEntry) => {
+    const profile = FANQIE_CATEGORY_PROFILES.find(
+      (item) => snapshot.listName.includes(item.channel) && snapshot.listName.includes(item.name),
+    );
+    setPublicSampleGenre(profile?.genre ?? "都市脑洞");
+    setPublicSampleCloud(false);
+    setPublicSampleEntry(entry);
+  };
+
+  const importAndDeconstructPublicSample = async () => {
+    if (!publicSampleEntry?.sourceUrl) return;
+    setReadingPublicSample(true);
+    try {
+      const book = await api.importPublicResearchSample(
+        publicSampleEntry.sourceUrl,
+        publicSampleGenre,
+        publicSampleCloud,
+      );
+      setPublicSampleEntry(null);
+      await reload();
+      notify(`已读取《${book.title}》公开前 ${book.chapterCount} 章`);
+      await requestDeconstruct(book);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setReadingPublicSample(false);
+    }
   };
 
   return (
@@ -379,6 +415,16 @@ export function ResearchPage({
                             阅读
                           </a>
                         )}
+                        {entry.sourceUrl && entry.platform === "番茄小说" && (
+                          <button
+                            className="link-button"
+                            type="button"
+                            onClick={() => openPublicSample(snapshot, entry)}
+                            title="读取官方公开前10章并拆书"
+                          >
+                            拆前10章
+                          </button>
+                        )}
                       </span>
                     </div>
                   ))}
@@ -424,7 +470,7 @@ export function ResearchPage({
                     <div className="book-consents">
                       <span>
                         <CheckCircle2 size={14} />
-                        权利已确认
+                        {book.sourceType === "公开试读" ? (book.sampleScope ?? "官方公开开篇样本") : "权利已确认"}
                       </span>
                       <span className={book.cloudConsent ? "" : "muted"}>
                         <CheckCircle2 size={14} />
@@ -467,7 +513,7 @@ export function ResearchPage({
                         )
                       }
                     >
-                      {book.status === "已拆解" ? "重新拆解" : "生成洞察"}
+                      {busyBook === book.id ? "流式拆书中" : book.status === "已拆解" ? "重新拆解" : "生成洞察"}
                     </Button>
                   </div>
                 </article>
@@ -684,6 +730,37 @@ export function ResearchPage({
                 }}
               >
                 保存快照
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {publicSampleEntry && (
+        <Modal title="读取公开前10章并拆书" onClose={() => !readingPublicSample && setPublicSampleEntry(null)}>
+          <div className="form-stack">
+            <div className="source-preview">
+              <ScanText size={20} />
+              <span>
+                <strong>{publicSampleEntry.title}</strong>
+                <small>{publicSampleEntry.author} · 番茄小说官方公开试读</small>
+              </span>
+            </div>
+            <p className="inline-warning">
+              只读取官方详情页公开的第1至第10章。遇到登录、付费、验证或正文无法可靠识别时立即停止；结论仅代表开篇样本。
+            </p>
+            <label className="checkbox-line">
+              <input
+                type="checkbox"
+                checked={publicSampleCloud}
+                onChange={(event) => setPublicSampleCloud(event.target.checked)}
+              />
+              <span>允许将这10章正文发送到已配置的 AI 进行语义拆书</span>
+            </label>
+            <div className="modal-actions">
+              <Button variant="secondary" disabled={readingPublicSample} onClick={() => setPublicSampleEntry(null)}>取消</Button>
+              <Button disabled={readingPublicSample} icon={readingPublicSample ? <LoaderCircle className="spin" size={16} /> : <ScanText size={16} />} onClick={() => void importAndDeconstructPublicSample()}>
+                {readingPublicSample ? "正在读取" : "读取并拆书"}
               </Button>
             </div>
           </div>

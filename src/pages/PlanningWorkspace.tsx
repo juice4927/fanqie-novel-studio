@@ -369,7 +369,12 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
                   const result = await api.generatePlanningDraft(project.summary.id, aiInput);
                   await reload(); setAiModal(false);
                   notify(result.chapters.length ? `已生成 ${result.chapters.length} 章章纲、细纲和场景卡，共 ${result.plans.length} 个规划草稿` : `已生成 ${result.plans.length} 个全书结构草稿`);
-                } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  await reload();
+                  if (message.startsWith("已保存第")) setAiModal(false);
+                  notify(message, "error");
+                }
                 finally { setAiBusy(false); }
               }}>{aiBusy ? "生成中" : "生成草稿"}</Button>
             </div>

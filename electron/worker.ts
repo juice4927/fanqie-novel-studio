@@ -15,6 +15,8 @@ import type {
   StoryContract,
 } from "../src/shared/types";
 import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
+import { analyzeProseTemperature } from "../src/shared/prose-temperature";
+import { normalizeAestheticProfile } from "../src/shared/aesthetic-profile";
 import { scanSystemHealth } from "./health-service";
 
 interface WorkerRequest {
@@ -244,6 +246,19 @@ export function qualityCheck(payload: QualityPayload): QualityIssue[] {
       `短语“${phrase[0]}”在本章密集出现 ${phrase[1]} 次`,
       phrase[0],
     );
+  const aestheticProfile = normalizeAestheticProfile(contract.aestheticProfile);
+  const temperature = analyzeProseTemperature(
+    chapter.content,
+    aestheticProfile.emotionalTemperature,
+  );
+  if (temperature.lowTemperature) {
+    add(
+      "警告",
+      "叙事温度",
+      `本章的具身情绪与感官反馈低于本项目“${aestheticProfile.emotionalTemperature}”温度设定；请结合该书的情绪表达方式检查人物是否只承担说明和推进功能`,
+      `每千字具身情绪 ${temperature.embodiedEmotionPerThousand.toFixed(1)} 次，感官反馈 ${temperature.sensoryPerThousand.toFixed(1)} 次`,
+    );
+  }
   for (const fact of facts.filter((item) => item.confidence === "有冲突")) {
     add(
       "硬性",

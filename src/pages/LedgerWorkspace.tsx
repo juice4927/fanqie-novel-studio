@@ -129,7 +129,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
     "事件",
   ];
   const visible = project.facts.filter(
-    (fact) => filter === "全部" || fact.kind === filter,
+    (fact) => fact.confidence !== "已忽略" && (filter === "全部" || fact.kind === filter),
   );
   const pendingFacts = project.facts.filter((fact) => fact.confidence === "待确认");
   const currentChapter = Math.max(
@@ -212,15 +212,26 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
             <Badge tone="warning">{pendingFacts.length} 项待确认</Badge>
           </div>
           <div className="pending-facts-list">
-            {pendingFacts.slice(0, 12).map((fact) => (
-              <article key={fact.id}>
-                <span><Badge>{fact.kind}</Badge><strong>{fact.subject} · {fact.predicate}</strong><small>{fact.value}｜证据第{fact.evidenceChapter}章</small></span>
-                <Button variant="secondary" onClick={async () => {
-                  try { await api.saveFact(project.summary.id, { ...fact, confidence: "已确认" }); await reload(); notify("候选事实已确认"); }
-                  catch (error) { notify(String(error), "error"); }
-                }}>确认入账</Button>
-              </article>
-            ))}
+            {pendingFacts.slice(0, 12).map((fact) => {
+              const replaced = fact.replacesFactId
+                ? project.facts.find((item) => item.id === fact.replacesFactId)
+                : undefined;
+              return (
+                <article key={fact.id}>
+                  <span><Badge>{fact.changeType ?? (replaced ? "状态替换" : fact.kind)}</Badge><strong>{fact.subject} · {fact.predicate}</strong><small>{fact.changeType === "知情范围变更" && replaced ? `${replaced.knowledgeScope || "公开"} → ${fact.knowledgeScope || "公开"}` : replaced ? `${replaced.value} → ${fact.value}` : fact.value}{fact.numericDelta !== null && fact.numericDelta !== undefined ? `（${fact.numericDelta > 0 ? "+" : ""}${fact.numericDelta}）` : ""}｜证据第{fact.evidenceChapter}章{replaced ? "｜确认后结束旧状态" : ""}</small></span>
+                  <div className="inline-actions">
+                    <Button variant="secondary" onClick={async () => {
+                      try { await api.saveFact(project.summary.id, { ...fact, confidence: "已确认" }); await reload(); notify(replaced ? "新状态已生效，旧状态已结束" : "候选事实已确认"); }
+                      catch (error) { notify(String(error), "error"); }
+                    }}>确认入账</Button>
+                    <Button variant="ghost" icon={<Trash2 size={14} />} onClick={async () => {
+                      try { await api.saveFact(project.summary.id, { ...fact, confidence: "已忽略" }); await reload(); notify("候选已忽略"); }
+                      catch (error) { notify(String(error), "error"); }
+                    }}>忽略</Button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
       ) : null}

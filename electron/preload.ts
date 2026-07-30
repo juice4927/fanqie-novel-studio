@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppApi } from "../src/shared/types";
+import type { AppApi, ChapterDraftStreamEvent } from "../src/shared/types";
 
 const invoke = <T>(channel: string, ...args: unknown[]) => ipcRenderer.invoke(`studio:${channel}`, ...args) as Promise<T>;
 
@@ -13,6 +13,7 @@ const api: AppApi = {
   getProject: (id) => invoke("getProject", id),
   updateProject: (id, patch) => invoke("updateProject", id, patch),
   saveContract: (id, contract) => invoke("saveContract", id, contract),
+  suggestAestheticProfile: (id) => invoke("suggestAestheticProfile", id),
   approveContract: (id) => invoke("approveContract", id),
   savePlan: (id, plan) => invoke("savePlan", id, plan),
   approvePlan: (id, planId) => invoke("approvePlan", id, planId),
@@ -25,6 +26,7 @@ const api: AppApi = {
   listRevisions: (id, collection, entityId) => invoke("listRevisions", id, collection, entityId),
   restoreRevision: (id, revisionId) => invoke("restoreRevision", id, revisionId),
   runQualityCheck: (id, chapterId) => invoke("runQualityCheck", id, chapterId),
+  reviseChapterFromQuality: (id, chapterId) => invoke("reviseChapterFromQuality", id, chapterId),
   extractChapterFacts: (id, chapterId) => invoke("extractChapterFacts", id, chapterId),
   saveFact: (id, fact) => invoke("saveFact", id, fact),
   resolveIssue: (id, issueId, status) => invoke("resolveIssue", id, issueId, status),
@@ -42,13 +44,25 @@ const api: AppApi = {
   listResearchBooks: () => invoke("listResearchBooks"),
   previewResearchFile: () => invoke("previewResearchFile"),
   importResearchBook: (preview, genre, rightsConfirmed, cloudConsent) => invoke("importResearchBook", preview, genre, rightsConfirmed, cloudConsent),
+  importPublicResearchSample: (sourceUrl, genre, cloudConsent) => invoke("importPublicResearchSample", sourceUrl, genre, cloudConsent),
   listInsights: () => invoke("listInsights"),
   createInsight: (input) => invoke("createInsight", input),
   deconstructResearchBook: (bookId) => invoke("deconstructResearchBook", bookId),
   listResearchAnalyses: (bookId) => invoke("listResearchAnalyses", bookId),
   attachInsights: (id, insightIds) => invoke("attachInsights", id, insightIds),
   generateConcepts: (id) => invoke("generateConcepts", id),
-  generateChapterDraft: (id, chapterId) => invoke("generateChapterDraft", id, chapterId),
+  generateChapterDraft: async (id, chapterId, onStream) => {
+    const streamId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const listener = (_event: Electron.IpcRendererEvent, payload: { streamId: string; event: ChapterDraftStreamEvent }) => {
+      if (payload.streamId === streamId) onStream?.(payload.event);
+    };
+    ipcRenderer.on("studio:chapter-draft-stream", listener);
+    try {
+      return await invoke("generateChapterDraft", id, chapterId, streamId);
+    } finally {
+      ipcRenderer.removeListener("studio:chapter-draft-stream", listener);
+    }
+  },
   previewChapterBatch: (id, chapterId) => invoke("previewChapterBatch", id, chapterId),
   generateChapterBatch: (id, chapterId) => invoke("generateChapterBatch", id, chapterId),
   getAiSettings: () => invoke("getAiSettings"),

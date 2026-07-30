@@ -8,11 +8,13 @@ import type {
   AppApi,
   BatchGenerationPreview,
   Chapter,
+  ChapterDraftStreamEvent,
   ConceptCandidate,
   ContextPackage,
   ImportPreview,
   InsightPack,
   MetricSnapshot,
+  PlanningGenerationResult,
   ProjectDetail,
   QualityIssue,
   RankingSnapshot,
@@ -25,7 +27,7 @@ import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
 import { AiService } from "./ai-service";
 import { autoBackupFileName, createEncryptedBackup, nextAutoBackupAt, pruneAutoBackups, restoreEncryptedBackup } from "./backup";
-import { analyzeRankings, capturePublicRankingPage } from "./ranking-service";
+import { analyzeRankings, captureFanqieOpeningSample, capturePublicRankingPage } from "./ranking-service";
 import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
 import {
   findCurrentVolume,
@@ -36,6 +38,8 @@ import { compileCommercialGuidance } from "../src/shared/commercial-knowledge";
 import { buildContextDiagnostics } from "../src/shared/context-diagnostics";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { buildLongTermMemory } from "../src/shared/summaries";
+import { analyzeProseTemperature } from "../src/shared/prose-temperature";
+import { compileAestheticGuidance } from "../src/shared/aesthetic-profile";
 import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
 import { validateIpcArgs } from "./ipc-validation";
 import { StructuredLogger } from "./structured-log";
@@ -203,7 +207,7 @@ function previewChapterBatch(
   };
 }
 
-async function generateOneChapter(id: string, chapterId: string) {
+async function generateOneChapter(id: string, chapterId: string, onStream?: (event: ChapterDraftStreamEvent) => void) {
   if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
   const project = database.getProject(id);
   if (!project.contract.approved) throw new Error("创作契约审批后才能生成正文");
@@ -215,7 +219,7 @@ async function generateOneChapter(id: string, chapterId: string) {
   activeGenerationProjects.add(id);
   try {
     const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
-    const generated = await ai.draftChapter(id, chapter, compileContext({ ...project, facts }, chapter), JSON.stringify({ kind: "chapter", projectId: id, chapterId }));
+    const generated = await ai.draftChapter(id, chapter, compileContext({ ...project, facts }, chapter), JSON.stringify({ kind: "chapter", projectId: id, chapterId }), onStream);
     return database.saveGeneratedChapter(id, generated);
   } finally {
     activeGenerationProjects.delete(id);
@@ -296,6 +300,7 @@ function compileContext(
         ((ownText.match(/[“”]/g)?.length ?? 0) / ownText.length) * 1000,
       )
     : 0;
+  const proseTemperature = analyzeProseTemperature(ownText);
   const activeFacts = project.facts.filter(
     (fact) =>
       fact.confidence === "已确认" &&
@@ -325,6 +330,7 @@ function compileContext(
       `终局：${project.contract.ending}`,
       `不可破坏规则：${project.contract.immutableRules.join("；") || "无"}`,
       `禁写项：${project.contract.prohibitedPatterns.join("；") || "无"}`,
+      `项目审美：\n${compileAestheticGuidance(project.contract.aestheticProfile)}`,
     ].join("\n"),
     commercialGuidance: compileCommercialGuidance(
       project.summary.genre,
@@ -391,7 +397,7 @@ function compileContext(
         )
         .join("\n") || "无额外限制",
     authorStyle: approvedOwnText.length
-      ? `仅根据本项目已定稿正文统计：平均句长 ${averageSentence} 字，平均段长 ${averageParagraph} 字，对话标记密度 ${dialogueDensity}‰。保持当前项目的叙事密度，不模仿研究样本。`
+      ? `仅根据本项目已定稿正文统计：平均句长 ${averageSentence} 字，平均段长 ${averageParagraph} 字，对话标记密度 ${dialogueDensity}‰，每千字具身情绪 ${proseTemperature.embodiedEmotionPerThousand.toFixed(1)} 次，感官反馈 ${proseTemperature.sensoryPerThousand.toFixed(1)} 次。保持当前项目的叙事密度，不模仿研究样本；这些统计只是观察值，具体取舍以本项目审美设定为准。`
       : "尚无本项目已定稿正文，不加载任何样本文风。",
     estimatedTokens: 0,
   } satisfies ContextPackage;
@@ -652,6 +658,9 @@ function registerHandlers() {
   handle("getProject", (id) => database.getProject(id));
   handle("updateProject", (id, patch) => database.updateProject(id, patch));
   handle("saveContract", (id, contract) => database.saveContract(id, contract));
+  handle("suggestAestheticProfile", (id) =>
+    ai.suggestAestheticProfile(database.getProject(id)),
+  );
   handle("approveContract", (id) => database.approveContract(id));
   handle("savePlan", (id, plan) => database.savePlan(id, plan));
   handle("approvePlan", (id, planId) => database.approvePlan(id, planId));
@@ -664,13 +673,25 @@ function registerHandlers() {
     const count = input.mode === "后续章纲" ? input.chapterCount ?? 10 : 0;
     if (input.mode === "后续章纲" && project.chapters.some((chapter) => chapter.number >= fromChapter && chapter.number < fromChapter + count))
       throw new Error(`第${fromChapter}–${fromChapter + count - 1}章范围内已有章节，AI 不会覆盖`);
-    const generated = await ai.generatePlanning(project, { ...input, fromChapter });
-    const latest = database.getProject(id);
-    if (generated.chapters.some((chapter) => latest.chapters.some((existing) => existing.number === chapter.number)))
-      throw new Error("生成期间章节范围发生变化，本次结果未保存，请重新生成");
-    const plans = generated.plans.map((plan) => database.savePlan(id, plan));
-    const chapters = generated.chapters.map((chapter) => database.saveChapter(id, chapter));
-    return { ...generated, plans, chapters };
+    const savedPlans: PlanningGenerationResult["plans"] = [];
+    const savedChapters: PlanningGenerationResult["chapters"] = [];
+    try {
+      const generated = await ai.generatePlanning(project, { ...input, fromChapter }, (batch) => {
+        const latest = database.getProject(id);
+        if (batch.chapters.some((chapter) => latest.chapters.some((existing) => existing.number === chapter.number)))
+          throw new Error("生成期间章节范围发生变化，本批结果未保存，请重新生成");
+        savedPlans.push(...batch.plans.map((plan) => database.savePlan(id, plan)));
+        savedChapters.push(...batch.chapters.map((chapter) => database.saveChapter(id, chapter)));
+      });
+      if (!generated.chapters.length) {
+        savedPlans.push(...generated.plans.map((plan) => database.savePlan(id, plan)));
+      }
+      return { ...generated, plans: savedPlans, chapters: savedChapters };
+    } catch (error) {
+      if (!savedChapters.length) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`已保存第${savedChapters[0].number}–${savedChapters.at(-1)!.number}章；后续批次生成失败：${message}`);
+    }
   });
   handle("saveChapter", (id, chapter, mode) => database.saveChapter(id, chapter, mode));
   handle("saveExpectation", (id, expectation) =>
@@ -678,20 +699,36 @@ function registerHandlers() {
   );
   handle("transitionChapter", async (id, chapterId, status) => {
     const saved = database.transitionChapter(id, chapterId, status);
-    if (status === "已定稿" && getApiKey()) {
-      try {
-        const project = database.getProject(id);
-        const candidates = await ai.extractChapterFacts(project, saved);
-        const existing = new Set(project.facts.map((fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`));
-        for (const fact of candidates) {
-          const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
-          if (!existing.has(key)) database.saveFact(id, fact);
-        }
-      } catch {
-        // Finalization must remain available if optional AI extraction fails.
-      }
+    if (status !== "已定稿") {
+      return { chapter: saved, ledgerExtraction: { status: "不适用", candidateCount: 0 } };
     }
-    return saved;
+    if (!getApiKey()) {
+      return { chapter: saved, ledgerExtraction: { status: "未配置", candidateCount: 0 } };
+    }
+    try {
+      const project = database.getProject(id);
+      const candidates = await ai.extractChapterFacts(project, saved);
+      const existing = new Set(project.facts.map((fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`));
+      let candidateCount = 0;
+      for (const fact of candidates) {
+        const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
+        if (!existing.has(key)) {
+          database.saveFact(id, fact);
+          existing.add(key);
+          candidateCount += 1;
+        }
+      }
+      return { chapter: saved, ledgerExtraction: { status: "已完成", candidateCount } };
+    } catch (error) {
+      return {
+        chapter: saved,
+        ledgerExtraction: {
+          status: "失败",
+          candidateCount: 0,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
   });
   handle("compileContext", (id, chapterId) => {
     const project = database.getProject(id);
@@ -820,6 +857,36 @@ function registerHandlers() {
       database.transitionChapter(id, chapterId, "待质检");
     return issues;
   });
+  handle("reviseChapterFromQuality", async (id, chapterId) => {
+    if (activeGenerationProjects.has(id))
+      throw new Error("该作品已有正文生成或修订任务正在运行");
+    const project = database.getProject(id);
+    const chapter = project.chapters.find((item) => item.id === chapterId);
+    if (!chapter) throw new Error("章节不存在");
+    if (["已定稿", "待发布", "已发布"].includes(chapter.status))
+      throw new Error("已定稿或进入发布流程的章节不能直接由 AI 修改");
+    const issues = project.issues.filter(
+      (issue) => issue.chapterId === chapterId && issue.status === "待处理",
+    );
+    if (!issues.length) throw new Error("本章没有可供 AI 修订的待处理问题");
+    const facts = database.searchRelevantFacts(
+      id,
+      `${chapter.title} ${chapter.outline} ${chapter.content.slice(0, 500)}`,
+      chapter.number,
+    );
+    activeGenerationProjects.add(id);
+    try {
+      const revised = await ai.reviseChapter(
+        { ...project, facts },
+        chapter,
+        compileContext({ ...project, facts }, chapter),
+        issues,
+      );
+      return database.saveGeneratedChapter(id, revised);
+    } finally {
+      activeGenerationProjects.delete(id);
+    }
+  });
   handle("extractChapterFacts", async (id, chapterId) => {
     const project = database.getProject(id);
     const chapter = project.chapters.find((item) => item.id === chapterId);
@@ -827,9 +894,14 @@ function registerHandlers() {
     if (!chapter.content.trim()) throw new Error("章节还没有正文");
     const candidates = await ai.extractChapterFacts(project, chapter);
     const existing = new Set(project.facts.map((fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`));
-    return candidates
-      .filter((fact) => !existing.has(`${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`))
-      .map((fact) => database.saveFact(id, fact));
+    const saved = [];
+    for (const fact of candidates) {
+      const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
+      if (existing.has(key)) continue;
+      saved.push(database.saveFact(id, fact));
+      existing.add(key);
+    }
+    return saved;
   });
   handle("saveFact", (id, fact) => database.saveFact(id, fact));
   handle("resolveIssue", (id, issueId, status) =>
@@ -905,6 +977,26 @@ function registerHandlers() {
       return book;
     },
   );
+  handle("importPublicResearchSample", async (sourceUrl, genre, cloudConsent) => {
+    const sample = await captureFanqieOpeningSample(sourceUrl);
+    const book: ResearchBook = {
+      id: randomUUID(),
+      title: sample.title,
+      author: sample.author,
+      genre,
+      sourceType: "公开试读",
+      sourceUrl: sample.sourceUrl,
+      sampleScope: `官方公开前 ${sample.chapters.length} 章，仅代表开篇样本`,
+      chapterCount: sample.chapters.length,
+      wordCount: sample.chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0),
+      rightsConfirmed: false,
+      cloudConsent,
+      importedAt: now(),
+      status: "待拆解",
+    };
+    database.saveResearchBook(book, sample.chapters);
+    return book;
+  });
   handle("listInsights", () => database.listInsights());
   handle("createInsight", (input) => {
     const insight: InsightPack = {
@@ -947,7 +1039,9 @@ function registerHandlers() {
       opportunities,
     );
   });
-  handle("generateChapterDraft", generateOneChapter);
+  handle("generateChapterDraft", (id, chapterId, streamId) => generateOneChapter(id, chapterId, streamId
+    ? (event) => mainWindow?.webContents.send("studio:chapter-draft-stream", { streamId, event })
+    : undefined));
   handle("previewChapterBatch", (id, chapterId) =>
     previewChapterBatch(
       database.getProject(id),
@@ -973,6 +1067,9 @@ function registerHandlers() {
   handle("listAiJobs", (projectId) => database.listAiJobs(projectId));
   handle("cancelAiJob", (id) => ai.cancelJob(id));
   handle("retryAiJob", async (id) => {
+    const existingJobs = database.listAiJobs();
+    const sourceJob = existingJobs.find((job) => job.id === id);
+    if (!sourceJob) throw new Error("AI 任务不存在");
     const raw = database.getAiJobRetryContext(id);
     if (!raw) throw new Error("该任务没有可安全重放的上下文，请返回原操作重试");
     const context = JSON.parse(raw) as { kind: "chapter" | "batch"; projectId: string; chapterId: string };
@@ -982,8 +1079,18 @@ function registerHandlers() {
         ? generateChapterBatchFrom(context.projectId, context.chapterId)
         : null;
     if (!execution) throw new Error("不支持的任务重试类型");
-    void execution.catch(() => undefined);
-    return database.listAiJobs().find((job) => job.id !== id && job.projectId === context.projectId) ?? database.listAiJobs()[0];
+    let executionError: unknown;
+    let completed = false;
+    void execution.then(() => { completed = true; }, (error) => { executionError = error; });
+    const existingIds = new Set(existingJobs.map((job) => job.id));
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (executionError) throw executionError;
+      const created = database.listAiJobs(context.projectId).find((job) => !existingIds.has(job.id));
+      if (created) return created;
+      if (completed) throw new Error("重试没有创建新的 AI 任务；目标章节可能已经有正文");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error("AI 重试任务启动超时，请返回原操作重试");
   });
   handle("exportProject", (id, format) => exportProject(id, format));
   handle("importMetricsCsv", (id, csvText) => {
@@ -1145,7 +1252,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   logger = new StructuredLogger(path.join(app.getPath("userData"), "logs"));
   logger.write("info", "application.started", { version: app.getVersion(), workspace: workspaceRoot });
   worker = new BackgroundWorker();
-  ai = new AiService(database, getApiKey);
+  ai = new AiService(database, getApiKey, 120_000, 0, (level, event, data) => logger.write(level, event, data));
   registerHandlers();
   void runDueRankingSchedules();
   void runAutomaticBackup();

@@ -57,5 +57,27 @@ describe("IPC runtime validation", () => {
     } catch (error) {
       expect(String(error)).not.toContain(secret);
     }
+    const settings = { baseUrl: "https://api.openai.com/v1", model: "gpt-5.1", embeddingModel: "local", inputPricePerMillion: 0, outputPricePerMillion: 0, longTaskTimeoutMinutes: 10 };
+    expect(validateIpcArgs("saveAiSettings", [settings])).toEqual([settings]);
+    expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, longTaskTimeoutMinutes: 20 }])).toThrow("参数无效");
+  });
+
+  it("accepts a strict per-project aesthetic profile", () => {
+    const contract = {
+      premise: "前提", protagonistDesire: "欲望", readerPromise: "承诺", coreEmotion: "情绪", ending: "终局",
+      immutableRules: [], prohibitedPatterns: [], version: 1, approved: false,
+      updatedAt: new Date().toISOString(),
+      aestheticProfile: {
+        narrativeDistance: "贴身", emotionalTemperature: "热烈",
+        proseTexture: "明快", dialogueStyle: "直接", emotionalExpression: "外放",
+        signatureTechniques: ["群像交锋"], avoidPatterns: ["冷处理"],
+      },
+    };
+
+    expect(validateIpcArgs("saveContract", ["project", contract])).toEqual(["project", contract]);
+    expect(() => validateIpcArgs("saveContract", ["project", {
+      ...contract,
+      aestheticProfile: { ...contract.aestheticProfile, emotionalTemperature: "统一模板" },
+    }])).toThrow("参数无效");
   });
 });

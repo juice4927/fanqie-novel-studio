@@ -50,4 +50,22 @@ describe("genre-specific local quality checks", () => {
       ),
     ).toBe(true);
   });
+
+  it("warns when a long chapter reads like a disembodied report", () => {
+    const current = chapter(5, "核清田亩差额");
+    current.content = "沈青禾翻开田册，逐项核对田亩与户数，随后把结果记入新册。".repeat(70);
+    current.wordCount = current.content.length;
+
+    const issues = qualityCheck({
+      projectId: "project",
+      chapter: current,
+      recentChapters: [],
+      facts: [],
+      contract,
+      genre: "玄幻/仙侠",
+      originalityMatches: [],
+    });
+
+    expect(issues.some((issue) => issue.category === "叙事温度" && issue.severity === "警告")).toBe(true);
+  });
 });

@@ -3,7 +3,7 @@ node_modules.partial-*/
 dist/
 dist-electron/
 release/
-release-p2-verify/
+release-*/
 test-results/
 playwright-report/
 *.log

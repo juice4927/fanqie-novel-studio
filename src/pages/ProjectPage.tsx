@@ -27,6 +27,8 @@ import {
   Trash2,
 } from "lucide-react";
 import type {
+  AestheticProfile,
+  AestheticProfileSuggestion,
   AppApi,
   BatchGenerationPreview,
   ChangeRequest,
@@ -49,6 +51,7 @@ import type {
   SearchHit,
   RevisionRecord,
 } from "../shared/types";
+import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
 import { AutosaveCoordinator, chapterDraftSignature, clearRecoveredChapter, readRecoveredChapter, writeRecoveredChapter } from "../lib/chapter-draft";
 import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
 import type { GenrePluginDefinition } from "../shared/genre-plugins";
@@ -666,17 +669,47 @@ function LightbulbIcon() {
 }
 
 function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
-  const [contract, setContract] = useState<StoryContract>(project.contract);
-  useEffect(() => setContract(project.contract), [project.contract]);
+  const normalizeContract = (value: StoryContract): StoryContract => ({
+    ...value,
+    aestheticProfile: normalizeAestheticProfile(value.aestheticProfile),
+  });
+  const [contract, setContract] = useState<StoryContract>(() => normalizeContract(project.contract));
+  const [aestheticSuggestion, setAestheticSuggestion] = useState<AestheticProfileSuggestion | null>(null);
+  const [optimizingAesthetic, setOptimizingAesthetic] = useState(false);
+  useEffect(() => setContract(normalizeContract(project.contract)), [project.contract]);
   const set = (key: keyof StoryContract, value: string | string[]) =>
     setContract((current) => ({ ...current, [key]: value }));
+  const setAesthetic = <K extends keyof AestheticProfile,>(
+    key: K,
+    value: AestheticProfile[K],
+  ) => setContract((current) => ({
+    ...current,
+    aestheticProfile: {
+      ...normalizeAestheticProfile(current.aestheticProfile),
+      [key]: value,
+    },
+  }));
   const save = async () => {
     try {
       setContract(await api.saveContract(project.summary.id, contract));
+      setAestheticSuggestion(null);
       await reload();
       notify("创作契约已保存为新版本");
     } catch (error) {
       notify(String(error), "error");
+    }
+  };
+  const optimizeAesthetic = async () => {
+    setOptimizingAesthetic(true);
+    try {
+      const suggestion = await api.suggestAestheticProfile(project.summary.id);
+      setAestheticSuggestion(suggestion);
+      setContract((current) => ({ ...current, aestheticProfile: suggestion.profile }));
+      notify("审美优化提案已回填，请审阅后保存");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setOptimizingAesthetic(false);
     }
   };
   const genrePlugin = GENRE_PLUGINS[project.summary.genre];
@@ -838,6 +871,101 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
             placeholder="终局状态、主角代价与主题落点"
           />
         </Field>
+        <div className="bible-subsection-heading">
+          <div>
+            <h2>审美设定</h2>
+            <p>仅约束当前作品；生成、语义质检和 AI 修改会共同读取这里。</p>
+          </div>
+          <Button
+            variant="secondary"
+            icon={optimizingAesthetic ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+            disabled={optimizingAesthetic}
+            onClick={optimizeAesthetic}
+          >
+            {optimizingAesthetic ? "正在分析本书" : "AI 优化本书审美"}
+          </Button>
+        </div>
+        {aestheticSuggestion && (
+          <div className="aesthetic-suggestion" role="status">
+            <div>
+              <strong>本书审美诊断</strong>
+              <Badge tone="warning">提案尚未保存</Badge>
+            </div>
+            <p>{aestheticSuggestion.diagnosis}</p>
+            <ul>
+              {aestheticSuggestion.rationale.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
+        <div className="form-grid two">
+          <Field label="叙事距离" hint="镜头与人物内心的常态距离">
+            <Select
+              value={contract.aestheticProfile!.narrativeDistance}
+              onChange={(event) => setAesthetic(
+                "narrativeDistance",
+                event.target.value as AestheticProfile["narrativeDistance"],
+              )}
+            >
+              <option value="贴身">贴身</option>
+              <option value="适中">适中</option>
+              <option value="远距">远距</option>
+            </Select>
+          </Field>
+          <Field label="情绪温度" hint="本地质检会据此调整温度阈值">
+            <Select
+              value={contract.aestheticProfile!.emotionalTemperature}
+              onChange={(event) => setAesthetic(
+                "emotionalTemperature",
+                event.target.value as AestheticProfile["emotionalTemperature"],
+              )}
+            >
+              <option value="冷峻">冷峻</option>
+              <option value="克制">克制</option>
+              <option value="均衡">均衡</option>
+              <option value="热烈">热烈</option>
+            </Select>
+          </Field>
+          <Field label="文字质地">
+            <Textarea
+              rows={4}
+              value={contract.aestheticProfile!.proseTexture}
+              onChange={(event) => setAesthetic("proseTexture", event.target.value)}
+              placeholder="如：短句利落，动作具体，少用抽象判断"
+            />
+          </Field>
+          <Field label="对话风格">
+            <Textarea
+              rows={4}
+              value={contract.aestheticProfile!.dialogueStyle}
+              onChange={(event) => setAesthetic("dialogueStyle", event.target.value)}
+              placeholder="如：言外有意，身份差异清楚，避免解释性对白"
+            />
+          </Field>
+        </div>
+        <Field label="情绪表达">
+          <Textarea
+            rows={4}
+            value={contract.aestheticProfile!.emotionalExpression}
+            onChange={(event) => setAesthetic("emotionalExpression", event.target.value)}
+            placeholder="说明本书如何呈现情绪，以及主角、配角是否需要形成温差"
+          />
+        </Field>
+        <div className="form-grid two">
+          <Field label="标志性手法" hint="每行一条">
+            <Textarea
+              rows={6}
+              value={contract.aestheticProfile!.signatureTechniques.join("\n")}
+              onChange={(event) => setAesthetic("signatureTechniques", splitLines(event.target.value))}
+            />
+          </Field>
+          <Field label="审美避用" hint="每行一条；用于生成与语义质检，不作为硬性禁写词匹配">
+            <Textarea
+              rows={6}
+              value={contract.aestheticProfile!.avoidPatterns.join("\n")}
+              onChange={(event) => setAesthetic("avoidPatterns", splitLines(event.target.value))}
+            />
+          </Field>
+        </div>
         <div className="form-grid two">
           <Field label="不可破坏规则" hint="每行一条">
             <Textarea
