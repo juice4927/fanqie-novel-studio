@@ -51,7 +51,7 @@ describe("per-book isolation and gates", () => {
     databases.push(database);
     expect(database.listProjects()[0]).toMatchObject({ id: "legacy-project", title: "旧版作品", safeStockLine: 10 });
     const inspection = new DatabaseSync(path.join(root, "catalog.sqlite"));
-    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
+    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(4);
     expect((inspection.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some((column) => column.name === "safe_stock_line")).toBe(true);
     inspection.close();
   });
@@ -77,6 +77,17 @@ describe("per-book isolation and gates", () => {
     const reopened = new WorkspaceDatabase(root);
     databases.push(reopened);
     expect(reopened.listAiJobs().find((job) => job.id === abandoned)).toMatchObject({ status: "已中断", error: expect.stringContaining("重新执行") });
+  });
+
+  it("preserves every AI attempt while caching the latest success", () => {
+    const database = createDatabase();
+    const first = database.startAiJob(null, "draft-chapter", "same-hash", "prompt", "provider", "model", "第一次", "{\"kind\":\"chapter\"}");
+    database.finishAiJob(first, "", "第一次失败");
+    const second = database.startAiJob(null, "draft-chapter", "same-hash", "prompt", "provider", "model", "第二次", "{\"kind\":\"chapter\"}");
+    database.finishAiJob(second, "{\"content\":\"成功\"}");
+    expect(database.listAiJobs().filter((job) => [first, second].includes(job.id))).toHaveLength(2);
+    expect(database.listAiJobs().find((job) => job.id === first)).toMatchObject({ status: "失败", retryable: true });
+    expect(database.findAiJob("draft-chapter", "same-hash", "prompt", "model")).toBe("{\"content\":\"成功\"}");
   });
 
   it("detects and rebuilds incomplete chapter search indexes", () => {

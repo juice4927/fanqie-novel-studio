@@ -55,6 +55,7 @@ const api: AppApi = {
   saveAiSettings: (settings, apiKey) => invoke("saveAiSettings", settings, apiKey),
   listAiJobs: (projectId) => invoke("listAiJobs", projectId),
   cancelAiJob: (id) => invoke("cancelAiJob", id),
+  retryAiJob: (id) => invoke("retryAiJob", id),
   exportProject: (id, format) => invoke("exportProject", id, format),
   importMetricsCsv: (id, csvText) => invoke("importMetricsCsv", id, csvText),
   getReviewSuggestions: (id) => invoke("getReviewSuggestions", id),

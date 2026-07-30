@@ -21,8 +21,15 @@ import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
 import { WorkspaceDatabase, now } from "./database";
 import { compileCommercialGuidance, compileDeconstructionFramework } from "../src/shared/commercial-knowledge";
 import { inferProviderCapabilities, parseProviderUsage, providerError, rejectsJsonMode } from "./ai-provider";
+import { PROMPT_VERSION } from "../src/shared/prompt-version";
 
-const PROMPT_VERSION = "2026-07-30.v4-structured-genres";
+export function abortableDelay(milliseconds: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) { reject(new Error("任务已取消")); return; }
+    const timer = setTimeout(resolve, milliseconds);
+    signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("任务已取消")); }, { once: true });
+  });
+}
 
 const InsightSchema = z.object({
   audienceNeed: z.string(),
@@ -210,6 +217,7 @@ export class AiService {
     user: string;
     schema: z.ZodType<T>;
     timeoutMs?: number;
+    retryContext?: string;
   }): Promise<T> {
     const settings = this.database.getAiSettings();
     const apiKey = this.getApiKey();
@@ -219,19 +227,21 @@ export class AiService {
     if (cached) return options.schema.parse(JSON.parse(cached));
     const jobId = this.database.startAiJob(
       options.projectId, options.taskType, inputHash, PROMPT_VERSION, settings.baseUrl, settings.model, options.inputSummary,
+      options.retryContext,
     );
     const startedAt = Date.now();
     let lastError = "模型输出不符合结构要求";
     let repairInstruction = "";
     let useJsonMode = inferProviderCapabilities(settings.baseUrl).jsonMode;
     let usage = { inputTokens: 0, outputTokens: 0 };
+    const controller = new AbortController();
+    this.activeRequests.set(jobId, controller);
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const endpoint = `${settings.baseUrl.replace(/\/$/, "")}/chat/completions`;
-        const controller = new AbortController();
-        this.activeRequests.set(jobId, controller);
         const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let timedOut = false;
+        const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
         let response: Response;
         try {
           response = await fetch(endpoint, {
@@ -251,12 +261,11 @@ export class AiService {
         } catch (error) {
           if (controller.signal.aborted) {
             if (this.cancelledJobs.has(jobId)) throw new Error("任务已取消");
-            throw new Error(`模型请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`);
+            if (timedOut) throw new Error(`模型请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`);
           }
           throw error;
         } finally {
           clearTimeout(timeout);
-          this.activeRequests.delete(jobId);
         }
         if (!response.ok) {
           const detail = (await response.text()).slice(0, 300);
@@ -277,24 +286,37 @@ export class AiService {
           actualCost: usage.inputTokens / 1_000_000 * settings.inputPricePerMillion + usage.outputTokens / 1_000_000 * settings.outputPricePerMillion,
           durationMs: Date.now() - startedAt,
         });
+        this.activeRequests.delete(jobId);
         return parsed;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
         if (lastError === "任务已取消") {
           this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt, status: "已取消" });
           this.cancelledJobs.delete(jobId);
+          this.activeRequests.delete(jobId);
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型请求超时")) {
           this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt });
+          this.activeRequests.delete(jobId);
           throw new Error(lastError);
         }
-        if (lastError.startsWith("模型服务暂时不可用") && attempt < 2)
-          await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+        if (lastError.startsWith("模型服务暂时不可用") && attempt < 2) {
+          try {
+            await abortableDelay(1000 * 2 ** attempt, controller.signal);
+          } catch {
+            lastError = "任务已取消";
+            this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt, status: "已取消" });
+            this.cancelledJobs.delete(jobId);
+            this.activeRequests.delete(jobId);
+            throw new Error(lastError);
+          }
+        }
         repairInstruction = `\n上一次输出校验失败：${lastError}。请修复结构并重新输出完整 JSON。`;
       }
     }
     this.database.finishAiJob(jobId, "", lastError, { ...usage, actualCost: 0, durationMs: Date.now() - startedAt });
+    this.activeRequests.delete(jobId);
     throw new Error(lastError);
   }
 
@@ -450,7 +472,7 @@ export class AiService {
     return { startChapter, plans: [roughPlan, ...detailPlans, ...scenePlans], chapters };
   }
 
-  async draftChapter(projectId: string, chapter: Chapter, context: ContextPackage): Promise<Chapter> {
+  async draftChapter(projectId: string, chapter: Chapter, context: ContextPackage, retryContext?: string): Promise<Chapter> {
     const result = await this.runJson({
       projectId,
       taskType: "draft-chapter",
@@ -458,6 +480,7 @@ export class AiService {
       system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑和契约。",
       user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(context)}\n请输出 title 和 content。正文目标 1800-2600 汉字。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响；留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
       schema: DraftSchema,
+      retryContext,
     });
     return { ...chapter, title: result.title, content: result.content, status: "待质检", updatedAt: now() };
   }

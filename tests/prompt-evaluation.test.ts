@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseProviderUsage, providerError, rejectsJsonMode } from "../electron/ai-provider";
 import { comparePromptVersions, evaluatePromptOutput } from "../src/shared/prompt-evaluation";
+import { PROMPT_REGRESSION_BASELINE } from "../src/shared/prompt-regression-corpus";
+import { PROMPT_VERSION } from "../src/shared/prompt-version";
 
 describe("provider compatibility", () => {
   it("normalizes token usage and detects JSON mode rejection", () => {
@@ -20,5 +22,13 @@ describe("prompt regression evaluation", () => {
     expect(bad.structureScore).toBe(50);
     expect(bad.factScore).toBe(50);
     expect(comparePromptVersions([good], [bad])).toMatchObject({ regressed: true });
+  });
+
+  it("keeps the current real-task corpus above its versioned baseline", () => {
+    expect(PROMPT_REGRESSION_BASELINE.promptVersion).toBe(PROMPT_VERSION);
+    const scores = PROMPT_REGRESSION_BASELINE.fixtures.map((item) => evaluatePromptOutput(item.fixture, item.output, item.inputTokens, item.outputTokens));
+    const average = scores.reduce((sum, item) => sum + item.totalScore, 0) / scores.length;
+    expect(average).toBeGreaterThanOrEqual(PROMPT_REGRESSION_BASELINE.minimumAverageScore);
+    expect(scores.every((item) => item.structureScore === 100 && item.factScore === 100)).toBe(true);
   });
 });

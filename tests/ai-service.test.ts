@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AiService } from "../electron/ai-service";
+import { abortableDelay, AiService } from "../electron/ai-service";
 import type { WorkspaceDatabase } from "../electron/database";
 import type { Chapter, ContextPackage, ProjectDetail, ResearchBook } from "../src/shared/types";
 
@@ -27,6 +27,31 @@ describe("AI request timeout", () => {
     await expect(service.deconstruct(book, [{ ordinal: 1, title: "第一章", content: "沈砚走进云港市。".repeat(100), wordCount: 900 }]))
       .rejects.toThrow("模型请求超时");
     expect(finished).toEqual([{ output: "", error: expect.stringContaining("模型请求超时") }]);
+  });
+});
+
+describe("AI cancellation", () => {
+  it("interrupts retry backoff immediately", async () => {
+    const finished: Array<{ status?: string }> = [];
+    const database = {
+      getAiSettings: () => ({ baseUrl: "https://model.invalid/v1", model: "test", embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
+      findAiJob: () => undefined, startAiJob: () => "job-backoff",
+      finishAiJob: (_id: string, _output: string, _error?: string, usage?: { status?: string }) => finished.push({ status: usage?.status }),
+    } as unknown as WorkspaceDatabase;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("busy", { status: 503 })));
+    const service = new AiService(database, () => "secret");
+    const book = { id: "book", title: "测试书", author: "作者", genre: "都市脑洞", sourceType: "TXT", chapterCount: 1, wordCount: 1000, rightsConfirmed: true, cloudConsent: true, importedAt: new Date().toISOString(), status: "待拆解" } satisfies ResearchBook;
+    const running = service.deconstruct(book, [{ ordinal: 1, title: "第一章", content: "正文".repeat(100), wordCount: 200 }]);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(service.cancelJob("job-backoff")).toBe(true);
+    await expect(running).rejects.toThrow("任务已取消");
+    expect(finished.at(-1)).toEqual({ status: "已取消" });
+  });
+
+  it("rejects immediately when a delay starts with an aborted signal", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(abortableDelay(1000, controller.signal)).rejects.toThrow("任务已取消");
   });
 });
 

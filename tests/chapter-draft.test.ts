@@ -56,4 +56,9 @@ describe("chapter draft reliability", () => {
     expect(values.has(chapterRecoveryKey("project", chapter("")))).toBe(true);
     expect(readRecoveredChapter("project", chapter("服务端旧稿"), storage).content).toBe("崩溃前草稿");
   });
+
+  it("reports when the local recovery copy cannot be written", () => {
+    const storage = { setItem: () => { throw new Error("quota exceeded"); } };
+    expect(writeRecoveredChapter("project", chapter("无法落盘"), storage)).toBe(false);
+  });
 });

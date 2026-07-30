@@ -1071,6 +1071,9 @@ export function createBrowserApi(): AppApi {
     async cancelAiJob() {
       return false;
     },
+    async retryAiJob() {
+      throw new Error("AI 任务重试仅在桌面版可用");
+    },
     async exportProject(projectId, format) {
       const project = getProject(state, projectId);
       const content = project.chapters

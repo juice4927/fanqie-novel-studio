@@ -144,6 +144,11 @@ export class WorkspaceDatabase {
           if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
         }
       },
+      (db) => {
+        db.exec("DROP INDEX IF EXISTS idx_global_ai_jobs_dedupe");
+        if (!hasColumn(db, "ai_jobs", "retry_context")) db.exec("ALTER TABLE ai_jobs ADD COLUMN retry_context TEXT");
+        db.exec("CREATE INDEX IF NOT EXISTS idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, model, status, updated_at)");
+      },
     ]);
   }
 
@@ -1231,7 +1236,7 @@ export class WorkspaceDatabase {
     const row = this.catalog
       .prepare(
         `
-      SELECT output FROM ai_jobs WHERE task_type = ? AND input_hash = ? AND prompt_version = ? AND model = ? AND status = '成功'
+      SELECT output FROM ai_jobs WHERE task_type = ? AND input_hash = ? AND prompt_version = ? AND model = ? AND status = '成功' ORDER BY updated_at DESC LIMIT 1
     `,
       )
       .get(taskType, inputHash, promptVersion, model) as
@@ -1247,14 +1252,15 @@ export class WorkspaceDatabase {
     provider: string,
     model: string,
     inputSummary: string,
+    retryContext?: string,
   ) {
     const id = randomUUID();
     const timestamp = now();
     this.catalog
       .prepare(
         `
-      INSERT OR REPLACE INTO ai_jobs(id, project_id, task_type, input_hash, prompt_version, provider, model, status, input_summary, output, estimated_cost, error, created_at, updated_at)
-      VALUES(?, ?, ?, ?, ?, ?, ?, '运行中', ?, NULL, 0, NULL, ?, ?)
+      INSERT INTO ai_jobs(id, project_id, task_type, input_hash, prompt_version, provider, model, status, input_summary, output, estimated_cost, error, retry_context, created_at, updated_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?, '运行中', ?, NULL, 0, NULL, ?, ?, ?)
     `,
       )
       .run(
@@ -1266,6 +1272,7 @@ export class WorkspaceDatabase {
         provider,
         model,
         inputSummary,
+        retryContext ?? null,
         timestamp,
         timestamp,
       );
@@ -1299,8 +1306,15 @@ export class WorkspaceDatabase {
       inputSummary: String(row.input_summary), promptVersion: String(row.prompt_version), provider: String(row.provider), model: String(row.model),
       status: String(row.status) as AiJobRecord["status"], inputTokens: Number(row.input_tokens ?? 0), outputTokens: Number(row.output_tokens ?? 0),
       actualCost: Number(row.actual_cost ?? 0), durationMs: Number(row.duration_ms ?? 0), error: row.error ? String(row.error) : null,
+      retryable: Boolean(row.retry_context) && ["失败", "已取消", "已中断"].includes(String(row.status)),
       createdAt: String(row.created_at), updatedAt: String(row.updated_at),
     }));
+  }
+
+  getAiJobRetryContext(id: string) {
+    const row = this.catalog.prepare("SELECT retry_context FROM ai_jobs WHERE id = ?").get(id) as { retry_context: string | null } | undefined;
+    if (!row) throw new Error("AI 任务不存在");
+    return row.retry_context;
   }
 
   getAiSettings(): AiSettings {
@@ -1420,7 +1434,7 @@ export class WorkspaceDatabase {
     return { checkedAt: now(), status, projectCount: projectRows.length, chapterCount, failedAiJobs, workspaceBytes: directoryBytes(this.root), backupBytes: directoryBytes(this.backupRoot), checks };
   }
 
-  rebuildSearchIndexes(projectId: string) {
+  rebuildSearchIndexes(projectId: string, verify = true) {
     const row = this.catalog.prepare("SELECT id FROM projects WHERE id = ?").get(projectId);
     if (!row) throw new Error("项目不存在");
     const db = this.projectDb(projectId);
@@ -1439,7 +1453,7 @@ export class WorkspaceDatabase {
       try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
       throw error;
     }
-    return this.runSystemHealthCheck();
+    return verify ? this.runSystemHealthCheck() : null;
   }
 
   checkpointAll() {

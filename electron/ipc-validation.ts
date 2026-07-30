@@ -161,6 +161,7 @@ const schemas: Partial<Record<keyof AppApi, z.ZodType<unknown[]>>> = {
   saveAiSettings: z.tuple([z.object({ baseUrl: httpUrl, model: z.string().trim().min(1).max(200), embeddingModel: z.string().trim().min(1).max(200), inputPricePerMillion: z.number().min(0).max(1_000_000), outputPricePerMillion: z.number().min(0).max(1_000_000) }).strict(), z.string().max(10_000).optional()]),
   listAiJobs: z.tuple([id.optional()]),
   cancelAiJob: z.tuple([id]),
+  retryAiJob: z.tuple([id]),
   exportProject: z.tuple([id, z.enum(["txt", "md", "docx"])]),
   importMetricsCsv: z.tuple([id, z.string().max(20_000_000)]),
   createBackup: z.tuple([z.string().min(8).max(1000)]),

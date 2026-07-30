@@ -19,7 +19,7 @@ export function readRecoveredChapter(projectId: string, chapter: Chapter, storag
 }
 
 export function writeRecoveredChapter(projectId: string, chapter: Chapter, storage: Pick<Storage, "setItem"> = localStorage) {
-  try { storage.setItem(chapterRecoveryKey(projectId, chapter), JSON.stringify(chapter)); } catch { /* storage unavailable */ }
+  try { storage.setItem(chapterRecoveryKey(projectId, chapter), JSON.stringify(chapter)); return true; } catch { return false; }
 }
 
 export function clearRecoveredChapter(projectId: string, chapter: Chapter, storage: Pick<Storage, "removeItem"> = localStorage) {

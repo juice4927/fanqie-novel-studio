@@ -360,6 +360,7 @@ export interface AiJobRecord {
   actualCost: number;
   durationMs: number;
   error: string | null;
+  retryable: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -628,6 +629,7 @@ export interface AppApi {
   ): Promise<AiSettings>;
   listAiJobs(projectId?: string): Promise<AiJobRecord[]>;
   cancelAiJob(id: string): Promise<boolean>;
+  retryAiJob(id: string): Promise<AiJobRecord>;
   exportProject(
     id: string,
     format: "txt" | "md" | "docx",

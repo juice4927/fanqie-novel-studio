@@ -194,6 +194,46 @@ function previewChapterBatch(
   };
 }
 
+async function generateOneChapter(id: string, chapterId: string) {
+  if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
+  const project = database.getProject(id);
+  if (!project.contract.approved) throw new Error("创作契约审批后才能生成正文");
+  const chapter = project.chapters.find((item) => item.id === chapterId);
+  if (!chapter) throw new Error("章节不存在");
+  if (!chapter.outline.trim()) throw new Error("请先填写本章章纲");
+  if (["已定稿", "待发布", "已发布"].includes(chapter.status)) throw new Error("已定稿或进入发布流程的章节不能由 AI 覆写");
+  activeGenerationProjects.add(id);
+  try {
+    const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
+    const generated = await ai.draftChapter(id, chapter, compileContext({ ...project, facts }, chapter), JSON.stringify({ kind: "chapter", projectId: id, chapterId }));
+    return database.saveGeneratedChapter(id, generated);
+  } finally {
+    activeGenerationProjects.delete(id);
+  }
+}
+
+async function generateChapterBatchFrom(id: string, chapterId: string) {
+  if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
+  const preview = previewChapterBatch(database.getProject(id), database.getAiSettings(), chapterId);
+  if (!preview.canRun) throw new Error(preview.blockingReason ?? "当前不能执行五章批次");
+  activeGenerationProjects.add(id);
+  try {
+    const generated: Chapter[] = [];
+    for (const candidate of preview.chapters) {
+      const currentProject = database.getProject(id);
+      const chapter = currentProject.chapters.find((item) => item.id === candidate.id);
+      if (!chapter) throw new Error(`第${candidate.number}章不存在`);
+      if (chapter.content.trim()) { generated.push(chapter); continue; }
+      const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
+      const draft = await ai.draftChapter(id, chapter, compileContext({ ...currentProject, facts }, chapter), JSON.stringify({ kind: "batch", projectId: id, chapterId }));
+      generated.push(database.saveGeneratedChapter(id, draft));
+    }
+    return generated;
+  } finally {
+    activeGenerationProjects.delete(id);
+  }
+}
+
 function getApiKey() {
   return apiCredential;
 }
@@ -856,39 +896,7 @@ function registerHandlers() {
       opportunities,
     );
   });
-  handle("generateChapterDraft", async (id, chapterId) => {
-    if (activeGenerationProjects.has(id))
-      throw new Error("该作品已有正文生成任务正在运行");
-    const project = database.getProject(id);
-    if (!project.contract.approved)
-      throw new Error("创作契约审批后才能生成正文");
-    const chapter = project.chapters.find((item) => item.id === chapterId);
-    if (!chapter) throw new Error("章节不存在");
-    if (!chapter.outline.trim()) throw new Error("请先填写本章章纲");
-    if (["已定稿", "待发布", "已发布"].includes(chapter.status))
-      throw new Error("已定稿或进入发布流程的章节不能由 AI 覆写");
-    activeGenerationProjects.add(id);
-    try {
-      const generated = await ai.draftChapter(
-        id,
-        chapter,
-        compileContext(
-          {
-            ...project,
-            facts: database.searchRelevantFacts(
-              id,
-              `${chapter.title} ${chapter.outline}`,
-              chapter.number,
-            ),
-          },
-          chapter,
-        ),
-      );
-      return database.saveGeneratedChapter(id, generated);
-    } finally {
-      activeGenerationProjects.delete(id);
-    }
-  });
+  handle("generateChapterDraft", generateOneChapter);
   handle("previewChapterBatch", (id, chapterId) =>
     previewChapterBatch(
       database.getProject(id),
@@ -896,46 +904,7 @@ function registerHandlers() {
       chapterId,
     ),
   );
-  handle("generateChapterBatch", async (id, chapterId) => {
-    if (activeGenerationProjects.has(id))
-      throw new Error("该作品已有正文生成任务正在运行");
-    const preview = previewChapterBatch(
-      database.getProject(id),
-      database.getAiSettings(),
-      chapterId,
-    );
-    if (!preview.canRun)
-      throw new Error(preview.blockingReason ?? "当前不能执行五章批次");
-    activeGenerationProjects.add(id);
-    try {
-      const generated: Chapter[] = [];
-      for (const candidate of preview.chapters) {
-        const currentProject = database.getProject(id);
-        const chapter = currentProject.chapters.find(
-          (item) => item.id === candidate.id,
-        );
-        if (!chapter) throw new Error(`第${candidate.number}章不存在`);
-        if (chapter.content.trim()) {
-          generated.push(chapter);
-          continue;
-        }
-        const facts = database.searchRelevantFacts(
-          id,
-          `${chapter.title} ${chapter.outline}`,
-          chapter.number,
-        );
-        const draft = await ai.draftChapter(
-          id,
-          chapter,
-          compileContext({ ...currentProject, facts }, chapter),
-        );
-        generated.push(database.saveGeneratedChapter(id, draft));
-      }
-      return generated;
-    } finally {
-      activeGenerationProjects.delete(id);
-    }
-  });
+  handle("generateChapterBatch", generateChapterBatchFrom);
   handle("getAiSettings", () => ({
     ...database.getAiSettings(),
     hasApiKey: Boolean(getApiKey()),
@@ -952,6 +921,19 @@ function registerHandlers() {
   });
   handle("listAiJobs", (projectId) => database.listAiJobs(projectId));
   handle("cancelAiJob", (id) => ai.cancelJob(id));
+  handle("retryAiJob", async (id) => {
+    const raw = database.getAiJobRetryContext(id);
+    if (!raw) throw new Error("该任务没有可安全重放的上下文，请返回原操作重试");
+    const context = JSON.parse(raw) as { kind: "chapter" | "batch"; projectId: string; chapterId: string };
+    const execution = context.kind === "chapter"
+      ? generateOneChapter(context.projectId, context.chapterId)
+      : context.kind === "batch"
+        ? generateChapterBatchFrom(context.projectId, context.chapterId)
+        : null;
+    if (!execution) throw new Error("不支持的任务重试类型");
+    void execution.catch(() => undefined);
+    return database.listAiJobs().find((job) => job.id !== id && job.projectId === context.projectId) ?? database.listAiJobs()[0];
+  });
   handle("exportProject", (id, format) => exportProject(id, format));
   handle("importMetricsCsv", (id, csvText) => {
     const metrics = parseMetricsCsv(csvText);
@@ -1043,7 +1025,10 @@ function registerHandlers() {
     healthTasks.set(id, { ...task, status: "已取消", label: "正在取消" });
     return worker.cancel(id);
   });
-  handle("rebuildSearchIndexes", (projectId) => database.rebuildSearchIndexes(projectId));
+  handle("rebuildSearchIndexes", async (projectId) => {
+    database.rebuildSearchIndexes(projectId, false);
+    return runHealthCheck(randomUUID());
+  });
   handle("getWorkspacePath", () => database.root);
 }
 

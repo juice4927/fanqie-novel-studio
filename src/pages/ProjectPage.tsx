@@ -1178,6 +1178,7 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
   const [history, setHistory] = useState<RevisionRecord[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saved" | "dirty" | "saving" | "error">("saved");
+  const [recoveryAvailable, setRecoveryAvailable] = useState(true);
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
   const draftRef = useRef(draft);
   const autosaveRef = useRef<AutosaveCoordinator | null>(null);
@@ -1223,7 +1224,7 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
       setSaveStatus("saved");
       return;
     }
-    writeRecoveredChapter(project.summary.id, draft);
+    setRecoveryAvailable(writeRecoveredChapter(project.summary.id, draft));
     setSaveStatus("dirty");
     if (!draft.id || ["已定稿", "待发布", "已发布"].includes(draft.status)) return;
     const timer = window.setTimeout(async () => {
@@ -1356,7 +1357,7 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
           </div>
           <div className="heading-actions">
             <span className={`autosave-status autosave-${saveStatus}`} role="status">
-              {saveStatus === "saving" ? "正在自动保存" : saveStatus === "dirty" ? "未保存" : saveStatus === "error" ? "保存失败" : "已保存"}
+              {!recoveryAvailable ? "恢复副本不可用" : saveStatus === "saving" ? "正在自动保存" : saveStatus === "dirty" ? "未保存" : saveStatus === "error" ? "保存失败" : "已保存"}
             </span>
             <Segmented
               options={["逐章", "五章批次"] as const}
