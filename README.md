@@ -141,3 +141,16 @@ npm run dist:win         # 生成 Windows NSIS 安装包
 ```
 
 公开榜单采集只访问用户提供的无需登录 HTTP/HTTPS 页面，不携带 Cookie、不绕过访问限制。页面无法稳定访问时应改用 CSV 或人工录入。
+
+## P2 工程保障
+
+- 项目页按规划、写作、状态账本、质检、发布拆为独立工作区；章节生命周期和审批版本门禁由 `src/shared/chapter-lifecycle.ts` 在浏览器与桌面端共享。
+- Electron 数据层由项目、研究、修订、搜索、AI 审计五类仓储组成，`WorkspaceDatabase` 保留兼容门面。
+- 写作台对章节列表使用虚拟窗口，首次增量加载 200 章；全文检索每页 50 条，并在滚动到底部后继续加载。
+- AI 审计默认保留 90 天且最多 5000 条；健康任务保留 24 小时且最多 100 条完成记录。
+- 桌面日志为 JSON Lines，写盘前脱敏密钥、Bearer、URL 凭据和 Windows 用户目录。系统设置可导出不含正文和数据库的诊断 ZIP。
+- 自动更新只在打包应用中启用。安装前必须成功创建加密的 `pre-update-<version>.novelbak` 数据快照；安装器失败时保留当前版本。数据恢复仍需通过“校验并恢复副本”人工确认，避免自动覆盖唯一工作区。
+
+Windows 发布流水线需要配置 `WINDOWS_CERTIFICATE_BASE64`、`WINDOWS_CERTIFICATE_PASSWORD` 和 `WINDOWS_PUBLISHER_NAME` 三个 GitHub Secrets。标签 `v*` 触发测试、构建、签名、GitHub Release 和 `latest.yml` 更新通道发布。
+
+故障注入仅在 `NODE_ENV=test` 生效，可通过 `NOVEL_STUDIO_FAULTS` 启用 `disk-full`、`power-loss-before-commit` 或 `credential-unavailable`。测试还会写入真实损坏的 SQLite 文件验证健康诊断不中断。

@@ -1560,14 +1560,21 @@ p {
   height: calc(100vh - 110px);
   overflow: auto;
 }
-.chapter-scroll > button {
+.chapter-virtual-spacer {
+  position: relative;
+}
+.chapter-virtual-window {
+  position: absolute;
+  inset: 0 0 auto;
+}
+.chapter-scroll button {
   position: relative;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 54px;
+  height: 54px;
   padding: 8px 11px;
   color: var(--ink);
   background: #fff;
@@ -1575,18 +1582,18 @@ p {
   border-bottom: 1px solid #eef0eb;
   text-align: left;
 }
-.chapter-scroll > button:hover,
-.chapter-scroll > button.active {
+.chapter-scroll button:hover,
+.chapter-scroll button.active {
   background: #f5f7f3;
 }
-.chapter-scroll > button.active {
+.chapter-scroll button.active {
   box-shadow: inset 3px 0 var(--accent);
 }
-.chapter-scroll > button > span {
+.chapter-scroll button > span {
   color: var(--subtle);
   font-size: 9px;
 }
-.chapter-scroll > button > div {
+.chapter-scroll button > div {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -2992,7 +2999,10 @@ p {
     height: 108px;
     overflow-x: auto;
   }
-  .chapter-scroll > button {
+  .chapter-virtual-window {
+    display: flex;
+  }
+  .chapter-scroll button {
     flex: 0 0 145px;
   }
   .editor-body {

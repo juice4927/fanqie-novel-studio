@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
 import type { AutoBackupFrequency } from "../src/shared/types";
+import { injectFault } from "./fault-injection";
 
 const MAGIC = Buffer.from("NOVELSTUDIO1");
 const AUTO_BACKUP_PATTERN = /^auto-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.novelbak$/;
@@ -56,6 +57,7 @@ export async function createEncryptedBackup(workspaceRoot: string, destination: 
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(archive), cipher.final()]);
   const tag = cipher.getAuthTag();
+  injectFault("disk-full");
   await writeFile(destination, Buffer.concat([MAGIC, salt, iv, tag, encrypted]));
   await verifyEncryptedBackup(destination, password);
 }

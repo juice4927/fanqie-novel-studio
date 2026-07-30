@@ -146,7 +146,7 @@ const schemas: Partial<Record<keyof AppApi, z.ZodType<unknown[]>>> = {
   saveChapter: z.tuple([id, chapter, z.enum(["version", "autosave"]).optional()]),
   saveExpectation: z.tuple([id, expectation]),
   transitionChapter: z.tuple([id, id, z.enum(["章纲", "草稿", "待质检", "待定稿", "已定稿", "待发布", "已发布"])]),
-  searchProject: z.tuple([id, z.string().max(500)]),
+  searchProject: z.tuple([id, z.string().max(500), z.number().int().min(0).max(1_000_000).optional(), z.number().int().min(1).max(200).optional()]),
   saveFact: z.tuple([id, fact]),
   resolveIssue: z.tuple([id, id, z.enum(["待处理", "已忽略", "已解决"])]),
   saveChangeRequest: z.tuple([id, changeRequest]),
@@ -168,6 +168,7 @@ const schemas: Partial<Record<keyof AppApi, z.ZodType<unknown[]>>> = {
   restoreBackup: z.tuple([z.string().min(8).max(1000)]),
   saveAutoBackupSettings: z.tuple([z.object({ enabled: z.boolean(), frequency: z.enum(["daily", "weekly"]), retentionCount: z.number().int().min(1).max(30) }).strict(), z.string().min(8).max(1000).optional()]),
   rebuildSearchIndexes: z.tuple([id]),
+  exportDiagnosticBundle: z.tuple([]),
   getSystemHealthCheck: z.tuple([id]),
   cancelSystemHealthCheck: z.tuple([id]),
 };

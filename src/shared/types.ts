@@ -570,7 +570,7 @@ export interface AppApi {
     status: ChapterStatus,
   ): Promise<Chapter>;
   compileContext(id: string, chapterId: string): Promise<ContextPackage>;
-  searchProject(id: string, query: string): Promise<SearchHit[]>;
+  searchProject(id: string, query: string, offset?: number, limit?: number): Promise<SearchHit[]>;
   listRevisions(
     id: string,
     collection: RevisionRecord["collection"],
@@ -646,5 +646,6 @@ export interface AppApi {
   getSystemHealthCheck(id: string): Promise<HealthCheckTask>;
   cancelSystemHealthCheck(id: string): Promise<boolean>;
   rebuildSearchIndexes(projectId: string): Promise<SystemHealthReport>;
+  exportDiagnosticBundle(): Promise<string | null>;
   getWorkspacePath(): Promise<string>;
 }

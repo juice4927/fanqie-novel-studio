@@ -95,8 +95,9 @@ export async function scanSystemHealth(
         continue;
       }
       addIntegrityCheck(`project-integrity-${row.id}`, `${row.title} · 项目数据库`, databasePath, row.id);
-      const db = openReadOnly(databasePath);
+      let db: DatabaseSync | null = null;
       try {
+        db = openReadOnly(databasePath);
         const records = Number((db.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count);
         const fts = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts").get() as { count: number }).count);
         const trigram = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts_tri").get() as { count: number }).count);
@@ -104,8 +105,10 @@ export async function scanSystemHealth(
         failedAiJobs += Number((db.prepare("SELECT COUNT(*) AS count FROM ai_jobs WHERE status = '失败'").get() as { count: number }).count);
         const indexesMatch = records === fts && records === trigram;
         checks.push({ id: `project-search-${row.id}`, label: `${row.title} · 搜索索引`, status: indexesMatch ? "正常" : "警告", detail: indexesMatch ? `${records} 章索引完整` : `章节 ${records}，全文索引 ${fts}，中文索引 ${trigram}`, projectId: row.id, repairable: !indexesMatch });
+      } catch (error) {
+        checks.push({ id: `project-statistics-${row.id}`, label: `${row.title} · 统计`, status: "错误", detail: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300), projectId: row.id, repairable: false });
       } finally {
-        db.close();
+        db?.close();
       }
       await advance(row.title);
     }

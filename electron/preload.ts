@@ -21,7 +21,7 @@ const api: AppApi = {
   saveExpectation: (id, expectation) => invoke("saveExpectation", id, expectation),
   transitionChapter: (id, chapterId, status) => invoke("transitionChapter", id, chapterId, status),
   compileContext: (id, chapterId) => invoke("compileContext", id, chapterId),
-  searchProject: (id, query) => invoke("searchProject", id, query),
+  searchProject: (id, query, offset, limit) => invoke("searchProject", id, query, offset, limit),
   listRevisions: (id, collection, entityId) => invoke("listRevisions", id, collection, entityId),
   restoreRevision: (id, revisionId) => invoke("restoreRevision", id, revisionId),
   runQualityCheck: (id, chapterId) => invoke("runQualityCheck", id, chapterId),
@@ -69,6 +69,7 @@ const api: AppApi = {
   getSystemHealthCheck: (id) => invoke("getSystemHealthCheck", id),
   cancelSystemHealthCheck: (id) => invoke("cancelSystemHealthCheck", id),
   rebuildSearchIndexes: (projectId) => invoke("rebuildSearchIndexes", projectId),
+  exportDiagnosticBundle: () => invoke("exportDiagnosticBundle"),
   getWorkspacePath: () => invoke("getWorkspacePath"),
 };
 

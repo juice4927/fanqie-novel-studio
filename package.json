@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "本地优先的番茄小说长篇创作工作台",
+  "author": "Novel Studio Team",
   "main": "dist-electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -19,6 +20,7 @@
   "dependencies": {
     "cheerio": "^1.1.2",
     "docx": "^9.5.1",
+    "electron-updater": "^6.8.9",
     "fast-xml-parser": "^5.2.5",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
@@ -58,11 +60,20 @@
     ],
     "asar": true,
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": true
     },
+    "publish": [{
+      "provider": "github",
+      "owner": "${env.GH_OWNER}",
+      "repo": "${env.GH_REPO}",
+      "releaseType": "release"
+    }],
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
     }
   }
 }

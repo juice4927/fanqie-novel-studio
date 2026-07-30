@@ -38,7 +38,18 @@ import {
   buildChapterSummary,
 } from "../src/shared/summaries";
 import { volumeBoundaryChapters } from "../src/shared/planning";
+import {
+  assertChapterTransition,
+  deriveChapterStatus,
+  isProtectedChapterEdit,
+} from "../src/shared/chapter-lifecycle";
 import { hasColumn, runMigrations } from "./migration-runner";
+import { AiAuditRepository } from "./repositories/ai-audit-repository";
+import { RevisionRepository } from "./repositories/revision-repository";
+import { SearchRepository } from "./repositories/search-repository";
+import { ProjectRepository } from "./repositories/project-repository";
+import { ResearchRepository } from "./repositories/research-repository";
+import { injectFault } from "./fault-injection";
 
 const now = () => new Date().toISOString();
 
@@ -87,6 +98,11 @@ export class WorkspaceDatabase {
   private readonly catalog: DatabaseSync;
   private readonly research: DatabaseSync;
   private readonly projectDbs = new Map<string, DatabaseSync>();
+  private readonly aiAudit: AiAuditRepository;
+  private readonly projects: ProjectRepository;
+  private readonly researchData: ResearchRepository;
+  private readonly revisions = new RevisionRepository();
+  private readonly search = new SearchRepository();
 
   constructor(root: string) {
     this.root = root;
@@ -107,7 +123,10 @@ export class WorkspaceDatabase {
       path.join(this.researchRoot, "research.sqlite"),
     );
     this.initCatalog();
-    this.recoverInterruptedAiJobs();
+    this.projects = new ProjectRepository(this.catalog);
+    this.researchData = new ResearchRepository(this.research);
+    this.aiAudit = new AiAuditRepository(this.catalog);
+    this.aiAudit.recoverInterrupted();
     this.initResearch();
   }
 
@@ -150,10 +169,6 @@ export class WorkspaceDatabase {
         db.exec("CREATE INDEX IF NOT EXISTS idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, model, status, updated_at)");
       },
     ]);
-  }
-
-  private recoverInterruptedAiJobs() {
-    this.catalog.prepare("UPDATE ai_jobs SET status = '已中断', error = '应用退出时任务仍在运行，可重新执行原操作', updated_at = ? WHERE status = '运行中'").run(now());
   }
 
   private initResearch() {
@@ -573,6 +588,7 @@ export class WorkspaceDatabase {
     db.exec("BEGIN IMMEDIATE");
     try {
       const saved = this.persistChapterInTransaction(db, id, chapter, forcedStatus, createRevision);
+      injectFault("power-loss-before-commit");
       db.exec("COMMIT");
       this.touchProject(id);
       return saved;
@@ -592,41 +608,7 @@ export class WorkspaceDatabase {
     const previous = chapter.id
       ? this.getRecord<Chapter>(db, "chapters", chapter.id)
       : undefined;
-    const protectedContentChanged =
-      previous &&
-      JSON.stringify({
-        number: chapter.number,
-        title: chapter.title,
-        outline: chapter.outline,
-        content: chapter.content,
-        batchMode: chapter.batchMode,
-        isKeyChapter: chapter.isKeyChapter,
-        chapterPromise: chapter.chapterPromise,
-        expectedPayoff: chapter.expectedPayoff,
-        crisis: chapter.crisis,
-        endingExpectation: chapter.endingExpectation,
-        expectationTargetChapter: chapter.expectationTargetChapter,
-        linkedExpectationIds: chapter.linkedExpectationIds,
-      }) !==
-        JSON.stringify({
-          number: previous.number,
-          title: previous.title,
-          outline: previous.outline,
-          content: previous.content,
-          batchMode: previous.batchMode,
-          isKeyChapter: previous.isKeyChapter,
-          chapterPromise: previous.chapterPromise,
-          expectedPayoff: previous.expectedPayoff,
-          crisis: previous.crisis,
-          endingExpectation: previous.endingExpectation,
-          expectationTargetChapter: previous.expectationTargetChapter,
-          linkedExpectationIds: previous.linkedExpectationIds,
-        });
-    const protectedEdit = Boolean(
-      previous &&
-      ["已定稿", "待发布", "已发布"].includes(previous.status) &&
-      protectedContentChanged,
-    );
+    const protectedEdit = isProtectedChapterEdit(previous, chapter);
     if (
       protectedEdit &&
       !this.consumeApprovedChange(db, "章节", previous!.id, previous!.revision)
@@ -647,20 +629,7 @@ export class WorkspaceDatabase {
     const isVolumeBoundary = volumeBoundaryChapters(
       this.listRecords<PlanNode>(db, "plans"),
     ).has(chapter.number);
-    const contentChanged = Boolean(
-      previous && previous.content !== chapter.content,
-    );
-    let status: ChapterStatus =
-      previous?.status ?? (chapter.content.trim() ? "草稿" : "章纲");
-    if (forcedStatus) status = forcedStatus;
-    else if (protectedEdit) status = chapter.content.trim() ? "待质检" : "章纲";
-    else if (previous?.status === "章纲" && chapter.content.trim())
-      status = "草稿";
-    else if (
-      contentChanged &&
-      (previous?.status === "待质检" || previous?.status === "待定稿")
-    )
-      status = "草稿";
+    const status = deriveChapterStatus(previous, chapter, { forcedStatus, protectedEdit });
     let endingExpectationId = chapter.endingExpectationId ?? null;
     if (chapter.endingExpectation?.trim()) {
       const existingExpectation = endingExpectationId
@@ -764,26 +733,7 @@ export class WorkspaceDatabase {
     const chapter = this.getRecord<Chapter>(db, "chapters", chapterId);
     if (!chapter) throw new Error("章节不存在");
     const issues = this.listRecords<QualityIssue>(db, "issues");
-    const transitions: Partial<Record<ChapterStatus, ChapterStatus[]>> = {
-      草稿: ["待质检"],
-      待质检: ["待定稿"],
-      待定稿: ["已定稿"],
-      已定稿: ["待发布"],
-      待发布: ["已发布"],
-    };
-    if (!transitions[chapter.status]?.includes(status))
-      throw new Error(`不允许从“${chapter.status}”直接变为“${status}”`);
-    if (
-      (status === "待定稿" || status === "已定稿" || status === "待发布") &&
-      issues.some(
-        (issue) =>
-          issue.chapterId === chapterId &&
-          issue.severity === "硬性" &&
-          issue.status !== "已解决",
-      )
-    ) {
-      throw new Error("该章仍有未解决的硬性问题");
-    }
+    assertChapterTransition(chapter.status, status, chapterId, issues);
     const saved = this.persistChapter(id, { ...chapter, status }, status);
     if (status === "已定稿" && chapter.status !== "已定稿")
       this.updateSummaries(id, saved);
@@ -849,38 +799,9 @@ export class WorkspaceDatabase {
       .map((item) => item.fact);
   }
 
-  searchProject(id: string, query: string): SearchHit[] {
-    const normalized = query
-      .trim()
-      .replace(/["'*:^(){}\[\]]/g, " ")
-      .trim();
-    if (normalized.length < 2) return [];
+  searchProject(id: string, query: string, offset = 0, limit = 50): SearchHit[] {
     const db = this.projectDb(id);
-    const chapters = new Map(
-      this.listRecords<Chapter>(db, "chapters").map((chapter) => [
-        chapter.id,
-        chapter,
-      ]),
-    );
-    const hits = db
-      .prepare(
-        "SELECT id, snippet(chapter_fts_tri, 2, '【', '】', '…', 24) AS excerpt FROM chapter_fts_tri WHERE chapter_fts_tri MATCH ? LIMIT 30",
-      )
-      .all(`"${normalized}"`) as Array<{ id: string; excerpt: string }>;
-    return hits.flatMap((hit) => {
-      const chapter = chapters.get(hit.id);
-      return chapter
-        ? [
-            {
-              id: chapter.id,
-              type: "章节" as const,
-              title: `第${chapter.number}章 ${chapter.title}`,
-              excerpt: hit.excerpt,
-              chapterNumber: chapter.number,
-            },
-          ]
-        : [];
-    });
+    return this.search.search(db, query, this.listRecords<Chapter>(db, "chapters"), offset, limit);
   }
 
   listRevisions(
@@ -889,34 +810,12 @@ export class WorkspaceDatabase {
     entityId: string,
   ): RevisionRecord[] {
     const db = this.projectDb(id);
-    const rows = db
-      .prepare(
-        "SELECT id, collection, entity_id, revision, payload, created_at FROM revisions WHERE collection = ? AND entity_id = ? ORDER BY revision DESC",
-      )
-      .all(collection, entityId) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      id: String(row.id),
-      collection: row.collection as RevisionRecord["collection"],
-      entityId: String(row.entity_id),
-      revision: Number(row.revision),
-      payload: parseJson<unknown>(row.payload),
-      createdAt: String(row.created_at),
-    }));
+    return this.revisions.list(db, collection, entityId);
   }
 
   restoreRevision(id: string, revisionId: string) {
     const db = this.projectDb(id);
-    const row = db
-      .prepare(
-        "SELECT collection, entity_id, payload FROM revisions WHERE id = ?",
-      )
-      .get(revisionId) as
-      | {
-          collection: RevisionRecord["collection"];
-          entity_id: string;
-          payload: string;
-        }
-      | undefined;
+    const row = this.revisions.get(db, revisionId);
     if (!row) throw new Error("历史版本不存在");
     const payload = parseJson<any>(row.payload);
     if (row.collection === "chapters") this.saveChapter(id, payload as Chapter);
@@ -1093,111 +992,38 @@ export class WorkspaceDatabase {
   }
 
   listResearchBooks(): ResearchBook[] {
-    return (
-      this.research
-        .prepare("SELECT payload FROM research_books ORDER BY updated_at DESC")
-        .all() as Array<{ payload: string }>
-    ).map((row) => parseJson<ResearchBook>(row.payload));
+    return this.researchData.listBooks();
   }
 
   saveResearchBook(
     book: ResearchBook,
     chapters: Array<{ title: string; content: string; wordCount: number }>,
   ) {
-    this.research
-      .prepare("INSERT OR REPLACE INTO research_books VALUES(?, ?, ?)")
-      .run(book.id, JSON.stringify(book), now());
-    const insert = this.research.prepare(
-      "INSERT INTO research_chapters VALUES(?, ?, ?, ?, ?, ?)",
-    );
-    const insertFingerprint = this.research.prepare(
-      "INSERT OR IGNORE INTO research_fingerprints VALUES(?, ?, ?)",
-    );
-    chapters.forEach((chapter, index) => {
-      insert.run(
-        randomUUID(),
-        book.id,
-        index + 1,
-        chapter.title,
-        chapter.content,
-        chapter.wordCount,
-      );
-      for (const window of textWindows(chapter.content, 8))
-        insertFingerprint.run(hashText(window), book.id, window);
-    });
+    this.researchData.saveBook(book, chapters);
   }
 
   getResearchBook(bookId: string) {
-    const row = this.research
-      .prepare("SELECT payload FROM research_books WHERE id = ?")
-      .get(bookId) as { payload: string } | undefined;
-    if (!row) throw new Error("样本书不存在");
-    const chapters = this.research
-      .prepare(
-        "SELECT ordinal, title, content, word_count FROM research_chapters WHERE book_id = ? ORDER BY ordinal",
-      )
-      .all(bookId) as Array<Record<string, unknown>>;
-    return {
-      book: parseJson<ResearchBook>(row.payload),
-      chapters: chapters.map((item) => ({
-        ordinal: Number(item.ordinal),
-        title: String(item.title),
-        content: String(item.content),
-        wordCount: Number(item.word_count),
-      })),
-    };
+    return this.researchData.getBook(bookId);
   }
 
   saveResearchAnalyses(records: ResearchAnalysisRecord[]) {
-    if (records[0])
-      this.research
-        .prepare("DELETE FROM research_analyses WHERE book_id = ?")
-        .run(records[0].bookId);
-    const insert = this.research.prepare(
-      "INSERT OR REPLACE INTO research_analyses VALUES(?, ?, ?, ?, ?, ?, ?)",
-    );
-    for (const record of records)
-      insert.run(
-        record.id,
-        record.bookId,
-        record.layer,
-        record.fromChapter,
-        record.toChapter,
-        JSON.stringify(record),
-        record.createdAt,
-      );
+    this.researchData.saveAnalyses(records);
   }
 
   listResearchAnalyses(bookId: string): ResearchAnalysisRecord[] {
-    return (
-      this.research
-        .prepare(
-          "SELECT payload FROM research_analyses WHERE book_id = ? ORDER BY from_chapter, layer",
-        )
-        .all(bookId) as Array<{ payload: string }>
-    ).map((row) => parseJson<ResearchAnalysisRecord>(row.payload));
+    return this.researchData.listAnalyses(bookId);
   }
 
   updateResearchBook(book: ResearchBook) {
-    this.research
-      .prepare(
-        "UPDATE research_books SET payload = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(JSON.stringify(book), now(), book.id);
+    this.researchData.updateBook(book);
   }
 
   listInsights(): InsightPack[] {
-    return (
-      this.research
-        .prepare("SELECT payload FROM insights ORDER BY created_at DESC")
-        .all() as Array<{ payload: string }>
-    ).map((row) => parseJson<InsightPack>(row.payload));
+    return this.researchData.listInsights();
   }
 
   saveInsight(insight: InsightPack) {
-    this.research
-      .prepare("INSERT OR REPLACE INTO insights VALUES(?, ?, ?)")
-      .run(insight.id, JSON.stringify(insight), insight.createdAt);
+    this.researchData.saveInsight(insight);
   }
 
   getInsights(ids: string[]) {
@@ -1206,25 +1032,7 @@ export class WorkspaceDatabase {
   }
 
   findOriginalityMatches(content: string) {
-    const matches = new Map<
-      string,
-      { researchRef: string; fingerprint: string }
-    >();
-    const query = this.research.prepare(
-      "SELECT book_id FROM research_fingerprints WHERE hash = ? LIMIT 5",
-    );
-    for (const window of textWindows(content, 1)) {
-      const fingerprint = hashText(window);
-      for (const row of query.all(fingerprint) as Array<{ book_id: string }>) {
-        const key = `${row.book_id}:${fingerprint}`;
-        matches.set(key, {
-          researchRef: hashText(row.book_id).slice(0, 12),
-          fingerprint: fingerprint.slice(0, 16),
-        });
-        if (matches.size >= 10) return [...matches.values()];
-      }
-    }
-    return [...matches.values()];
+    return this.researchData.originalityMatches(content);
   }
 
   findAiJob(
@@ -1233,15 +1041,7 @@ export class WorkspaceDatabase {
     promptVersion: string,
     model: string,
   ) {
-    const row = this.catalog
-      .prepare(
-        `
-      SELECT output FROM ai_jobs WHERE task_type = ? AND input_hash = ? AND prompt_version = ? AND model = ? AND status = '成功' ORDER BY updated_at DESC LIMIT 1
-    `,
-      )
-      .get(taskType, inputHash, promptVersion, model) as
-      { output: string | null } | undefined;
-    return row?.output ?? null;
+    return this.aiAudit.findSuccessful(taskType, inputHash, promptVersion, model);
   }
 
   startAiJob(
@@ -1254,67 +1054,24 @@ export class WorkspaceDatabase {
     inputSummary: string,
     retryContext?: string,
   ) {
-    const id = randomUUID();
-    const timestamp = now();
-    this.catalog
-      .prepare(
-        `
-      INSERT INTO ai_jobs(id, project_id, task_type, input_hash, prompt_version, provider, model, status, input_summary, output, estimated_cost, error, retry_context, created_at, updated_at)
-      VALUES(?, ?, ?, ?, ?, ?, ?, '运行中', ?, NULL, 0, NULL, ?, ?, ?)
-    `,
-      )
-      .run(
-        id,
-        projectId,
-        taskType,
-        inputHash,
-        promptVersion,
-        provider,
-        model,
-        inputSummary,
-        retryContext ?? null,
-        timestamp,
-        timestamp,
-      );
-    return id;
+    return this.aiAudit.start(projectId, taskType, inputHash, promptVersion, provider, model, inputSummary, retryContext);
   }
 
   finishAiJob(id: string, output: string, error?: string, usage?: { inputTokens: number; outputTokens: number; actualCost: number; durationMs: number; status?: "失败" | "已取消" }) {
-    this.catalog
-      .prepare(
-        "UPDATE ai_jobs SET status = ?, output = ?, error = ?, input_tokens = ?, output_tokens = ?, actual_cost = ?, duration_ms = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(
-        error ? usage?.status ?? "失败" : "成功",
-        error ? null : output,
-        error ?? null,
-        usage?.inputTokens ?? 0,
-        usage?.outputTokens ?? 0,
-        usage?.actualCost ?? 0,
-        usage?.durationMs ?? 0,
-        now(),
-        id,
-      );
+    this.aiAudit.finish(id, output, error, usage);
+    this.aiAudit.prune();
   }
 
   listAiJobs(projectId?: string): AiJobRecord[] {
-    const rows = (projectId
-      ? this.catalog.prepare("SELECT * FROM ai_jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 200").all(projectId)
-      : this.catalog.prepare("SELECT * FROM ai_jobs ORDER BY created_at DESC LIMIT 200").all()) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      id: String(row.id), projectId: row.project_id ? String(row.project_id) : null, taskType: String(row.task_type),
-      inputSummary: String(row.input_summary), promptVersion: String(row.prompt_version), provider: String(row.provider), model: String(row.model),
-      status: String(row.status) as AiJobRecord["status"], inputTokens: Number(row.input_tokens ?? 0), outputTokens: Number(row.output_tokens ?? 0),
-      actualCost: Number(row.actual_cost ?? 0), durationMs: Number(row.duration_ms ?? 0), error: row.error ? String(row.error) : null,
-      retryable: Boolean(row.retry_context) && ["失败", "已取消", "已中断"].includes(String(row.status)),
-      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-    }));
+    return this.aiAudit.list(projectId);
   }
 
   getAiJobRetryContext(id: string) {
-    const row = this.catalog.prepare("SELECT retry_context FROM ai_jobs WHERE id = ?").get(id) as { retry_context: string | null } | undefined;
-    if (!row) throw new Error("AI 任务不存在");
-    return row.retry_context;
+    return this.aiAudit.retryContext(id);
+  }
+
+  pruneAiJobHistory(retentionDays = 90, maxRows = 5000) {
+    return this.aiAudit.prune(retentionDays, maxRows);
   }
 
   getAiSettings(): AiSettings {
@@ -1540,33 +1297,19 @@ export class WorkspaceDatabase {
   }
 
   private touchProject(id: string) {
-    this.catalog
-      .prepare("UPDATE projects SET updated_at = ? WHERE id = ?")
-      .run(now(), id);
+    this.projects.touch(id);
   }
 
   private setState<T>(db: DatabaseSync, key: string, value: T) {
-    db.prepare(
-      "INSERT OR REPLACE INTO state(key, value, updated_at) VALUES(?, ?, ?)",
-    ).run(key, JSON.stringify(value), now());
+    this.projects.setState(db, key, value);
   }
 
   private getState<T>(db: DatabaseSync, key: string, fallback?: T): T {
-    const row = db.prepare("SELECT value FROM state WHERE key = ?").get(key) as
-      { value: string } | undefined;
-    if (!row) {
-      if (fallback !== undefined) return fallback;
-      throw new Error(`项目状态缺失: ${key}`);
-    }
-    return parseJson<T>(row.value);
+    return this.projects.getState(db, key, fallback);
   }
 
   private listRecords<T>(db: DatabaseSync, collection: string): T[] {
-    return (
-      db
-        .prepare("SELECT payload FROM records WHERE collection = ?")
-        .all(collection) as Array<{ payload: string }>
-    ).map((row) => parseJson<T>(row.payload));
+    return this.projects.listRecords<T>(db, collection);
   }
 
   private getRecord<T>(
@@ -1574,10 +1317,7 @@ export class WorkspaceDatabase {
     collection: string,
     id: string,
   ): T | undefined {
-    const row = db
-      .prepare("SELECT payload FROM records WHERE collection = ? AND id = ?")
-      .get(collection, id) as { payload: string } | undefined;
-    return row ? parseJson<T>(row.payload) : undefined;
+    return this.projects.getRecord<T>(db, collection, id);
   }
 
   private saveRecord<T>(
@@ -1588,18 +1328,7 @@ export class WorkspaceDatabase {
     priorRevision?: number,
     createRevision = true,
   ) {
-    const previous = this.getRecord<T>(db, collection, id);
-    if (previous && createRevision)
-      this.addRevision(
-        db,
-        collection,
-        id,
-        priorRevision ?? this.nextRevision(db, collection, id),
-        previous,
-      );
-    db.prepare(
-      "INSERT OR REPLACE INTO records(collection, id, payload, updated_at) VALUES(?, ?, ?, ?)",
-    ).run(collection, id, JSON.stringify(payload), now());
+    this.projects.saveRecord(db, collection, id, payload, priorRevision, createRevision);
   }
 
   private addRevision<T>(
@@ -1609,23 +1338,11 @@ export class WorkspaceDatabase {
     revision: number,
     payload: T,
   ) {
-    db.prepare("INSERT INTO revisions VALUES(?, ?, ?, ?, ?, ?)").run(
-      randomUUID(),
-      collection,
-      id,
-      revision,
-      JSON.stringify(payload),
-      now(),
-    );
+    this.projects.addRevision(db, collection, id, revision, payload);
   }
 
   private nextRevision(db: DatabaseSync, collection: string, id: string) {
-    const row = db
-      .prepare(
-        "SELECT MAX(revision) AS revision FROM revisions WHERE collection = ? AND entity_id = ?",
-      )
-      .get(collection, id) as { revision: number | null };
-    return (row.revision ?? 0) + 1;
+    return this.projects.nextRevision(db, collection, id);
   }
 
   private saveEmbedding(

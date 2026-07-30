@@ -72,13 +72,13 @@ test("navigates through research and the complete project workflow", async ({
   await expect(page.getByText("预期回报", { exact: true })).toBeVisible();
   await expect(page.getByText("当前危机", { exact: true })).toBeVisible();
   await expect(page.getByText("结尾期待", { exact: true })).toBeVisible();
-  await page.locator(".chapter-scroll > button").filter({ hasText: "回声的代价" }).click();
+  await page.locator(".chapter-scroll button").filter({ hasText: "回声的代价" }).click();
   const manuscript = page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。");
   await manuscript.fill("自动保存回归文本：雨落在旧城的玻璃窗上。");
   await expect(page.getByRole("status")).toHaveText("已保存", { timeout: 5000 });
   await page.getByRole("button", { name: /状态账本/ }).click();
   await page.getByRole("button", { name: /写作台/ }).click();
-  await page.locator(".chapter-scroll > button").filter({ hasText: "回声的代价" }).click();
+  await page.locator(".chapter-scroll button").filter({ hasText: "回声的代价" }).click();
   await expect(page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。")).toHaveValue("自动保存回归文本：雨落在旧城的玻璃窗上。");
   await page.getByPlaceholder("检索正文").fill("红伞");
   await expect(page.getByText("停电后的第七分钟").first()).toBeVisible();
@@ -186,4 +186,18 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await page.getByRole("button", { name: /故事圣经/ }).click();
   await expect(page.getByLabel("故事前提")).toHaveValue(/被夺走婚房的基层职员/);
   await expect(page.getByRole("button", { name: "审批契约" })).toBeVisible();
+});
+
+test("traps modal focus, closes with Escape, and restores focus", async ({ page }) => {
+  const trigger = page.getByRole("button", { name: "新建作品" }).first();
+  await trigger.focus();
+  await trigger.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "从 0 开始创建一本书" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole("button", { name: "关闭" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
 });

@@ -30,6 +30,12 @@ import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { findCurrentVolume } from "../shared/planning";
 import { compileCommercialGuidance } from "../shared/commercial-knowledge";
 import { buildLongTermMemory } from "../shared/summaries";
+import {
+  assertChapterTransition,
+  deriveChapterStatus,
+  findMatchingApproval,
+  isProtectedChapterEdit,
+} from "../shared/chapter-lifecycle";
 
 interface DemoState {
   projects: ProjectDetail[];
@@ -575,35 +581,14 @@ export function createBrowserApi(): AppApi {
         (item) => item.id === chapter.id,
       );
       const previous = existing >= 0 ? project.chapters[existing] : undefined;
-      const changed = Boolean(previous && previous.content !== chapter.content);
-      const protectedEdit = Boolean(
-        previous &&
-        ["已定稿", "待发布", "已发布"].includes(previous.status) &&
-        changed,
-      );
+      const protectedEdit = isProtectedChapterEdit(previous, chapter);
       if (protectedEdit) {
-        const approval = project.changes.find(
-          (item) =>
-            item.status === "已批准" &&
-            item.targetKind === "章节" &&
-            item.targetId === previous!.id &&
-            item.baseVersion === previous!.revision,
-        );
+        const approval = findMatchingApproval(project.changes, "章节", previous!.id, previous!.revision);
         if (!approval)
-          throw new Error("已定稿章节只能通过匹配的已批准变更单修改");
+          throw new Error("已定稿或进入发布流程的章节只能通过匹配的已批准变更单修改");
         approval.status = "已应用";
       }
-      const status = protectedEdit
-        ? "待质检"
-        : previous
-          ? previous.status === "章纲" && chapter.content
-            ? "草稿"
-            : changed && ["待质检", "待定稿"].includes(previous.status)
-              ? "草稿"
-              : previous.status
-          : chapter.content
-            ? "草稿"
-            : "章纲";
+      const status = deriveChapterStatus(previous, chapter, { protectedEdit });
       let endingExpectationId = chapter.endingExpectationId ?? null;
       if (chapter.endingExpectation?.trim()) {
         const old = project.expectations.find(
@@ -674,27 +659,7 @@ export function createBrowserApi(): AppApi {
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((item) => item.id === chapterId);
       if (!chapter) throw new Error("章节不存在");
-      const transitions: Partial<
-        Record<Chapter["status"], Chapter["status"][]>
-      > = {
-        草稿: ["待质检"],
-        待质检: ["待定稿"],
-        待定稿: ["已定稿"],
-        已定稿: ["待发布"],
-        待发布: ["已发布"],
-      };
-      if (!transitions[chapter.status]?.includes(status))
-        throw new Error(`不允许从“${chapter.status}”直接变为“${status}”`);
-      if (
-        ["待定稿", "已定稿", "待发布"].includes(status) &&
-        project.issues.some(
-          (issue) =>
-            issue.chapterId === chapterId &&
-            issue.severity === "硬性" &&
-            issue.status !== "已解决",
-        )
-      )
-        throw new Error("该章仍有未解决的硬性问题");
+      assertChapterTransition(chapter.status, status, chapterId, project.issues);
       chapter.status = status;
       chapter.updatedAt = now();
       persist();
@@ -756,18 +721,19 @@ export function createBrowserApi(): AppApi {
       result.estimatedTokens = Math.ceil(JSON.stringify(result).length / 1.8);
       return result;
     },
-    async searchProject(projectId, query) {
+    async searchProject(projectId, query, offset = 0, limit = 50) {
       return getProject(state, projectId)
         .chapters.filter((chapter) =>
           `${chapter.title}\n${chapter.content}`.includes(query),
         )
         .map((chapter) => ({
           id: chapter.id,
-          type: "章节",
+          type: "章节" as const,
           title: `第${chapter.number}章 ${chapter.title}`,
           excerpt: chapter.content.slice(0, 120),
           chapterNumber: chapter.number,
-        }));
+        }))
+        .slice(offset, offset + limit);
     },
     async listRevisions() {
       return [];
@@ -1140,6 +1106,9 @@ export function createBrowserApi(): AppApi {
     },
     async rebuildSearchIndexes() {
       throw new Error("搜索索引重建仅在桌面版可用");
+    },
+    async exportDiagnosticBundle() {
+      throw new Error("诊断包仅在桌面版提供");
     },
     async getWorkspacePath() {
       return "浏览器预览使用 localStorage";

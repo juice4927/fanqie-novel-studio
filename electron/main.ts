@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import Papa from "papaparse";
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
@@ -36,6 +36,9 @@ import { compileCommercialGuidance } from "../src/shared/commercial-knowledge";
 import { buildLongTermMemory } from "../src/shared/summaries";
 import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
 import { validateIpcArgs } from "./ipc-validation";
+import { StructuredLogger } from "./structured-log";
+import { configureAutoUpdates } from "./update-service";
+import JSZip from "jszip";
 
 let mainWindow: BrowserWindow | null = null;
 let database: WorkspaceDatabase;
@@ -47,6 +50,8 @@ let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
 let autoBackupTimer: ReturnType<typeof setInterval> | null = null;
 let autoBackupRunning = false;
 const healthTasks = new Map<string, HealthCheckTask>();
+const healthTaskFinishedAt = new Map<string, number>();
+let logger: StructuredLogger;
 const singleInstanceLockDisabled =
   process.env.NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
 const hasSingleInstanceLock =
@@ -562,14 +567,30 @@ async function exportProject(projectId: string, format: "txt" | "md" | "docx") {
 }
 
 function registerHandlers() {
+  const pruneHealthTasks = () => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const [id, finishedAt] of healthTaskFinishedAt) {
+      if (finishedAt < cutoff) { healthTaskFinishedAt.delete(id); healthTasks.delete(id); }
+    }
+    const completed = [...healthTaskFinishedAt.entries()].sort((left, right) => right[1] - left[1]);
+    for (const [id] of completed.slice(100)) { healthTaskFinishedAt.delete(id); healthTasks.delete(id); }
+  };
   const handle = (
     channel: keyof AppApi,
     callback: (...args: any[]) => unknown,
   ) =>
-    ipcMain.handle(`studio:${channel}`, (event, ...args) => {
+    ipcMain.handle(`studio:${channel}`, async (event, ...args) => {
       if (!mainWindow || event.sender.id !== mainWindow.webContents.id)
         throw new Error("拒绝来自非主窗口的调用");
-      return callback(...validateIpcArgs(channel, args));
+      const startedAt = Date.now();
+      try {
+        const result = await callback(...validateIpcArgs(channel, args));
+        logger.write("info", "ipc.completed", { channel, durationMs: Date.now() - startedAt });
+        return result;
+      } catch (error) {
+        logger.write("error", "ipc.failed", { channel, durationMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
     });
   handle("getDashboard", () => getDashboard());
   handle("listProjects", () => database.listProjects());
@@ -658,7 +679,7 @@ function registerHandlers() {
       chapter,
     );
   });
-  handle("searchProject", (id, query) => database.searchProject(id, query));
+  handle("searchProject", (id, query, offset, limit) => database.searchProject(id, query, offset, limit));
   handle("listRevisions", (id, collection, entityId) =>
     database.listRevisions(id, collection, entityId),
   );
@@ -999,6 +1020,7 @@ function registerHandlers() {
   );
   handle("runSystemHealthCheck", () => runHealthCheck(randomUUID()));
   handle("startSystemHealthCheck", () => {
+    pruneHealthTasks();
     const running = [...healthTasks.values()].find((task) => task.status === "运行中");
     if (running) return running;
     const id = randomUUID();
@@ -1006,11 +1028,17 @@ function registerHandlers() {
     healthTasks.set(id, task);
     void runHealthCheck(id).then((report) => {
       const current = healthTasks.get(id);
-      if (current?.status === "运行中") healthTasks.set(id, { ...current, status: "完成", completed: current.total, label: "检查完成", report });
+      if (current?.status === "运行中") {
+        healthTasks.set(id, { ...current, status: "完成", completed: current.total, label: "检查完成", report });
+        healthTaskFinishedAt.set(id, Date.now());
+      }
     }).catch((error) => {
       const current = healthTasks.get(id);
       const message = error instanceof Error ? error.message : String(error);
-      if (current) healthTasks.set(id, { ...current, status: message === "健康检查已取消" ? "已取消" : "失败", error: message });
+      if (current) {
+        healthTasks.set(id, { ...current, status: message === "健康检查已取消" ? "已取消" : "失败", error: message });
+        healthTaskFinishedAt.set(id, Date.now());
+      }
     });
     return task;
   });
@@ -1028,6 +1056,21 @@ function registerHandlers() {
   handle("rebuildSearchIndexes", async (projectId) => {
     database.rebuildSearchIndexes(projectId, false);
     return runHealthCheck(randomUUID());
+  });
+  handle("exportDiagnosticBundle", async () => {
+    if (!mainWindow) return null;
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "导出崩溃诊断包",
+      defaultPath: `长篇创作工作台-诊断-${now().slice(0, 10)}.zip`,
+      filters: [{ name: "诊断包", extensions: ["zip"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    const zip = new JSZip();
+    zip.file("system.json", JSON.stringify({ appVersion: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, generatedAt: now() }, null, 2));
+    zip.file("health.json", JSON.stringify(database.runSystemHealthCheck(), null, 2));
+    try { zip.file("application.jsonl", await readFile(logger.filePath, "utf8")); } catch { zip.file("application.jsonl", ""); }
+    await writeFile(result.filePath, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+    return result.filePath;
   });
   handle("getWorkspacePath", () => database.root);
 }
@@ -1067,6 +1110,9 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     apiCredential = "";
   }
   database = new WorkspaceDatabase(workspaceRoot);
+  database.pruneAiJobHistory();
+  logger = new StructuredLogger(path.join(app.getPath("userData"), "logs"));
+  logger.write("info", "application.started", { version: app.getVersion(), workspace: workspaceRoot });
   worker = new BackgroundWorker();
   ai = new AiService(database, getApiKey);
   registerHandlers();
@@ -1075,6 +1121,14 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   rankingScheduleTimer = setInterval(() => void runDueRankingSchedules(), 15 * 60 * 1000);
   autoBackupTimer = setInterval(() => void runAutomaticBackup(), 15 * 60 * 1000);
   createWindow();
+  configureAutoUpdates(logger, async () => {
+    database.checkpointAll();
+    const password = await readAutoBackupCredential();
+    if (!password) throw new Error("自动更新前需要先在设置中保存自动备份密码");
+    await createEncryptedBackup(database.root, path.join(database.backupRoot, `pre-update-${app.getVersion()}.novelbak`), password);
+  });
+  process.on("uncaughtException", (error) => logger.write("error", "process.uncaughtException", { error: error.message, stack: error.stack }));
+  process.on("unhandledRejection", (reason) => logger.write("error", "process.unhandledRejection", { error: String(reason) }));
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

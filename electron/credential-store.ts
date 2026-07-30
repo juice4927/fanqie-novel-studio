@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { injectFault } from "./fault-injection";
 
 const API_TARGET = "cn.local.fanqie.novelstudio/model-api";
 const AUTO_BACKUP_TARGET = "cn.local.fanqie.novelstudio/auto-backup";
@@ -98,6 +99,7 @@ if ($env:NOVEL_STUDIO_CREDENTIAL_OPERATION -eq 'write') {
 `;
 
 function execute(target: string, operation: "read" | "write" | "delete", value = "") {
+  injectFault("credential-unavailable");
   if (process.platform !== "win32") return Promise.resolve("");
   return new Promise<string>((resolve, reject) => {
     const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], {
