@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -106,6 +106,32 @@ const EMPTY_CHAPTER = (number: number): Chapter => ({
   revision: 0,
   updatedAt: new Date().toISOString(),
 });
+
+function chapterDraftSignature(chapter: Chapter) {
+  const { id: _id, revision: _revision, updatedAt: _updatedAt, wordCount: _wordCount, ...editable } = chapter;
+  return JSON.stringify(editable);
+}
+
+function chapterRecoveryKey(projectId: string, chapter: Chapter) {
+  return `novel-studio.chapter-draft.${projectId}.${chapter.id || `new-${chapter.number}`}`;
+}
+
+function readRecoveredChapter(projectId: string, chapter: Chapter) {
+  try {
+    const recovered = localStorage.getItem(chapterRecoveryKey(projectId, chapter));
+    return recovered ? JSON.parse(recovered) as Chapter : chapter;
+  } catch {
+    return chapter;
+  }
+}
+
+function writeRecoveredChapter(projectId: string, chapter: Chapter) {
+  try { localStorage.setItem(chapterRecoveryKey(projectId, chapter), JSON.stringify(chapter)); } catch { /* storage unavailable */ }
+}
+
+function clearRecoveredChapter(projectId: string, chapter: Chapter) {
+  try { localStorage.removeItem(chapterRecoveryKey(projectId, chapter)); } catch { /* storage unavailable */ }
+}
 
 function splitLines(value: string) {
   return value
@@ -1165,7 +1191,10 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
     (chapter) => chapter.id === selectedId,
   );
   const [draft, setDraft] = useState<Chapter>(
-    selected ?? EMPTY_CHAPTER(project.chapters.length + 1),
+    readRecoveredChapter(
+      project.summary.id,
+      selected ?? EMPTY_CHAPTER(project.chapters.length + 1),
+    ),
   );
   const [context, setContext] = useState<ContextPackage | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1173,12 +1202,62 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [history, setHistory] = useState<RevisionRecord[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "dirty" | "saving" | "error">("saved");
+  const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
+  const draftRef = useRef(draft);
+  const saveInFlight = useRef(false);
   const [batchPreview, setBatchPreview] =
     useState<BatchGenerationPreview | null>(null);
+  useEffect(() => { draftRef.current = draft; }, [draft]);
   useEffect(() => {
     const next = project.chapters.find((chapter) => chapter.id === selectedId);
-    if (next) setDraft(next);
+    if (!next || chapterDraftSignature(draftRef.current) !== lastSavedSignature.current) return;
+    setDraft(next);
+    lastSavedSignature.current = chapterDraftSignature(next);
   }, [project, selectedId]);
+  const dirty = chapterDraftSignature(draft) !== lastSavedSignature.current;
+  useEffect(() => {
+    if (!dirty) {
+      setSaveStatus("saved");
+      return;
+    }
+    writeRecoveredChapter(project.summary.id, draft);
+    setSaveStatus("dirty");
+    if (!draft.id || ["已定稿", "待发布", "已发布"].includes(draft.status)) return;
+    const timer = window.setTimeout(async () => {
+      if (saveInFlight.current) return;
+      const snapshot = draftRef.current;
+      const snapshotSignature = chapterDraftSignature(snapshot);
+      saveInFlight.current = true;
+      setSaveStatus("saving");
+      try {
+        const saved = await api.saveChapter(project.summary.id, snapshot);
+        const stillEditingChapter = draftRef.current.id === snapshot.id;
+        clearRecoveredChapter(project.summary.id, snapshot);
+        if (stillEditingChapter) lastSavedSignature.current = snapshotSignature;
+        if (stillEditingChapter && chapterDraftSignature(draftRef.current) === snapshotSignature) {
+          setDraft(saved);
+          setSaveStatus("saved");
+        } else if (stillEditingChapter) setSaveStatus("dirty");
+        await reload();
+      } catch (error) {
+        setSaveStatus("error");
+        notify(error instanceof Error ? error.message : String(error), "error");
+      } finally {
+        saveInFlight.current = false;
+      }
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [api, dirty, draft, notify, project.summary.id]);
+  useEffect(() => {
+    const preventUnsavedExit = (event: BeforeUnloadEvent) => {
+      if (chapterDraftSignature(draftRef.current) === lastSavedSignature.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventUnsavedExit);
+    return () => window.removeEventListener("beforeunload", preventUnsavedExit);
+  }, []);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (query.trim().length >= 2)
@@ -1194,14 +1273,38 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
         )
       : project.chapters;
   const save = async () => {
+    const snapshot = draftRef.current;
+    const snapshotSignature = chapterDraftSignature(snapshot);
+    setSaveStatus("saving");
     try {
-      const saved = await api.saveChapter(project.summary.id, draft);
+      const saved = await api.saveChapter(project.summary.id, snapshot);
+      clearRecoveredChapter(project.summary.id, snapshot);
+      lastSavedSignature.current = snapshotSignature;
       setSelectedId(saved.id);
+      setDraft(saved);
+      setSaveStatus("saved");
       await reload();
       notify("章节已保存并建立新版本");
     } catch (error) {
-      notify(String(error), "error");
+      setSaveStatus("error");
+      notify(error instanceof Error ? error.message : String(error), "error");
     }
+  };
+  const canDiscardDraft = () => {
+    if (!dirty) return true;
+    if (!window.confirm("当前章节还有未保存内容，确定放弃这些修改吗？")) return false;
+    clearRecoveredChapter(project.summary.id, draftRef.current);
+    return true;
+  };
+  const selectChapter = (chapter: Chapter) => {
+    if (!canDiscardDraft()) return;
+    const recovered = readRecoveredChapter(project.summary.id, chapter);
+    setSelectedId(chapter.id);
+    setDraft(recovered);
+    draftRef.current = recovered;
+    lastSavedSignature.current = chapterDraftSignature(chapter);
+    setSaveStatus(chapterDraftSignature(recovered) === lastSavedSignature.current ? "saved" : "dirty");
+    setContext(null);
   };
   return (
     <div className="writing-layout">
@@ -1214,8 +1317,13 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
           <IconButton
             label="新建章节"
             onClick={() => {
+              if (!canDiscardDraft()) return;
+              const empty = EMPTY_CHAPTER(project.chapters.length + 1);
               setSelectedId("");
-              setDraft(EMPTY_CHAPTER(project.chapters.length + 1));
+              setDraft(empty);
+              draftRef.current = empty;
+              lastSavedSignature.current = chapterDraftSignature(empty);
+              setSaveStatus("saved");
               setContext(null);
             }}
           >
@@ -1235,11 +1343,7 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
             <button
               key={chapter.id}
               className={selectedId === chapter.id ? "active" : ""}
-              onClick={() => {
-                setSelectedId(chapter.id);
-                setDraft(chapter);
-                setContext(null);
-              }}
+              onClick={() => selectChapter(chapter)}
             >
               <span>{chapter.number}</span>
               <div>
@@ -1267,6 +1371,9 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
             />
           </div>
           <div className="heading-actions">
+            <span className={`autosave-status autosave-${saveStatus}`} role="status">
+              {saveStatus === "saving" ? "正在自动保存" : saveStatus === "dirty" ? "未保存" : saveStatus === "error" ? "保存失败" : "已保存"}
+            </span>
             <Segmented
               options={["逐章", "五章批次"] as const}
               value={draft.batchMode}
@@ -1289,6 +1396,7 @@ function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
             <Button
               variant="secondary"
               icon={<Save size={16} />}
+              disabled={!dirty || saveStatus === "saving"}
               onClick={save}
             >
               保存

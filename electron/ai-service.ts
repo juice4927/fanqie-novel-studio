@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
   Chapter,
+  BookConceptCandidate,
+  BookConceptInput,
   ConceptCandidate,
   ContextPackage,
   Genre,
@@ -60,6 +62,23 @@ const CandidateSchema = z.object({
     differentiation: z.string(),
     longFormCapacity: z.string(),
     originalityRisk: z.enum(["低", "中", "高"]),
+  })).length(3),
+});
+
+const BookConceptSchema = z.object({
+  candidates: z.array(z.object({
+    title: z.string().min(4).max(40),
+    premise: z.string().min(20).max(500),
+    genreSubtype: z.string().min(2).max(40),
+    protagonistDesire: z.string().min(8).max(200),
+    readerPromise: z.string().min(10).max(300),
+    coreEmotion: z.string().min(2).max(80),
+    ending: z.string().min(10).max(300),
+    immutableRules: z.array(z.string().min(2).max(120)).min(2).max(6),
+    prohibitedPatterns: z.array(z.string().min(2).max(120)).min(2).max(6),
+    audience: z.string().min(5).max(200),
+    commercialHook: z.string().min(8).max(300),
+    longFormEngine: z.string().min(10).max(400),
   })).length(3),
 });
 
@@ -331,6 +350,20 @@ export class AiService {
       system: "你是原创中国商业网文策划。你只能使用输入中的抽象市场洞察，不得假定、复原或模仿任何样本作品。三个方案必须在主角身份、核心矛盾和长篇发动机上明显不同，并能持续制造逐级升级的期待与回报。",
       user: `项目题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n商业知识：${compileCommercialGuidance(project.summary.genre, 1, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, fanqieCategoryKey: project.contract.fanqieCategoryKey })}\n番茄市场机会（仅作证据，不得机械追热点）：${JSON.stringify(marketOpportunities)}\n脱敏洞察：${JSON.stringify(insights)}\n输出 candidates 数组，每项包含 title、oneLinePitch、audience、coreConflict、differentiation、longFormCapacity、originalityRisk。longFormCapacity 必须说明冲突、资源/关系/地图或规则如何至少三轮升级；每个方案要说明如何借鉴市场机会的读者需求但避开同质化。`,
       schema: CandidateSchema,
+    });
+    return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
+  }
+
+  async generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]> {
+    const plugin = GENRE_PLUGINS[input.genre];
+    const result = await this.runJson({
+      projectId: null,
+      taskType: "generate-book-concepts",
+      inputSummary: `${input.genre} 从零开书三案`,
+      system: "你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案必须在主角身份、核心矛盾、关系结构和长篇发动机上显著不同；书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。",
+      user: `频道题材：${input.genre}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n题材子类型（genreSubtype 必须从中选择）：${plugin.subtypes.map((item) => item.name).join("、")}\n核心幻想：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords })}\n输出 candidates，严格三项。每项包含 title、premise、genreSubtype、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`,
+      schema: BookConceptSchema,
+      timeoutMs: 300_000,
     });
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
   }

@@ -1,6 +1,8 @@
 import type {
   AiSettings,
   AppApi,
+  BookConceptCandidate,
+  BookConceptInput,
   ChangeRequest,
   Chapter,
   ConceptCandidate,
@@ -374,6 +376,27 @@ function browserRankingAnalytics(
 export function createBrowserApi(): AppApi {
   let state = load();
   const persist = () => save(state);
+  const createProject = (input: CreateProjectInput) => {
+    const projectId = id();
+    const project: ProjectDetail = {
+      summary: {
+        id: projectId, title: input.title, genre: input.genre, status: "候选立项",
+        targetWords: input.targetWords, currentWords: 0, chapterCount: 0, stockChapters: 0,
+        safeStockLine: input.safeStockLine ?? 10, updateCadence: input.updateCadence,
+        nextPublishAt: null, riskLevel: "正常", updatedAt: now(),
+      },
+      contract: {
+        premise: "", genreSubtype: "", fanqieCategoryKey: "", protagonistDesire: "",
+        readerPromise: "", coreEmotion: "", ending: "", immutableRules: [],
+        prohibitedPatterns: [], version: 1, approved: false, updatedAt: now(),
+      },
+      plans: [], chapters: [], facts: [], issues: [], changes: [], schedule: [], metrics: [],
+      insightIds: [], summaries: [], expectations: [],
+    };
+    state.projects.unshift(project);
+    persist();
+    return summary(project);
+  };
   return {
     async getDashboard(): Promise<DashboardData> {
       const projects = state.projects.map((item) => summary(item));
@@ -404,49 +427,37 @@ export function createBrowserApi(): AppApi {
       return state.projects.map(summary);
     },
     async createProject(input: CreateProjectInput) {
-      const projectId = id();
-      const project: ProjectDetail = {
-        summary: {
-          id: projectId,
-          title: input.title,
-          genre: input.genre,
-          status: "候选立项",
-          targetWords: input.targetWords,
-          currentWords: 0,
-          chapterCount: 0,
-          stockChapters: 0,
-          safeStockLine: input.safeStockLine ?? 10,
-          updateCadence: input.updateCadence,
-          nextPublishAt: null,
-          riskLevel: "正常",
-          updatedAt: now(),
-        },
-        contract: {
-          premise: "",
-        genreSubtype: "",
-        fanqieCategoryKey: "",
-          protagonistDesire: "",
-          readerPromise: "",
-          coreEmotion: "",
-          ending: "",
-          immutableRules: [],
-          prohibitedPatterns: [],
-          version: 1,
-          approved: false,
-          updatedAt: now(),
-        },
-        plans: [],
-        chapters: [],
-        facts: [],
-        issues: [],
-        changes: [],
-        schedule: [],
-        metrics: [],
-        insightIds: [],
-        summaries: [],
-        expectations: [],
+      return createProject(input);
+    },
+    async generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]> {
+      const ideas = [
+        ["她把烂账改成了金饭碗", "被亲友推去顶债的女会计，发现每笔恶意欠款都会显露一条可追索的证据链。"],
+        ["离婚当天，我接手了倒闭供销社", "被夺走婚房的基层职员接手濒临倒闭的供销社，用一张异常进货单串起女性互助生意。"],
+        ["全家等我认输，我却承包了荒山", "返乡姑娘被逼让出工作名额，她用一份旧承包合同把荒山变成整个县的新产业。"],
+      ];
+      return ideas.map(([title, premise], index) => ({
+        id: id(), title, premise: `${premise} 她必须在事业扩张与亲密关系重建中守住自己的选择。`,
+        genreSubtype: input.genre === "年代重生" ? "年代经营" : "现实成长",
+        protagonistDesire: "夺回人生选择权，并建立不依附任何人的事业与关系。",
+        readerPromise: "持续提供止损反击、能力变现、关系升温与阶段性事业成果。",
+        coreEmotion: index === 1 ? "治愈与重建" : "憋屈后的清醒反击",
+        ending: "主角解决最初的不公，建立可持续事业，并以平等关系完成情感选择。",
+        immutableRules: ["主角依靠行动和能力解决问题", "每次升级都带来新的责任与代价"],
+        prohibitedPatterns: ["反派无理由降智", "用连续误会拖延关系"],
+        audience: "偏好女性成长、现实经营与稳定情绪回报的番茄女频读者",
+        commercialHook: "低谷止损开局，身份反差和事业成果形成连续可见回报。",
+        longFormEngine: "个人止损、团队经营、区域产业三轮扩张，关系与旧账在每轮同步升级。",
+      }));
+    },
+    async createProjectFromConcept(input: BookConceptInput, concept: BookConceptCandidate) {
+      const created = createProject({ ...input, title: concept.title });
+      const project = getProject(state, created.id);
+      project.contract = {
+        ...project.contract, premise: concept.premise, genreSubtype: concept.genreSubtype,
+        protagonistDesire: concept.protagonistDesire, readerPromise: concept.readerPromise,
+        coreEmotion: concept.coreEmotion, ending: concept.ending,
+        immutableRules: concept.immutableRules, prohibitedPatterns: concept.prohibitedPatterns,
       };
-      state.projects.unshift(project);
       persist();
       return summary(project);
     },

@@ -8,7 +8,12 @@ test("starts the production Electron app and persists through the preload API", 
   const application = await electron.launch({
     args: ["."],
     cwd: process.cwd(),
-    env: { ...process.env, NODE_ENV: "test", NOVEL_STUDIO_WORKSPACE: workspace },
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      NOVEL_STUDIO_WORKSPACE: workspace,
+      NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK: "1",
+    },
   });
   try {
     const page = await application.firstWindow();

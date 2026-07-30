@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookCopy, BookOpen, Database, LayoutDashboard, LibraryBig, Plus, Search, Settings, Trash2, X } from "lucide-react";
-import type { DashboardData, Genre, ProjectSummary } from "./shared/types";
-import { GENRES } from "./shared/types";
+import { BookCopy, BookOpen, Database, LayoutDashboard, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import type { DashboardData, ProjectSummary } from "./shared/types";
 import { createBrowserApi } from "./lib/browser-api";
-import { Button, Field, Input, Modal, Select } from "./components/UI";
+import { Button, Field, Input, Modal } from "./components/UI";
+import { NewProjectModal } from "./components/NewProjectModal";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ResearchPage } from "./pages/ResearchPage";
 import { ProjectPage } from "./pages/ProjectPage";
@@ -23,7 +23,6 @@ export default function App() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
-  const [newProject, setNewProject] = useState({ title: "", genre: GENRES[0] as Genre, targetWords: 3000000, updateCadence: "每日 2 章" });
 
   const reload = async () => {
     const [nextDashboard, nextProjects] = await Promise.all([api.getDashboard(), api.listProjects()]);
@@ -49,7 +48,7 @@ export default function App() {
       {page === "settings" && <SettingsPage api={api} notify={notify} />}
       {page === "project" && selectedProjectId && <ProjectPage api={api} projectId={selectedProjectId} onBack={() => navigate("dashboard")} notify={(message, tone) => { notify(message, tone); void reload(); }} />}
     </div>
-    {createModal && <Modal title="新建独立作品" onClose={() => setCreateModal(false)}><div className="form-stack"><Field label="书名"><Input autoFocus value={newProject.title} onChange={(event) => setNewProject({ ...newProject, title: event.target.value })} placeholder="输入暂定书名" /></Field><div className="form-grid two"><Field label="题材"><Select value={newProject.genre} onChange={(event) => setNewProject({ ...newProject, genre: event.target.value as Genre })}>{GENRES.map((genre) => <option key={genre}>{genre}</option>)}</Select></Field><Field label="目标字数"><Input type="number" min={100000} step={100000} value={newProject.targetWords} onChange={(event) => setNewProject({ ...newProject, targetWords: Number(event.target.value) })} /></Field></div><Field label="更新节奏"><Input value={newProject.updateCadence} onChange={(event) => setNewProject({ ...newProject, updateCadence: event.target.value })} placeholder="例如：每日 2 章" /></Field><div className="project-isolation-note"><LibraryBig size={18} /><span>将创建独立目录、数据库和检索索引。</span></div><div className="modal-actions"><Button variant="secondary" onClick={() => setCreateModal(false)}>取消</Button><Button disabled={!newProject.title.trim()} onClick={async () => { try { const created = await api.createProject(newProject); setCreateModal(false); setNewProject({ title: "", genre: GENRES[0], targetWords: 3000000, updateCadence: "每日 2 章" }); await reload(); openProject(created.id); notify("独立作品库已创建"); } catch (error) { notify(String(error), "error"); } }}>创建作品</Button></div></div></Modal>}
+    {createModal && <NewProjectModal api={api} onClose={() => setCreateModal(false)} notify={notify} onCreated={async (created) => { setCreateModal(false); await reload(); openProject(created.id); notify("作品与创作契约草案已创建，请先在故事圣经中审核"); }} />}
     {deleteProject && <Modal title="移除作品" onClose={() => !deleteBusy && setDeleteProject(null)}><div className="form-stack"><div className="delete-project-warning"><Trash2 size={20} /><div><strong>作品将从工作台移除</strong><p>独立数据库、正文、附件和历史版本会移动到工作区的 trash 回收目录，不会立即永久擦除。</p></div></div><Field label={`输入完整书名“${deleteProject.title}”确认`}><Input autoFocus value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} /></Field><div className="modal-actions"><Button variant="secondary" disabled={deleteBusy} onClick={() => setDeleteProject(null)}>取消</Button><Button disabled={deleteBusy || deleteConfirmation.trim() !== deleteProject.title} icon={<Trash2 size={16} />} onClick={async () => { setDeleteBusy(true); try { const result = await api.deleteProject(deleteProject.id, deleteConfirmation); if (selectedProjectId === deleteProject.id) { setSelectedProjectId(null); setPage("dashboard"); } setDeleteProject(null); setDeleteConfirmation(""); await reload(); notify(result); } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); } finally { setDeleteBusy(false); } }}>移入回收目录</Button></div></div></Modal>}
     {toast && <div className={`toast toast-${toast.tone}`}><span>{toast.message}</span><button aria-label="关闭通知" onClick={() => setToast(null)}><X size={15} /></button></div>}
   </div>;

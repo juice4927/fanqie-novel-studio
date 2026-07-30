@@ -48,6 +48,31 @@ function parseJson<T>(value: unknown): T {
   return JSON.parse(String(value)) as T;
 }
 
+function hasColumn(db: DatabaseSync, table: string, column: string) {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+    .some((item) => item.name === column);
+}
+
+function migrateDatabase(
+  db: DatabaseSync,
+  migrations: ReadonlyArray<(database: DatabaseSync) => void>,
+) {
+  const current = Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
+  if (current > migrations.length)
+    throw new Error(`数据库版本 ${current} 高于当前程序支持的版本 ${migrations.length}`);
+  for (let version = current + 1; version <= migrations.length; version += 1) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      migrations[version - 1](db);
+      db.exec(`PRAGMA user_version = ${version}`);
+      db.exec("COMMIT");
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw new Error(`数据库升级到版本 ${version} 失败`, { cause: error });
+    }
+  }
+}
+
 interface CatalogRow {
   id: string;
   title: string;
@@ -93,7 +118,8 @@ export class WorkspaceDatabase {
   }
 
   private initCatalog() {
-    this.catalog.exec(`
+    migrateDatabase(this.catalog, [
+      (db) => db.exec(`
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -113,19 +139,17 @@ export class WorkspaceDatabase {
         error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_global_ai_jobs_dedupe ON ai_jobs(task_type, input_hash, prompt_version, model);
-    `);
-    const projectColumns = this.catalog
-      .prepare("PRAGMA table_info(projects)")
-      .all() as Array<{ name: string }>;
-    if (!projectColumns.some((column) => column.name === "safe_stock_line")) {
-      this.catalog.exec(
-        "ALTER TABLE projects ADD COLUMN safe_stock_line INTEGER NOT NULL DEFAULT 10",
-      );
-    }
+      `),
+      (db) => {
+        if (!hasColumn(db, "projects", "safe_stock_line"))
+          db.exec("ALTER TABLE projects ADD COLUMN safe_stock_line INTEGER NOT NULL DEFAULT 10");
+      },
+    ]);
   }
 
   private initResearch() {
-    this.research.exec(`
+    migrateDatabase(this.research, [
+      (db) => db.exec(`
       CREATE TABLE IF NOT EXISTS ranking_snapshots (
         id TEXT PRIMARY KEY, source TEXT NOT NULL, list_name TEXT NOT NULL,
         captured_at TEXT NOT NULL, status TEXT NOT NULL, error TEXT
@@ -158,17 +182,18 @@ export class WorkspaceDatabase {
         PRIMARY KEY(hash, book_id)
       );
       CREATE INDEX IF NOT EXISTS idx_research_fingerprints_hash ON research_fingerprints(hash);
-    `);
-    const rankingColumns = this.research
-      .prepare("PRAGMA table_info(ranking_entries)")
-      .all() as Array<{ name: string }>;
-    for (const column of ["synopsis", "official_reader_url", "platform"])
-      if (!rankingColumns.some((existing) => existing.name === column))
-        this.research.exec(`ALTER TABLE ranking_entries ADD COLUMN ${column} TEXT`);
+      `),
+      (db) => {
+        for (const column of ["synopsis", "official_reader_url", "platform"])
+          if (!hasColumn(db, "ranking_entries", column))
+            db.exec(`ALTER TABLE ranking_entries ADD COLUMN ${column} TEXT`);
+      },
+    ]);
   }
 
   private initProject(db: DatabaseSync) {
-    db.exec(`
+    migrateDatabase(db, [
+      (database) => database.exec(`
       CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS records (
         collection TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -193,7 +218,8 @@ export class WorkspaceDatabase {
         estimated_cost REAL NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_jobs_dedupe ON ai_jobs(task_type, input_hash, prompt_version, model);
-    `);
+      `),
+    ]);
   }
 
   private projectDb(projectId: string) {
@@ -246,6 +272,13 @@ export class WorkspaceDatabase {
     this.setState(db, "contract", contract);
     this.setState(db, "insightIds", []);
     return this.getProjectSummary(id);
+  }
+
+  createProjectFromConcept(input: CreateProjectInput, contractDraft: Omit<StoryContract, "version" | "approved" | "updatedAt">): ProjectSummary {
+    const created = this.createProject(input);
+    const project = this.getProject(created.id);
+    this.saveContract(created.id, { ...project.contract, ...contractDraft, approved: false });
+    return this.getProjectSummary(created.id);
   }
 
   listProjects(): ProjectSummary[] {

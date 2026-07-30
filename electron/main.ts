@@ -41,10 +41,13 @@ let ai: AiService;
 let apiCredential = "";
 const activeGenerationProjects = new Set<string>();
 let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const singleInstanceLockDisabled =
+  process.env.NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
+const hasSingleInstanceLock =
+  singleInstanceLockDisabled || app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) app.quit();
-else app.on("second-instance", () => {
+else if (!singleInstanceLockDisabled) app.on("second-instance", () => {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
@@ -496,10 +499,33 @@ function registerHandlers() {
     channel: keyof AppApi,
     callback: (...args: any[]) => unknown,
   ) =>
-    ipcMain.handle(`studio:${channel}`, (_event, ...args) => callback(...args));
+    ipcMain.handle(`studio:${channel}`, (event, ...args) => {
+      if (!mainWindow || event.sender.id !== mainWindow.webContents.id)
+        throw new Error("拒绝来自非主窗口的调用");
+      return callback(...args);
+    });
   handle("getDashboard", () => getDashboard());
   handle("listProjects", () => database.listProjects());
   handle("createProject", (input) => database.createProject(input));
+  handle("generateBookConcepts", (input) => ai.generateBookConcepts(input));
+  handle("createProjectFromConcept", (input, concept) => {
+    return database.createProjectFromConcept({
+      title: concept.title,
+      genre: input.genre,
+      targetWords: input.targetWords,
+      updateCadence: input.updateCadence,
+    }, {
+      premise: concept.premise,
+      genreSubtype: concept.genreSubtype,
+      fanqieCategoryKey: "",
+      protagonistDesire: concept.protagonistDesire,
+      readerPromise: concept.readerPromise,
+      coreEmotion: concept.coreEmotion,
+      ending: concept.ending,
+      immutableRules: concept.immutableRules,
+      prohibitedPatterns: concept.prohibitedPatterns,
+    });
+  });
   handle("deleteProject", (id, confirmationTitle) => {
     if (activeGenerationProjects.has(id))
       throw new Error("该作品仍有正文生成任务运行，暂时不能删除");
@@ -925,9 +951,6 @@ function registerHandlers() {
     return restoreEncryptedBackup(result.filePaths[0], database.root, password);
   });
   handle("getWorkspacePath", () => database.root);
-  ipcMain.handle("studio:showInFolder", (_event, target: string) =>
-    shell.showItemInFolder(target),
-  );
 }
 
 function createWindow() {
@@ -943,7 +966,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
   const devUrl = process.env.VITE_DEV_SERVER_URL;

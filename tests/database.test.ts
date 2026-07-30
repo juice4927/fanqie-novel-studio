@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorkspaceDatabase, now } from "../electron/database";
 import type { Chapter, LedgerFact, QualityIssue } from "../src/shared/types";
@@ -28,6 +29,55 @@ afterEach(() => {
 });
 
 describe("per-book isolation and gates", () => {
+  it("migrates an unversioned catalog without losing existing projects", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "novel-studio-legacy-"));
+    roots.push(root);
+    mkdirSync(root, { recursive: true });
+    const legacy = new DatabaseSync(path.join(root, "catalog.sqlite"));
+    legacy.exec(`
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, genre TEXT NOT NULL, status TEXT NOT NULL,
+        target_words INTEGER NOT NULL, update_cadence TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      INSERT INTO projects VALUES (
+        'legacy-project', '旧版作品', '都市脑洞', '候选立项', 1000000, '每日1章',
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+      );
+    `);
+    legacy.close();
+
+    const database = new WorkspaceDatabase(root);
+    databases.push(database);
+    expect(database.listProjects()[0]).toMatchObject({ id: "legacy-project", title: "旧版作品", safeStockLine: 10 });
+    const inspection = new DatabaseSync(path.join(root, "catalog.sqlite"));
+    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    expect((inspection.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some((column) => column.name === "safe_stock_line")).toBe(true);
+    inspection.close();
+  });
+
+  it("creates a zero-start project with an unapproved contract draft", () => {
+    const database = createDatabase();
+    const created = database.createProjectFromConcept(
+      { title: "她在八零开新局", genre: "年代重生", targetWords: 1000000, updateCadence: "每日 2 章" },
+      {
+        premise: "女主从一场被安排的婚事中止损，用技术与经营重建自己的人生。",
+        genreSubtype: "年代经营", fanqieCategoryKey: "",
+        protagonistDesire: "拿回人生选择权，并建立属于自己的事业。",
+        readerPromise: "持续兑现止损反击、事业升级和双向关系成长。",
+        coreEmotion: "清醒反击与共同成长",
+        ending: "女主建立独立事业，也完成一段平等而坚定的亲密关系。",
+        immutableRules: ["主角靠主动行动解决问题", "事业升级必须付出真实成本"],
+        prohibitedPatterns: ["反派无理由降智", "连续误会拖延关系"],
+      },
+    );
+    const project = database.getProject(created.id);
+    expect(project.summary.title).toBe("她在八零开新局");
+    expect(project.contract.premise).toContain("技术与经营");
+    expect(project.contract.genreSubtype).toBe("年代经营");
+    expect(project.contract.approved).toBe(false);
+  });
+
   it("moves a title-confirmed project to the recoverable trash directory", () => {
     const database = createDatabase();
     const project = database.createProject({ title: "待移除作品", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });

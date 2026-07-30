@@ -1367,6 +1367,24 @@ p {
   margin-top: 4px;
 }
 
+.book-wizard { display: grid; gap: 16px; }
+.wizard-genre-note { display: flex; align-items: baseline; gap: 12px; padding: 10px 12px; color: var(--muted); background: var(--surface-muted); border-left: 3px solid var(--accent); font-size: 11px; line-height: 1.5; }
+.wizard-genre-note strong { flex: 0 0 auto; color: var(--ink); }
+.wizard-generate { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 88px; padding: 16px; border: 1px dashed var(--line-strong); background: var(--surface-soft); }
+.wizard-generate > svg { color: var(--accent); }
+.wizard-generate div { display: grid; gap: 4px; }
+.wizard-generate span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.book-concept-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.book-concept-grid > button { min-width: 0; padding: 14px; color: var(--ink); text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.book-concept-grid > button:hover { border-color: #9aa89f; }
+.book-concept-grid > button.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(36, 121, 109, 0.12); }
+.book-concept-grid header { display: flex; align-items: center; justify-content: space-between; min-height: 20px; color: var(--accent); font-size: 10px; }
+.book-concept-grid h3 { margin: 8px 0; font-size: 15px; line-height: 1.4; }
+.book-concept-grid p { margin: 0 0 12px; color: #4d544f; font-size: 10px; line-height: 1.6; }
+.book-concept-grid dl { display: grid; gap: 3px; margin: 0; }
+.book-concept-grid dt { margin-top: 6px; color: var(--subtle); font-size: 9px; }
+.book-concept-grid dd { margin: 0; color: #4d544f; font-size: 10px; line-height: 1.45; }
+
 .plan-hierarchy {
   display: grid;
   gap: 14px;
@@ -1641,6 +1659,20 @@ p {
   color: var(--muted);
   font-size: 10px;
   white-space: nowrap;
+}
+.autosave-status {
+  min-width: 68px;
+  color: var(--subtle);
+  font-size: 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+.autosave-dirty,
+.autosave-error {
+  color: var(--danger);
+}
+.autosave-saving {
+  color: var(--teal);
 }
 .editor-body {
   display: flex;
@@ -2914,4 +2946,7 @@ p {
     max-height: calc(100vh - 74px);
     padding: 15px;
   }
+  .book-concept-grid { grid-template-columns: 1fr; }
+  .wizard-generate { grid-template-columns: 28px minmax(0, 1fr); }
+  .wizard-generate .button { grid-column: 1 / -1; justify-self: stretch; }
 }

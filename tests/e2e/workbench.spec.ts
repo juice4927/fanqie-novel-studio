@@ -72,6 +72,14 @@ test("navigates through research and the complete project workflow", async ({
   await expect(page.getByText("预期回报", { exact: true })).toBeVisible();
   await expect(page.getByText("当前危机", { exact: true })).toBeVisible();
   await expect(page.getByText("结尾期待", { exact: true })).toBeVisible();
+  await page.locator(".chapter-scroll > button").filter({ hasText: "回声的代价" }).click();
+  const manuscript = page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。");
+  await manuscript.fill("自动保存回归文本：雨落在旧城的玻璃窗上。");
+  await expect(page.getByRole("status")).toHaveText("已保存", { timeout: 5000 });
+  await page.getByRole("button", { name: /状态账本/ }).click();
+  await page.getByRole("button", { name: /写作台/ }).click();
+  await page.locator(".chapter-scroll > button").filter({ hasText: "回声的代价" }).click();
+  await expect(page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。")).toHaveValue("自动保存回归文本：雨落在旧城的玻璃窗上。");
   await page.getByPlaceholder("检索正文").fill("红伞");
   await expect(page.getByText("停电后的第七分钟").first()).toBeVisible();
   const layout = await page.evaluate(() => {
@@ -150,4 +158,19 @@ test("keeps the dashboard readable without viewport overflow", async ({
       path: path.join(screenshotRoot, `${testInfo.project.name}-dashboard.png`),
       fullPage: true,
     });
+});
+
+test("creates a book from zero through AI concept selection", async ({ page }) => {
+  await page.getByRole("button", { name: "新建作品" }).first().click();
+  await expect(page.getByRole("dialog", { name: "从 0 开始创建一本书" })).toBeVisible();
+  await expect(page.getByText("AI 从零开书", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "生成三套方案" }).click();
+  await expect(page.getByRole("heading", { name: "她把烂账改成了金饭碗" })).toBeVisible();
+  await expect(page.locator(".book-concept-grid > button")).toHaveCount(3);
+  await page.getByRole("button", { name: /离婚当天，我接手了倒闭供销社/ }).click();
+  await page.getByRole("button", { name: "采用此方案并创建" }).click();
+  await expect(page.getByRole("heading", { name: "离婚当天，我接手了倒闭供销社" })).toBeVisible();
+  await page.getByRole("button", { name: /故事圣经/ }).click();
+  await expect(page.getByLabel("故事前提")).toHaveValue(/被夺走婚房的基层职员/);
+  await expect(page.getByRole("button", { name: "审批契约" })).toBeVisible();
 });

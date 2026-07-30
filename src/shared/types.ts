@@ -370,6 +370,29 @@ export interface ConceptCandidate {
   originalityRisk: "低" | "中" | "高";
 }
 
+export interface BookConceptInput {
+  genre: Genre;
+  targetWords: number;
+  updateCadence: string;
+  seed: string;
+}
+
+export interface BookConceptCandidate {
+  id: string;
+  title: string;
+  premise: string;
+  genreSubtype: string;
+  protagonistDesire: string;
+  readerPromise: string;
+  coreEmotion: string;
+  ending: string;
+  immutableRules: string[];
+  prohibitedPatterns: string[];
+  audience: string;
+  commercialHook: string;
+  longFormEngine: string;
+}
+
 export interface CreateProjectInput {
   title: string;
   genre: Genre;
@@ -454,6 +477,8 @@ export interface AppApi {
   getDashboard(): Promise<DashboardData>;
   listProjects(): Promise<ProjectSummary[]>;
   createProject(input: CreateProjectInput): Promise<ProjectSummary>;
+  generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]>;
+  createProjectFromConcept(input: BookConceptInput, concept: BookConceptCandidate): Promise<ProjectSummary>;
   deleteProject(id: string, confirmationTitle: string): Promise<string>;
   getProject(id: string): Promise<ProjectDetail>;
   updateProject(id: string, patch: ProjectPatch): Promise<ProjectSummary>;
