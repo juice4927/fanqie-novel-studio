@@ -233,6 +233,22 @@ describe("per-book isolation and gates", () => {
     expect(conflict.confidence).toBe("有冲突");
     expect(database.searchRelevantFacts(project.id, "北仓控制方", 3, 2).some((fact) => fact.subject === "北仓")).toBe(true);
   });
+
+  it("persists review experiments without applying story changes", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "实验测试", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
+    const draft = {
+      id: "", title: "减少重复回报", hypothesis: "关系回报替代重复震惊后追读率提高", changeSummary: "第10至15章调整回报类型",
+      fromChapter: 10, toChapter: 15, baselineStart: "2026-07-01", baselineEnd: "2026-07-07",
+      observationStart: "2026-07-08", observationEnd: "2026-07-14", primaryMetric: "追读率" as const,
+      successCriteria: "提高2个百分点", confounders: "推荐量、发布时间", status: "观察中" as const,
+      conclusion: "", decision: null, createdAt: now(), updatedAt: now(),
+    };
+    const saved = database.saveReviewExperiment(project.id, draft);
+    expect(database.getProject(project.id).experiments[0]).toMatchObject({ id: saved.id, status: "观察中", fromChapter: 10, toChapter: 15 });
+    expect(database.getProject(project.id).changes).toEqual([]);
+    expect(() => database.saveReviewExperiment(project.id, { ...saved, status: "已结论", conclusion: "", decision: null })).toThrow("结论和处理决定");
+  });
 });
 
 describe("research firewall", () => {

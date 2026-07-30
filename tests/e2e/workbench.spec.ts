@@ -73,6 +73,12 @@ test("navigates through research and the complete project workflow", async ({
   await expect(page.getByText("当前危机", { exact: true })).toBeVisible();
   await expect(page.getByText("结尾期待", { exact: true })).toBeVisible();
   await page.locator(".chapter-scroll button").filter({ hasText: "回声的代价" }).click();
+  await page.getByRole("button", { name: "预览上下文" }).click();
+  await expect(page.getByText("上下文包", { exact: true })).toBeVisible();
+  await expect(page.locator(".context-diagnostic").filter({ hasText: "创作契约" })).toContainText("已审批创作契约");
+  await expect(page.locator(".context-diagnostic").filter({ hasText: "相关事实" })).toContainText(/\d+\/\d+ 项/);
+  await expect(page.locator(".context-diagnostic-list")).toBeVisible();
+  await page.getByRole("button", { name: "关闭上下文" }).click();
   const manuscript = page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。");
   await manuscript.fill("自动保存回归文本：雨落在旧城的玻璃窗上。");
   await expect(page.getByRole("status")).toHaveText("已保存", { timeout: 5000 });
@@ -200,4 +206,35 @@ test("traps modal focus, closes with Escape, and restores focus", async ({ page 
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test("reviews chapters through the quality queue", async ({ page }) => {
+  await page.locator(".project-row").filter({ hasText: "回声备忘录" }).click();
+  await page.getByRole("button", { name: /质检中心/ }).click();
+  await expect(page.getByRole("heading", { name: "章节审稿队列" })).toBeVisible();
+  const queued = page.locator(".review-queue article").filter({ hasText: "停电后的第七分钟" });
+  await expect(queued).toContainText("其他 1");
+  await queued.getByRole("button", { name: /第 1 章/ }).click();
+  await expect(page.getByLabel("筛选审稿章节")).toHaveValue("demo-chapter-1");
+  await queued.getByRole("button", { name: "运行质检" }).click();
+  await expect(page.getByText("第1章质检已更新")).toBeVisible();
+});
+
+test("records an operations experiment without changing story content", async ({ page }) => {
+  await page.locator(".project-row").filter({ hasText: "回声备忘录" }).click();
+  await page.getByRole("button", { name: /数据复盘/ }).click();
+  await page.getByRole("button", { name: "新建实验" }).click();
+  const dialog = page.getByRole("dialog", { name: "新建运营实验" });
+  await dialog.getByLabel("实验标题").fill("减少重复回报机制");
+  await dialog.getByLabel("可验证假设").fill("减少连续震惊桥段后，七日追读率提高两个百分点");
+  await dialog.getByLabel("计划改动").fill("第10至15章改用关系与资源回报");
+  await dialog.getByLabel("影响起始章").fill("10");
+  await dialog.getByLabel("影响结束章").fill("15");
+  await dialog.getByLabel("成功标准").fill("七日追读率提高2个百分点");
+  await dialog.getByLabel("干扰因素").fill("记录同期推荐量、发布时间和断更情况");
+  await dialog.getByRole("button", { name: "保存实验" }).click();
+  await expect(page.getByRole("dialog", { name: "新建运营实验" })).toBeHidden();
+  const experiment = page.locator(".experiment-list article").filter({ hasText: "减少重复回报机制" });
+  await expect(experiment).toContainText("第10–15章");
+  await expect(experiment).toContainText("追读率");
 });

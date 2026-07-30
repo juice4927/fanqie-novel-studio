@@ -23,12 +23,14 @@ import type {
   QualityIssue,
   RankingSnapshot,
   ResearchBook,
+  ReviewExperiment,
   ScheduleItem,
   StoryContract,
 } from "../shared/types";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { findCurrentVolume } from "../shared/planning";
 import { compileCommercialGuidance } from "../shared/commercial-knowledge";
+import { buildContextDiagnostics } from "../shared/context-diagnostics";
 import { buildLongTermMemory } from "../shared/summaries";
 import {
   assertChapterTransition,
@@ -202,7 +204,7 @@ function seedProject(): ProjectDetail {
     ],
     changes: [],
     schedule: [],
-    metrics: [],
+    metrics: [], experiments: [],
     insightIds: ["demo-insight"],
     summaries: [],
     expectations: [
@@ -334,6 +336,7 @@ function getProject(state: DemoState, projectId: string) {
   if (!project) throw new Error("项目不存在");
   project.summaries ??= [];
   project.expectations ??= [];
+  project.experiments ??= [];
   project.chapters.forEach((chapter) => {
     chapter.linkedExpectationIds ??= [];
   });
@@ -396,7 +399,7 @@ export function createBrowserApi(): AppApi {
         readerPromise: "", coreEmotion: "", ending: "", immutableRules: [],
         prohibitedPatterns: [], version: 1, approved: false, updatedAt: now(),
       },
-      plans: [], chapters: [], facts: [], issues: [], changes: [], schedule: [], metrics: [],
+      plans: [], chapters: [], facts: [], issues: [], changes: [], schedule: [], metrics: [], experiments: [],
       insightIds: [], summaries: [], expectations: [],
     };
     state.projects.unshift(project);
@@ -668,7 +671,7 @@ export function createBrowserApi(): AppApi {
     async compileContext(projectId, chapterId): Promise<ContextPackage> {
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((item) => item.id === chapterId)!;
-      const result = {
+      const result: ContextPackage = {
         contract: JSON.stringify(project.contract, null, 2),
         commercialGuidance: compileCommercialGuidance(
           project.summary.genre,
@@ -719,6 +722,10 @@ export function createBrowserApi(): AppApi {
         estimatedTokens: 0,
       };
       result.estimatedTokens = Math.ceil(JSON.stringify(result).length / 1.8);
+      result.diagnostics = buildContextDiagnostics(result, {}, [
+        !project.contract.approved ? "创作契约尚未审批" : "",
+        !project.facts.some((fact) => fact.confidence === "已确认") ? "没有可用于本章的已确认有效事实" : "",
+      ]);
       return result;
     },
     async searchProject(projectId, query, offset = 0, limit = 50) {
@@ -1069,6 +1076,18 @@ export function createBrowserApi(): AppApi {
     },
     async getReviewSuggestions(projectId) {
       return analyzeMetrics(getProject(state, projectId).metrics);
+    },
+    async saveReviewExperiment(projectId, experiment: ReviewExperiment) {
+      const project = getProject(state, projectId);
+      const existing = project.experiments.find((item) => item.id === experiment.id);
+      const next = { ...experiment, id: experiment.id || id(), createdAt: existing?.createdAt ?? experiment.createdAt ?? now(), updatedAt: now() };
+      if (!next.title.trim() || !next.hypothesis.trim()) throw new Error("实验标题和假设不能为空");
+      if (next.fromChapter > next.toChapter) throw new Error("影响起始章不能晚于结束章");
+      if (next.status === "已结论" && (!next.conclusion.trim() || !next.decision)) throw new Error("结束实验必须填写结论和处理决定");
+      const index = project.experiments.findIndex((item) => item.id === next.id);
+      if (index >= 0) project.experiments[index] = next; else project.experiments.unshift(next);
+      persist();
+      return next;
     },
     async createBackup() {
       throw new Error("加密备份仅在桌面版可用");

@@ -59,6 +59,7 @@ const api: AppApi = {
   exportProject: (id, format) => invoke("exportProject", id, format),
   importMetricsCsv: (id, csvText) => invoke("importMetricsCsv", id, csvText),
   getReviewSuggestions: (id) => invoke("getReviewSuggestions", id),
+  saveReviewExperiment: (id, experiment) => invoke("saveReviewExperiment", id, experiment),
   createBackup: (password) => invoke("createBackup", password),
   restoreBackup: (password) => invoke("restoreBackup", password),
   getAutoBackupSettings: () => invoke("getAutoBackupSettings"),

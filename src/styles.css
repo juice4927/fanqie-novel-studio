@@ -1814,6 +1814,59 @@ p {
   word-break: break-word;
 }
 
+.context-diagnostics {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.context-warnings {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 9px 10px;
+  border: 1px solid var(--amber);
+  background: var(--amber-soft);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.context-diagnostic-list {
+  display: grid;
+  gap: 6px;
+}
+
+.context-diagnostic {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.context-diagnostic > span {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.context-diagnostic > span:nth-child(2) {
+  justify-content: flex-end;
+}
+
+.context-diagnostic small,
+.context-diagnostic p {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.context-diagnostic p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .ledger-filter {
   align-items: flex-start;
 }
@@ -2177,6 +2230,30 @@ p {
   gap: 1px;
   background: var(--line);
 }
+
+.experiment-band { margin-bottom: 18px; }
+.experiment-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+.experiment-list article {
+  display: flex;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  flex-direction: column;
+}
+.experiment-list header { display: flex; align-items: center; gap: 8px; }
+.experiment-list p { margin: 10px 0; color: var(--muted); font-size: 11px; }
+.experiment-list dl { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 0 0 10px; }
+.experiment-list dl div { min-width: 0; }
+.experiment-list dt { color: var(--subtle); font-size: 9px; }
+.experiment-list dd { margin: 2px 0 0; font-size: 10px; overflow-wrap: anywhere; }
+.experiment-list blockquote { margin: 0 0 10px; padding: 8px; background: var(--surface-soft); border-left: 3px solid var(--teal); font-size: 10px; }
+.experiment-list .button { margin-top: auto; align-self: flex-start; }
 .review-suggestions article {
   min-height: 150px;
   padding: 15px;
@@ -2463,6 +2540,80 @@ p {
   color: var(--subtle);
   font-size: 9px;
 }
+
+.revision-actions {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.paragraph-diff {
+  grid-column: 1 / -1;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line);
+}
+
+.paragraph-diff header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-size: 10px;
+}
+
+.paragraph-diff p {
+  margin: 0;
+  padding: 6px 10px;
+  white-space: pre-wrap;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.paragraph-diff .diff-新增 { background: var(--teal-soft); }
+.paragraph-diff .diff-删除 { color: var(--danger); background: var(--danger-soft); text-decoration: line-through; }
+.paragraph-diff .diff-未变 { color: var(--muted); }
+
+.review-queue-band {
+  margin-bottom: 18px;
+}
+
+.review-queue-band .section-heading .select {
+  width: min(320px, 100%);
+}
+
+.review-queue {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.review-queue article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.review-queue article.active { border-color: var(--teal); }
+.review-queue article > button {
+  display: flex;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  flex-direction: column;
+}
+.review-queue article > button span,
+.review-queue article > button small { color: var(--muted); font-size: 10px; }
 .check-row {
   display: flex;
   align-items: flex-start;
@@ -2880,6 +3031,10 @@ p {
   .writing-layout,
   .writing-layout:has(.context-panel) {
     grid-template-columns: 150px minmax(0, 1fr);
+  }
+  .context-panel {
+    top: 58px;
+    height: calc(100vh - 58px);
   }
   .editor-toolbar {
     align-items: flex-start;

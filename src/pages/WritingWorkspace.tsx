@@ -66,6 +66,8 @@ import {
 } from "../components/UI";
 import { formatCount, formatDate } from "../lib/format";
 import { summarizeMetrics } from "../shared/metrics";
+import { CONTEXT_SECTION_LABELS } from "../shared/context-diagnostics";
+import { diffParagraphs } from "../shared/paragraph-diff";
 
 export interface CommonProjectProps {
   project: ProjectDetail;
@@ -106,6 +108,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   const [compactList, setCompactList] = useState(() => window.matchMedia("(max-width: 600px)").matches);
   const [history, setHistory] = useState<RevisionRecord[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [compareRevisionId, setCompareRevisionId] = useState("");
   const [saveStatus, setSaveStatus] = useState<"saved" | "dirty" | "saving" | "error">("saved");
   const [recoveryAvailable, setRecoveryAvailable] = useState(true);
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
@@ -635,8 +638,27 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               <Trash2 size={16} />
             </IconButton>
           </div>
+          {context.diagnostics && (
+            <div className="context-diagnostics">
+              {context.diagnostics.warnings.length > 0 && (
+                <div className="context-warnings" role="alert">
+                  <AlertTriangle size={16} />
+                  <span>{context.diagnostics.warnings.join("；")}</span>
+                </div>
+              )}
+              <div className="context-diagnostic-list">
+                {context.diagnostics.sections.map((section) => (
+                  <div key={section.key} className={`context-diagnostic context-${section.status}`}>
+                    <span><strong>{section.label}</strong><small>{section.source}</small></span>
+                    <span><Badge tone={section.status === "缺失" ? "warning" : "neutral"}>{section.status}</Badge><small>{section.includedItems}/{section.totalItems} 项 · {section.characters} 字</small></span>
+                    <p>{section.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {Object.entries(context)
-            .filter(([key]) => key !== "estimatedTokens")
+            .filter(([key]) => key !== "estimatedTokens" && key !== "diagnostics")
             .map(([key, value]) => (
               <details
                 key={key}
@@ -649,18 +671,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               >
                 <summary>
                   {
-                    {
-                      contract: "创作契约",
-                      commercialGuidance: "商业写作知识",
-                      chapterIntent: "本章商业意图",
-                      expectationLedger: "期待兑现账本",
-                      volumeGoal: "当前卷目标",
-                      rollingOutline: "滚动章纲",
-                      recentSummary: "近期摘要",
-                      relevantFacts: "相关事实",
-                      forbiddenKnowledge: "禁止泄露信息",
-                      authorStyle: "作者自身文风统计",
-                    }[key]
+                    CONTEXT_SECTION_LABELS[key as keyof typeof CONTEXT_SECTION_LABELS]
                   }
                 </summary>
                 <pre>{value || "无"}</pre>
@@ -677,6 +688,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             {history.length ? (
               history.map((revision) => {
                 const snapshot = revision.payload as Chapter;
+                const compared = compareRevisionId === revision.id ? diffParagraphs(snapshot.content ?? "", draft.content ?? "") : [];
                 return (
                   <article key={revision.id}>
                     <div>
@@ -688,20 +700,37 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                         {snapshot.content?.replace(/\s/g, "").length ?? 0}字
                       </small>
                     </div>
-                    <Button
-                      variant="secondary"
-                      onClick={async () => {
-                        await api.restoreRevision(
-                          project.summary.id,
-                          revision.id,
-                        );
-                        await reload();
-                        setHistoryOpen(false);
-                        notify(`已从 v${revision.revision} 建立新的当前版本`);
-                      }}
-                    >
-                      恢复为新版本
-                    </Button>
+                    <div className="revision-actions">
+                      <Button variant="ghost" onClick={() => setCompareRevisionId(compareRevisionId === revision.id ? "" : revision.id)}>
+                        {compareRevisionId === revision.id ? "收起差异" : "与当前版本比较"}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={async () => {
+                          await api.restoreRevision(
+                            project.summary.id,
+                            revision.id,
+                          );
+                          await reload();
+                          setHistoryOpen(false);
+                          notify(`已从 v${revision.revision} 建立新的当前版本`);
+                        }}
+                      >
+                        恢复为新版本
+                      </Button>
+                    </div>
+                    {compared.length > 0 && (
+                      <div className="paragraph-diff" aria-label={`v${revision.revision} 与当前版本的段落差异`}>
+                        <header>
+                          <span>新增 {compared.filter((item) => item.kind === "新增").length}</span>
+                          <span>删除 {compared.filter((item) => item.kind === "删除").length}</span>
+                          <span>未变 {compared.filter((item) => item.kind === "未变").length}</span>
+                        </header>
+                        {compared.map((item, index) => (
+                          <p key={`${item.kind}-${index}`} className={`diff-${item.kind}`}>{item.kind === "新增" ? "+" : item.kind === "删除" ? "-" : " "} {item.text}</p>
+                        ))}
+                      </div>
+                    )}
                   </article>
                 );
               })

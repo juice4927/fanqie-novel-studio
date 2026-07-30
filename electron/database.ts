@@ -16,6 +16,7 @@ import type {
   InsightPack,
   LedgerFact,
   MetricSnapshot,
+  ReviewExperiment,
   PlanNode,
   ProjectDetail,
   ProjectPatch,
@@ -452,6 +453,9 @@ export class WorkspaceDatabase {
       ),
       metrics: this.listRecords<MetricSnapshot>(db, "metrics").sort((a, b) =>
         b.recordedAt.localeCompare(a.recordedAt),
+      ),
+      experiments: this.listRecords<ReviewExperiment>(db, "experiments").sort((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt),
       ),
       insightIds: this.getState<string[]>(db, "insightIds", []),
       summaries: this.listRecords<StorySummary>(db, "summaries").sort(
@@ -902,6 +906,24 @@ export class WorkspaceDatabase {
     for (const metric of metrics)
       this.saveRecord(db, "metrics", metric.id, metric);
     this.touchProject(id);
+  }
+
+  saveReviewExperiment(id: string, experiment: ReviewExperiment) {
+    const db = this.projectDb(id);
+    const previous = experiment.id ? this.getRecord<ReviewExperiment>(db, "experiments", experiment.id) : undefined;
+    const next: ReviewExperiment = {
+      ...experiment,
+      id: experiment.id || randomUUID(),
+      createdAt: previous?.createdAt ?? experiment.createdAt ?? now(),
+      updatedAt: now(),
+    };
+    if (!next.title.trim() || !next.hypothesis.trim()) throw new Error("实验标题和假设不能为空");
+    if (next.fromChapter > next.toChapter) throw new Error("影响起始章不能晚于结束章");
+    if (next.baselineStart > next.baselineEnd || next.observationStart > next.observationEnd) throw new Error("观察日期范围无效");
+    if (next.status === "已结论" && (!next.conclusion.trim() || !next.decision)) throw new Error("结束实验必须填写结论和处理决定");
+    this.saveRecord(db, "experiments", next.id, next);
+    this.touchProject(id);
+    return next;
   }
 
   listRankings(): RankingSnapshot[] {

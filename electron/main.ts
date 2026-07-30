@@ -33,6 +33,8 @@ import {
 } from "../src/shared/planning";
 import { deleteAutoBackupCredential, readApiCredential, readAutoBackupCredential, writeApiCredential, writeAutoBackupCredential } from "./credential-store";
 import { compileCommercialGuidance } from "../src/shared/commercial-knowledge";
+import { buildContextDiagnostics } from "../src/shared/context-diagnostics";
+import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { buildLongTermMemory } from "../src/shared/summaries";
 import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
 import { validateIpcArgs } from "./ipc-validation";
@@ -175,6 +177,8 @@ function previewChapterBatch(
       return blocked(`第${chapter.number}章尚未填写章纲`, summary);
     if (["已定稿", "待发布", "已发布"].includes(chapter.status))
       return blocked(`第${chapter.number}章已经定稿或进入发布流程`, summary);
+    const hardConstraint = evaluateStoryConstraints(project.facts, chapter).find((finding) => finding.severity === "硬性");
+    if (hardConstraint) return blocked(`第${chapter.number}章写前约束失败：${hardConstraint.message}`, summary);
   }
 
   const inputTokens = ordered.reduce(
@@ -207,6 +211,7 @@ async function generateOneChapter(id: string, chapterId: string) {
   if (!chapter) throw new Error("章节不存在");
   if (!chapter.outline.trim()) throw new Error("请先填写本章章纲");
   if (["已定稿", "待发布", "已发布"].includes(chapter.status)) throw new Error("已定稿或进入发布流程的章节不能由 AI 覆写");
+  assertNoHardStoryConstraint(evaluateStoryConstraints(project.facts, chapter));
   activeGenerationProjects.add(id);
   try {
     const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
@@ -229,6 +234,7 @@ async function generateChapterBatchFrom(id: string, chapterId: string) {
       const chapter = currentProject.chapters.find((item) => item.id === candidate.id);
       if (!chapter) throw new Error(`第${candidate.number}章不存在`);
       if (chapter.content.trim()) { generated.push(chapter); continue; }
+      assertNoHardStoryConstraint(evaluateStoryConstraints(currentProject.facts, chapter));
       const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
       const draft = await ai.draftChapter(id, chapter, compileContext({ ...currentProject, facts }, chapter), JSON.stringify({ kind: "batch", projectId: id, chapterId }));
       generated.push(database.saveGeneratedChapter(id, draft));
@@ -305,7 +311,10 @@ function compileContext(
   const openExpectations = project.expectations.filter(
     (item) => item.status === "待兑现" || item.status === "部分兑现",
   );
-  const context = {
+  const unlinkedOpenExpectations = openExpectations.filter(
+    (item) => !linkedExpectations.some((linked) => linked.id === item.id),
+  );
+  const context: ContextPackage = {
     contract: [
       `故事前提：${project.contract.premise}`,
       `题材子类型：${project.contract.genreSubtype || "未选择"}`,
@@ -339,11 +348,7 @@ function compileContext(
           (item) =>
             `[本章承接] ${item.title}｜第${item.sourceChapter}章提出｜预计第${item.expectedPayoffChapter ?? "未定"}章兑现｜${item.status}`,
         ),
-        ...openExpectations
-          .filter(
-            (item) =>
-              !linkedExpectations.some((linked) => linked.id === item.id),
-          )
+        ...unlinkedOpenExpectations
           .slice(-20)
           .map(
             (item) =>
@@ -395,6 +400,31 @@ function compileContext(
       .filter((value) => typeof value === "string")
       .join("\n").length / 1.8,
   );
+  const rollingCandidates = approvedPlans.filter(
+    (plan) => ["粗纲", "细纲", "场景卡"].includes(plan.kind) && plan.ordinal >= chapter.number && plan.ordinal <= chapter.number + 30,
+  );
+  const confirmedConflicts = project.facts.filter((fact) => fact.confidence === "有冲突");
+  const constraintFindings = evaluateStoryConstraints(project.facts, chapter);
+  const missingIntent = [chapter.chapterPromise, chapter.expectedPayoff, chapter.crisis, chapter.endingExpectation].filter((value) => !value?.trim()).length;
+  context.diagnostics = buildContextDiagnostics(context, {
+    contract: { includedItems: project.contract.approved ? 1 : 0, totalItems: 1 },
+    chapterIntent: { includedItems: 4 - missingIntent, totalItems: 4 },
+    expectationLedger: { includedItems: linkedExpectations.length + Math.min(20, unlinkedOpenExpectations.length), totalItems: linkedExpectations.length + unlinkedOpenExpectations.length },
+    longTermMemory: { includedItems: project.summaries.length, totalItems: project.summaries.length },
+    volumeGoal: { includedItems: volume ? 1 : 0, totalItems: 1 },
+    rollingOutline: { includedItems: rolling.length, totalItems: rollingCandidates.length },
+    recentSummary: { includedItems: recent.length, totalItems: Math.min(5, project.chapters.filter((item) => item.number < chapter.number).length) },
+    relevantFacts: { includedItems: Math.min(80, activeFacts.length), totalItems: activeFacts.length },
+    forbiddenKnowledge: { includedItems: secrets.length, totalItems: secrets.length },
+    authorStyle: { includedItems: approvedOwnText.length, totalItems: approvedOwnText.length },
+  }, [
+    !project.contract.approved ? "创作契约尚未审批，生成门禁应阻止使用未确认方向" : "",
+    missingIntent ? `本章商业意图缺少 ${missingIntent} 项` : "",
+    !volume ? "当前章节没有已批准分卷目标" : "",
+    !activeFacts.length ? "没有可用于本章的已确认有效事实" : "",
+    confirmedConflicts.length ? `状态账本存在 ${confirmedConflicts.length} 条冲突事实，未纳入生成上下文` : "",
+    ...constraintFindings.map((finding) => `${finding.severity}·${finding.category}：${finding.message}`),
+  ]);
   return context;
 }
 
@@ -964,6 +994,7 @@ function registerHandlers() {
   handle("getReviewSuggestions", (id) =>
     analyzeMetrics(database.getProject(id).metrics),
   );
+  handle("saveReviewExperiment", (id, experiment) => database.saveReviewExperiment(id, experiment));
   handle("createBackup", async (password) => {
     if (!mainWindow) return null;
     const result = await dialog.showSaveDialog(mainWindow, {

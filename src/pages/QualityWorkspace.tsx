@@ -86,6 +86,7 @@ function UploadIcon() { return <FileOutput size={16} />; }
 
 export function QualityPage({ project, api, reload, notify }: CommonProjectProps) {
   const [changeModal, setChangeModal] = useState(false);
+  const [reviewChapterId, setReviewChapterId] = useState("all");
   const [change, setChange] = useState<ChangeRequest>({
     id: "",
     targetKind: "创作契约",
@@ -166,6 +167,13 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
       ).length,
     },
   ];
+  const reviewQueue = project.chapters
+    .filter((chapter) => chapter.status === "待质检" || project.issues.some((issue) => issue.chapterId === chapter.id && issue.status === "待处理"))
+    .map((chapter) => ({
+      chapter,
+      issues: project.issues.filter((issue) => issue.chapterId === chapter.id && issue.status === "待处理"),
+    }));
+  const displayedIssues = project.issues.filter((issue) => reviewChapterId === "all" || issue.chapterId === reviewChapterId);
   return (
     <div className="page project-page">
       <header className="page-header">
@@ -189,6 +197,31 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
           </div>
         ))}
       </section>
+      <section className="section-band review-queue-band">
+        <div className="section-heading">
+          <div><h2>章节审稿队列</h2><p>{reviewQueue.length} 章等待质检或问题处理</p></div>
+          <Select value={reviewChapterId} onChange={(event) => setReviewChapterId(event.target.value)} aria-label="筛选审稿章节">
+            <option value="all">全部问题</option>
+            {reviewQueue.map(({ chapter }) => <option key={chapter.id} value={chapter.id}>第{chapter.number}章 · {chapter.title}</option>)}
+          </Select>
+        </div>
+        {reviewQueue.length ? (
+          <div className="review-queue">
+            {reviewQueue.map(({ chapter, issues }) => (
+              <article key={chapter.id} className={reviewChapterId === chapter.id ? "active" : ""}>
+                <button type="button" onClick={() => setReviewChapterId(chapter.id)}>
+                  <span>第 {chapter.number} 章</span><strong>{chapter.title || "未命名章"}</strong>
+                  <small>{chapter.status} · 硬性 {issues.filter((issue) => issue.severity === "硬性").length} · 其他 {issues.filter((issue) => issue.severity !== "硬性").length}</small>
+                </button>
+                <Button variant="secondary" onClick={async () => {
+                  try { await api.runQualityCheck(project.summary.id, chapter.id); await reload(); setReviewChapterId(chapter.id); notify(`第${chapter.number}章质检已更新`); }
+                  catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
+                }}>运行质检</Button>
+              </article>
+            ))}
+          </div>
+        ) : <p className="muted-line">当前没有等待审稿的章节。</p>}
+      </section>
       <section className="two-column quality-columns">
         <div className="section-band">
           <div className="section-heading">
@@ -203,9 +236,9 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
               </p>
             </div>
           </div>
-          {project.issues.length ? (
+          {displayedIssues.length ? (
             <div className="issue-list">
-              {project.issues.map((issue) => (
+              {displayedIssues.map((issue) => (
                 <article
                   key={issue.id}
                   className={issue.status !== "待处理" ? "resolved" : ""}

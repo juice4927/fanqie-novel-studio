@@ -322,6 +322,27 @@ export interface ReviewSuggestion {
   confidence: "低" | "中" | "高";
 }
 
+export interface ReviewExperiment {
+  id: string;
+  title: string;
+  hypothesis: string;
+  changeSummary: string;
+  fromChapter: number;
+  toChapter: number;
+  baselineStart: string;
+  baselineEnd: string;
+  observationStart: string;
+  observationEnd: string;
+  primaryMetric: "点击率" | "首章读完率" | "三章留存" | "追读率" | "书架率" | "收益";
+  successCriteria: string;
+  confounders: string;
+  status: "计划中" | "观察中" | "已结论" | "已取消";
+  conclusion: string;
+  decision: "保留改动" | "撤销改动" | "继续观察" | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type SummaryLayer = "场景" | "章节" | "十章阶段" | "分卷" | "全书";
 
 export interface StorySummary {
@@ -375,6 +396,7 @@ export interface ProjectDetail {
   changes: ChangeRequest[];
   schedule: ScheduleItem[];
   metrics: MetricSnapshot[];
+  experiments: ReviewExperiment[];
   insightIds: string[];
   summaries: StorySummary[];
   expectations: ExpectationEntry[];
@@ -452,6 +474,24 @@ export interface ContextPackage {
   forbiddenKnowledge: string;
   authorStyle: string;
   estimatedTokens: number;
+  diagnostics?: ContextDiagnostics;
+}
+
+export interface ContextSectionDiagnostic {
+  key: Exclude<keyof ContextPackage, "estimatedTokens" | "diagnostics">;
+  label: string;
+  source: string;
+  reason: string;
+  characters: number;
+  includedItems: number;
+  totalItems: number;
+  status: "已包含" | "已截断" | "缺失";
+}
+
+export interface ContextDiagnostics {
+  generatedAt: string;
+  sections: ContextSectionDiagnostic[];
+  warnings: string[];
 }
 
 export interface BatchGenerationPreview {
@@ -636,6 +676,7 @@ export interface AppApi {
   ): Promise<string | null>;
   importMetricsCsv(id: string, csvText: string): Promise<number>;
   getReviewSuggestions(id: string): Promise<ReviewSuggestion[]>;
+  saveReviewExperiment(id: string, experiment: ReviewExperiment): Promise<ReviewExperiment>;
   createBackup(password: string): Promise<string | null>;
   restoreBackup(password: string): Promise<string | null>;
   getAutoBackupSettings(): Promise<AutoBackupSettings>;

@@ -22,6 +22,7 @@ import { WorkspaceDatabase, now } from "./database";
 import { compileCommercialGuidance, compileDeconstructionFramework } from "../src/shared/commercial-knowledge";
 import { inferProviderCapabilities, parseProviderUsage, providerError, rejectsJsonMode } from "./ai-provider";
 import { PROMPT_VERSION } from "../src/shared/prompt-version";
+import { contextForModel } from "../src/shared/context-diagnostics";
 
 export function abortableDelay(milliseconds: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -478,7 +479,7 @@ export class AiService {
       taskType: "draft-chapter",
       inputSummary: `第${chapter.number}章 ${chapter.title || "未命名"}`,
       system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑和契约。",
-      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(context)}\n请输出 title 和 content。正文目标 1800-2600 汉字。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响；留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
+      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标 1800-2600 汉字。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响；留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
       schema: DraftSchema,
       retryContext,
     });
@@ -525,7 +526,7 @@ export class AiService {
         "只有正文明确违反已审批契约、事实账本或知识边界时才标记为硬性；可以优化但不构成矛盾的问题标记为警告或建议。",
         "evidence 必须是本章中的简短原文或明确的契约/事实条目。没有可验证问题时返回空数组。",
       ].join("\n"),
-      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(context)}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 issues 数组，每项包含 severity、category、message、evidence。`,
+      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(contextForModel(context))}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 issues 数组，每项包含 severity、category、message、evidence。`,
       schema: QualityReviewSchema,
     });
     const evidenceSource = [chapter.content, context.contract, context.volumeGoal, context.rollingOutline, context.relevantFacts, context.forbiddenKnowledge]

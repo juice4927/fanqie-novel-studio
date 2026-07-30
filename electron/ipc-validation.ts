@@ -116,6 +116,19 @@ const changeRequest = z.object({
   status: z.enum(["待审批", "已批准", "已拒绝", "已应用"]), createdAt: timestamp,
 }).strict();
 
+const reviewExperiment = z.object({
+  id: z.string().max(200), title: shortText, hypothesis: mediumText, changeSummary: mediumText,
+  fromChapter: positiveInt, toChapter: positiveInt,
+  baselineStart: z.string().date(), baselineEnd: z.string().date(), observationStart: z.string().date(), observationEnd: z.string().date(),
+  primaryMetric: z.enum(["点击率", "首章读完率", "三章留存", "追读率", "书架率", "收益"]),
+  successCriteria: mediumText, confounders: mediumText,
+  status: z.enum(["计划中", "观察中", "已结论", "已取消"]), conclusion: mediumText,
+  decision: z.enum(["保留改动", "撤销改动", "继续观察"]).nullable(), createdAt: timestamp, updatedAt: timestamp,
+}).strict().superRefine((value, context) => {
+  if (value.fromChapter > value.toChapter) context.addIssue({ code: "custom", message: "影响起始章不能晚于结束章", path: ["fromChapter"] });
+  if (value.status === "已结论" && (!value.conclusion.trim() || !value.decision)) context.addIssue({ code: "custom", message: "结束实验必须填写结论和处理决定", path: ["conclusion"] });
+});
+
 const importPreview = z.object({
   fileName: z.string().max(1000), sourceType: z.enum(["TXT", "EPUB", "DOCX", "粘贴"]),
   detectedEncoding: shortText,
@@ -164,6 +177,7 @@ const schemas: Partial<Record<keyof AppApi, z.ZodType<unknown[]>>> = {
   retryAiJob: z.tuple([id]),
   exportProject: z.tuple([id, z.enum(["txt", "md", "docx"])]),
   importMetricsCsv: z.tuple([id, z.string().max(20_000_000)]),
+  saveReviewExperiment: z.tuple([id, reviewExperiment]),
   createBackup: z.tuple([z.string().min(8).max(1000)]),
   restoreBackup: z.tuple([z.string().min(8).max(1000)]),
   saveAutoBackupSettings: z.tuple([z.object({ enabled: z.boolean(), frequency: z.enum(["daily", "weekly"]), retentionCount: z.number().int().min(1).max(30) }).strict(), z.string().min(8).max(1000).optional()]),

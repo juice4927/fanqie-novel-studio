@@ -133,6 +133,7 @@ npm run dev
 
 ```powershell
 npm test                 # 单元与隔离测试
+npm run test:quality     # 提示词结构与小说质量固定基准
 npm run test:scale       # 10 本书 × 1500 章 × 300 万字容量测试
 npm run test:e2e         # 浏览器桌面/移动端交互测试
 npm run build            # React 与 Electron 生产构建
@@ -152,5 +153,17 @@ npm run dist:win         # 生成 Windows NSIS 安装包
 - 自动更新只在打包应用中启用。安装前必须成功创建加密的 `pre-update-<version>.novelbak` 数据快照；安装器失败时保留当前版本。数据恢复仍需通过“校验并恢复副本”人工确认，避免自动覆盖唯一工作区。
 
 Windows 发布流水线需要配置 `WINDOWS_CERTIFICATE_BASE64`、`WINDOWS_CERTIFICATE_PASSWORD` 和 `WINDOWS_PUBLISHER_NAME` 三个 GitHub Secrets。标签 `v*` 触发测试、构建、签名、GitHub Release 和 `latest.yml` 更新通道发布。
+
+## 质量评测基准
+
+`src/shared/quality-benchmark-corpus.ts` 保存与提示词版本绑定的固定案例。首批案例覆盖角色知识边界、资源守恒、时间地点冲突、连续回报机制重复和正常章节误报控制。每个预期问题都声明类别、严重级别、匹配语义和可追溯证据。
+
+`npm run test:quality` 分别计算问题召回率、准确率、严重级别准确率、证据准确率和误报控制率。硬性问题漏检、证据不在正文或上下文中、命中禁止误报，都会直接判定失败；Token 成本继续由提示词结构基准单列衡量，不与质量分互相抵消。修改质检提示词或模型版本前，应先增加能复现目标问题的案例，再比较候选输出与当前基线。
+
+写作台的“预览上下文”会说明每类材料的来源、入选原因、入选/候选数量、字符占用和截断状态，并提示未审批契约、缺失卷纲、账本冲突或事实不足。诊断元数据不会发送给模型，也不计入输入 Token。
+
+正文生成前会运行确定性状态约束：未解决账本冲突、同一有效区间的多值事实和明确的数字资源超支会阻止单章及五章批次生成；涉及受限秘密只提示知情范围，不凭自然语言猜测角色行为。历史版本支持段落级增删对比，质检中心按章节汇总待质检草稿与未处理问题。
+
+数据复盘可建立运营实验，分别记录假设、计划改动、影响章节、基线期、观察期、主指标、成功标准和干扰因素。实验结束时必须填写结论并选择保留、撤销或继续观察；实验记录不会自动修改正文、契约或章纲，剧情调整仍需通过变更单。
 
 故障注入仅在 `NODE_ENV=test` 生效，可通过 `NOVEL_STUDIO_FAULTS` 启用 `disk-full`、`power-loss-before-commit` 或 `credential-unavailable`。测试还会写入真实损坏的 SQLite 文件验证健康诊断不中断。
