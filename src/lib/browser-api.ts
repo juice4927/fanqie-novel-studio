@@ -1,0 +1,128 @@
+import type {
+  AiSettings, AppApi, ChangeRequest, Chapter, ConceptCandidate, ContextPackage, CreateProjectInput,
+  DashboardData, Genre, ImportPreview, InsightPack, LedgerFact, MetricSnapshot, PlanNode, ProjectDetail, RankingAnalytics,
+  ProjectPatch, ProjectSummary, QualityIssue, RankingSnapshot, ResearchBook, ScheduleItem, StoryContract,
+} from "../shared/types";
+import { analyzeMetrics } from "../shared/metrics";
+import { findCurrentVolume } from "../shared/planning";
+
+interface DemoState {
+  projects: ProjectDetail[];
+  rankings: RankingSnapshot[];
+  books: ResearchBook[];
+  insights: InsightPack[];
+  settings: AiSettings;
+}
+
+const key = "fanqie-novel-studio.demo.v1";
+const now = () => new Date().toISOString();
+const id = () => crypto.randomUUID();
+const countWords = (text: string) => text.replace(/\s/g, "").length;
+
+function summary(detail: ProjectDetail): ProjectSummary {
+  const currentWords = detail.chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0);
+  const stockChapters = detail.chapters.filter((chapter) => chapter.status === "已定稿" || chapter.status === "待发布").length;
+  const next = detail.schedule.filter((item) => item.status !== "已发布").sort((a, b) => a.publishAt.localeCompare(b.publishAt))[0];
+  const safeStockLine = detail.summary.safeStockLine ?? 10;
+  return { ...detail.summary, currentWords, chapterCount: detail.chapters.length, stockChapters, safeStockLine, nextPublishAt: next?.publishAt ?? null,
+    riskLevel: detail.issues.some((issue) => issue.status === "待处理" && issue.severity === "硬性") ? "告警" : stockChapters < safeStockLine ? "注意" : "正常" };
+}
+
+function seedProject(): ProjectDetail {
+  const projectId = "demo-project";
+  const chapters: Chapter[] = [
+    { id: "demo-chapter-1", number: 1, title: "停电后的第七分钟", outline: "目标：让主角发现异常回声；冲突：救人还是隐藏能力；结果：被陌生人看见。", content: "整条旧街在七分钟内熄灭了三次。\n\n沈砚站在药店门口，听见黑暗里传来一段只有他能听懂的回声。它没有告诉他未来，只重复了一个尚未发生的求救声。\n\n他循声冲进巷子，把摔倒的老人拖离断裂的招牌。灯光重新亮起时，巷口多了一个撑着红伞的女孩。\n\n她没有看老人，只看着沈砚。\n\n“你也听见了，对吗？”", wordCount: 125, status: "已定稿", batchMode: "逐章", isKeyChapter: true, revision: 3, updatedAt: now() },
+    { id: "demo-chapter-2", number: 2, title: "回声的代价", outline: "目标：确认能力边界；冲突：每次干预都会失去一段近期记忆；结果：主角决定建立记录系统。", content: "", wordCount: 0, status: "章纲", batchMode: "逐章", isKeyChapter: false, revision: 1, updatedAt: now() },
+  ];
+  return {
+    summary: { id: projectId, title: "回声备忘录", genre: "都市脑洞", status: "连载准备", targetWords: 3000000, currentWords: 125, chapterCount: 2, stockChapters: 1, safeStockLine: 10, updateCadence: "每日 2 章", nextPublishAt: null, riskLevel: "注意", updatedAt: now() },
+    contract: { premise: "普通维修员能听见事故发生前的回声，却会因每次干预失去一段记忆。", protagonistDesire: "在彻底忘记家人之前找出回声来源。", readerPromise: "以现实城市事件验证能力边界，并逐层揭开一套操纵灾难的交易网络。", coreEmotion: "救人与自我消失之间的选择，以及被他人记住的温暖。", ending: "主角放弃能力保住核心记忆，曾被他救下的人共同完成最后一次干预。", immutableRules: ["回声只提前七分钟出现", "每次主动改变结果都会丢失等量近期记忆"], prohibitedPatterns: ["无代价升级", "用梦境撤销已发生剧情"], version: 2, approved: true, updatedAt: now() },
+    plans: [
+      { id: "plan-1", kind: "宏观阶段", title: "第一阶段：证明回声", ordinal: 1, goal: "建立能力规则与城市事件单元", conflict: "救人越多，主角遗忘越快", outcome: "形成三人调查小组", targetWords: 600000, status: "已批准", parentId: null },
+      { id: "plan-2", kind: "分卷", title: "第一卷：七分钟", ordinal: 1, goal: "从单次事故追到第一名交易者", conflict: "能力暴露与记忆损失", outcome: "确认事故可以被人为制造", targetWords: 150000, status: "已批准", parentId: "plan-1" },
+    ],
+    chapters,
+    facts: [{ id: "fact-1", kind: "能力", subject: "沈砚", predicate: "回声预警", value: "事故前七分钟听见求救回声", validFromChapter: 1, validToChapter: null, evidenceChapter: 1, confidence: "已确认", knowledgeScope: "沈砚、林柚", updatedAt: now() }],
+    issues: [{ id: "issue-1", projectId, chapterId: "demo-chapter-1", severity: "建议", category: "篇幅", message: "示例章节较短，正式连载前需要扩写场景推进。", evidence: "当前 125 字", status: "待处理", createdAt: now() }],
+    changes: [], schedule: [], metrics: [], insightIds: ["demo-insight"], summaries: [],
+  };
+}
+
+function seed(): DemoState {
+  return {
+    projects: [seedProject()],
+    rankings: [{ id: "demo-ranking", source: "CSV 手动导入", listName: "示例公开榜单快照", capturedAt: now(), status: "成功", error: null, entries: [
+      { id: "r1", snapshotId: "demo-ranking", rank: 1, title: "样本甲", author: "作者甲", genre: "都市脑洞", words: 1080000, status: "连载", tags: ["系统", "成长"], sourceUrl: "" },
+      { id: "r2", snapshotId: "demo-ranking", rank: 2, title: "样本乙", author: "作者乙", genre: "玄幻/仙侠", words: 2460000, status: "连载", tags: ["升级"], sourceUrl: "" },
+      { id: "r3", snapshotId: "demo-ranking", rank: 3, title: "样本丙", author: "作者丙", genre: "现言甜宠", words: 680000, status: "完结", tags: ["双向成长"], sourceUrl: "" },
+    ] }],
+    books: [{ id: "demo-book", title: "结构研究样本", author: "已脱敏", genre: "都市脑洞", sourceType: "TXT", chapterCount: 120, wordCount: 278000, rightsConfirmed: true, cloudConsent: false, importedAt: now(), status: "已拆解" }],
+    insights: [{ id: "demo-insight", name: "高概念都市长篇结构洞察", genre: "都市脑洞", audienceNeed: "能力迅速兑现，同时保留可验证的边界与代价。", openingPromise: "前三章完成异常、验证和首次代价。", conflictEngine: "能力解决外部问题，同时制造不可逆的个人损失。", emotionalRhythm: "紧张事件与关系修复交替。", retentionDevices: "有限倒计时、身份信息差、阶段性规则揭示。", longFormEngine: "事件规模、能力规则和组织层级同步扩张。", marketGap: "把能力代价与人物关系绑定，而非只做数值升级。", risks: "能力失控会削弱悬念；单元事件重复会造成疲劳。", evidenceCount: 120, confidence: "中", createdAt: now() }],
+    settings: { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1", embeddingModel: "text-embedding-3-small", hasApiKey: false, inputPricePerMillion: 0, outputPricePerMillion: 0 },
+  };
+}
+
+function load(): DemoState {
+  try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) as DemoState : seed(); } catch { return seed(); }
+}
+
+function save(state: DemoState) { localStorage.setItem(key, JSON.stringify(state)); }
+function getProject(state: DemoState, projectId: string) { const project = state.projects.find((item) => item.summary.id === projectId); if (!project) throw new Error("项目不存在"); project.summaries ??= []; project.summary = summary(project); return project; }
+
+function browserRankingAnalytics(snapshots: RankingSnapshot[]): RankingAnalytics {
+  const entries = snapshots.flatMap((snapshot) => snapshot.entries);
+  const group = (values: string[]) => [...values.reduce((map, value) => map.set(value, (map.get(value) ?? 0) + 1), new Map<string, number>())].map(([name, count]) => ({ name, count }));
+  return { snapshotCount: snapshots.length, sampleSize: entries.length, timeRange: snapshots.length ? snapshots.map((item) => item.capturedAt.slice(0, 10)).sort()[0] : "暂无数据", confidence: snapshots.length >= 2 ? "中" : "低", genreDistribution: group(entries.map((item) => item.genre)), wordBands: group(entries.map((item) => item.words < 300000 ? "30万以下" : item.words < 1000000 ? "30–100万" : item.words < 2000000 ? "100–200万" : "200万以上")), statusDistribution: group(entries.map((item) => item.status)), newEntrants: [], movers: [], continuousAppearances: [] };
+}
+
+export function createBrowserApi(): AppApi {
+  let state = load();
+  const persist = () => save(state);
+  return {
+    async getDashboard(): Promise<DashboardData> { const projects = state.projects.map((item) => summary(item)); const issues = state.projects.flatMap((item) => item.issues).filter((item) => item.status === "待处理"); return { projects, dueToday: state.projects.flatMap((item) => item.schedule).filter((item) => item.status !== "已发布"), activeAlerts: issues, totals: { activeBooks: projects.length, totalWords: projects.reduce((sum, item) => sum + item.currentWords, 0), stockChapters: projects.reduce((sum, item) => sum + item.stockChapters, 0), pendingIssues: issues.length } }; },
+    async listProjects() { return state.projects.map(summary); },
+    async createProject(input: CreateProjectInput) { const projectId = id(); const project: ProjectDetail = { summary: { id: projectId, title: input.title, genre: input.genre, status: "候选立项", targetWords: input.targetWords, currentWords: 0, chapterCount: 0, stockChapters: 0, safeStockLine: input.safeStockLine ?? 10, updateCadence: input.updateCadence, nextPublishAt: null, riskLevel: "正常", updatedAt: now() }, contract: { premise: "", protagonistDesire: "", readerPromise: "", coreEmotion: "", ending: "", immutableRules: [], prohibitedPatterns: [], version: 1, approved: false, updatedAt: now() }, plans: [], chapters: [], facts: [], issues: [], changes: [], schedule: [], metrics: [], insightIds: [], summaries: [] }; state.projects.unshift(project); persist(); return summary(project); },
+    async getProject(projectId) { return structuredClone(getProject(state, projectId)); },
+    async updateProject(projectId, patch: ProjectPatch) { const project = getProject(state, projectId); project.summary = { ...project.summary, ...patch, updatedAt: now() }; persist(); return summary(project); },
+    async saveContract(projectId, contract: StoryContract) { const project = getProject(state, projectId); if (project.contract.approved && !project.changes.some((item) => item.status === "已批准" && item.targetKind === "创作契约" && item.targetId === "contract" && item.baseVersion === project.contract.version)) throw new Error("已审批创作契约只能通过匹配的已批准变更单修改"); const approval = project.changes.find((item) => item.status === "已批准" && item.targetKind === "创作契约" && item.targetId === "contract" && item.baseVersion === project.contract.version); if (approval) approval.status = "已应用"; project.contract = { ...contract, version: project.contract.version + 1, approved: false, updatedAt: now() }; persist(); return project.contract; },
+    async approveContract(projectId) { const project = getProject(state, projectId); if (!project.contract.premise || !project.contract.readerPromise || !project.contract.ending) throw new Error("故事前提、读者承诺和终局不能为空"); project.contract.approved = true; project.summary.status = "大纲审批"; persist(); return project.contract; },
+    async savePlan(projectId, plan: PlanNode) { const project = getProject(state, projectId); const index = project.plans.findIndex((item) => item.id === plan.id); const previous = index >= 0 ? project.plans[index] : undefined; const next = { ...plan, id: plan.id || id(), status: previous?.status ?? (plan.status === "待审批" ? "待审批" : "草稿") } as PlanNode; if (previous?.status === "已批准" && JSON.stringify(previous) !== JSON.stringify(next)) { const version = project.changes.filter((item) => item.targetKind === "规划" && item.targetId === previous.id && item.status === "已应用").length + 1; const approval = project.changes.find((item) => item.status === "已批准" && item.targetKind === "规划" && item.targetId === previous.id && item.baseVersion === version); if (!approval) throw new Error("已批准规划只能通过匹配的已批准变更单修改"); approval.status = "已应用"; next.status = "待审批"; } if (index >= 0) project.plans[index] = next; else project.plans.push(next); persist(); return next; },
+    async approvePlan(projectId, planId) { const project = getProject(state, projectId); if (!project.contract.approved) throw new Error("必须先审批创作契约"); const plan = project.plans.find((item) => item.id === planId); if (plan) plan.status = "已批准"; persist(); },
+    async saveChapter(projectId, chapter: Chapter) { const project = getProject(state, projectId); const existing = project.chapters.findIndex((item) => item.id === chapter.id); const previous = existing >= 0 ? project.chapters[existing] : undefined; const changed = Boolean(previous && previous.content !== chapter.content); const protectedEdit = Boolean(previous && ["已定稿", "待发布", "已发布"].includes(previous.status) && changed); if (protectedEdit) { const approval = project.changes.find((item) => item.status === "已批准" && item.targetKind === "章节" && item.targetId === previous!.id && item.baseVersion === previous!.revision); if (!approval) throw new Error("已定稿章节只能通过匹配的已批准变更单修改"); approval.status = "已应用"; } const status = protectedEdit ? "待质检" : previous ? (previous.status === "章纲" && chapter.content ? "草稿" : changed && ["待质检", "待定稿"].includes(previous.status) ? "草稿" : previous.status) : chapter.content ? "草稿" : "章纲"; const next = { ...chapter, id: chapter.id || id(), status, wordCount: countWords(chapter.content), revision: previous ? previous.revision + 1 : 1, updatedAt: now() } as Chapter; if (existing >= 0) project.chapters[existing] = next; else project.chapters.push(next); persist(); return next; },
+    async transitionChapter(projectId, chapterId, status: Chapter["status"]) { const project = getProject(state, projectId); const chapter = project.chapters.find((item) => item.id === chapterId); if (!chapter) throw new Error("章节不存在"); const transitions: Partial<Record<Chapter["status"], Chapter["status"][]>> = { 草稿: ["待质检"], 待质检: ["待定稿"], 待定稿: ["已定稿"], 已定稿: ["待发布"], 待发布: ["已发布"] }; if (!transitions[chapter.status]?.includes(status)) throw new Error(`不允许从“${chapter.status}”直接变为“${status}”`); if (["待定稿", "已定稿", "待发布"].includes(status) && project.issues.some((issue) => issue.chapterId === chapterId && issue.severity === "硬性" && issue.status !== "已解决")) throw new Error("该章仍有未解决的硬性问题"); chapter.status = status; chapter.updatedAt = now(); persist(); return chapter; },
+    async compileContext(projectId, chapterId): Promise<ContextPackage> { const project = getProject(state, projectId); const chapter = project.chapters.find((item) => item.id === chapterId)!; const result = { contract: JSON.stringify(project.contract, null, 2), volumeGoal: findCurrentVolume(project.plans, chapter.number)?.goal ?? "尚未批准当前卷纲", rollingOutline: project.plans.filter((item) => ["粗纲", "细纲", "场景卡"].includes(item.kind)).map((item) => `${item.ordinal}. ${item.title} ${item.goal}`).join("\n") || chapter.outline, recentSummary: project.chapters.filter((item) => item.number < chapter.number).slice(-5).map((item) => `第${item.number}章：${item.outline}`).join("\n"), relevantFacts: project.facts.map((fact) => `${fact.subject} ${fact.predicate} ${fact.value}`).join("\n"), forbiddenKnowledge: project.facts.filter((fact) => fact.kind === "秘密").map((fact) => `${fact.value}｜${fact.knowledgeScope}`).join("\n") || "无", authorStyle: "仅根据本项目已定稿正文统计；浏览器预览不加载研究样本文风。", estimatedTokens: 0 }; result.estimatedTokens = Math.ceil(JSON.stringify(result).length / 1.8); return result; },
+    async searchProject(projectId, query) { return getProject(state, projectId).chapters.filter((chapter) => `${chapter.title}\n${chapter.content}`.includes(query)).map((chapter) => ({ id: chapter.id, type: "章节", title: `第${chapter.number}章 ${chapter.title}`, excerpt: chapter.content.slice(0, 120), chapterNumber: chapter.number })); },
+    async listRevisions() { return []; },
+    async restoreRevision() { throw new Error("浏览器预览不包含持久化历史版本"); },
+    async runQualityCheck(projectId, chapterId) { const project = getProject(state, projectId); const chapter = project.chapters.find((item) => item.id === chapterId)!; const issues: QualityIssue[] = []; if (chapter.wordCount < 1200) issues.push({ id: id(), projectId, chapterId, severity: "警告", category: "篇幅", message: `本章仅 ${chapter.wordCount} 字，可能不足以完成目标`, evidence: "", status: "待处理", createdAt: now() }); if (chapter.isKeyChapter && chapter.batchMode === "五章批次") issues.push({ id: id(), projectId, chapterId, severity: "硬性", category: "审批模式", message: "关键章必须逐章审批", evidence: "", status: "待处理", createdAt: now() }); project.issues.push(...issues); if (chapter.status === "草稿") chapter.status = "待质检"; persist(); return issues; },
+    async saveFact(projectId, fact: LedgerFact) { const project = getProject(state, projectId); const next = { ...fact, id: fact.id || id(), updatedAt: now() }; if (project.facts.some((item) => item.id !== next.id && item.subject === next.subject && item.predicate === next.predicate && item.validToChapter === null && item.value !== next.value)) next.confidence = "有冲突"; project.facts.push(next); persist(); return next; },
+    async resolveIssue(projectId, issueId, status) { const issue = getProject(state, projectId).issues.find((item) => item.id === issueId); if (issue?.severity === "硬性" && status === "已忽略") throw new Error("硬性质检项不能忽略"); if (issue) issue.status = status; persist(); },
+    async saveChangeRequest(projectId, change: ChangeRequest) { const project = getProject(state, projectId); const baseVersion = change.targetKind === "创作契约" ? project.contract.version : change.targetKind === "章节" ? project.chapters.find((item) => item.id === change.targetId)?.revision : project.changes.filter((item) => item.targetKind === "规划" && item.targetId === change.targetId && item.status === "已应用").length + 1; if (!baseVersion) throw new Error("变更目标不存在"); const next = { ...change, id: id(), baseVersion, status: "待审批" as const, createdAt: now() }; project.changes.unshift(next); persist(); return next; },
+    async decideChangeRequest(projectId, changeId, decision) { const change = getProject(state, projectId).changes.find((item) => item.id === changeId); if (change) change.status = decision === "批准" ? "已批准" : "已拒绝"; persist(); },
+    async saveSchedule(projectId, item: ScheduleItem) { const project = getProject(state, projectId); const next = { ...item, id: item.id || id() }; const index = project.schedule.findIndex((entry) => entry.id === next.id); if (index >= 0) project.schedule[index] = next; else project.schedule.push(next); persist(); return next; },
+    async listRankings() { return structuredClone(state.rankings); },
+    async importRankingCsv(csvText, listName) { const lines = csvText.trim().split(/\r?\n/); const snapshot: RankingSnapshot = { id: id(), source: "浏览器 CSV 导入", listName, capturedAt: now(), status: "成功", error: null, entries: lines.slice(1).map((line, index) => { const cells = line.split(","); return { id: id(), snapshotId: "", rank: Number(cells[0]) || index + 1, title: cells[1] || "未命名", author: cells[2] || "未知", genre: cells[3] || "未分类", words: Number((cells[4] || "0").replace("万", "0000")), status: cells[5] || "未知", tags: [], sourceUrl: "" }; }) }; state.rankings.unshift(snapshot); persist(); return snapshot; },
+    async capturePublicRanking() { throw new Error("公开页采集仅在桌面版运行，浏览器预览请使用 CSV"); },
+    async getRankingAnalytics() { return browserRankingAnalytics(state.rankings); },
+    async listResearchBooks() { return structuredClone(state.books); },
+    async previewResearchFile() { return null; },
+    async importResearchBook(preview: ImportPreview, genre: Genre, rightsConfirmed, cloudConsent) { const book: ResearchBook = { id: id(), title: preview.fileName, author: "未标注", genre, sourceType: preview.sourceType, chapterCount: preview.chapters.length, wordCount: preview.totalWords, rightsConfirmed, cloudConsent, importedAt: now(), status: "待拆解" }; state.books.unshift(book); persist(); return book; },
+    async listInsights() { return structuredClone(state.insights); },
+    async createInsight(input) { const insight: InsightPack = { ...input, id: id(), createdAt: now() }; state.insights.unshift(insight); persist(); return insight; },
+    async deconstructResearchBook(bookId) { const book = state.books.find((item) => item.id === bookId)!; book.status = "已拆解"; const insight: InsightPack = { id: id(), name: `${book.title} · 本地结构统计`, genre: book.genre, audienceNeed: "需结合章节证据人工确认。", openingPromise: "已建立篇幅和章节基线。", conflictEngine: "待配置模型后补充语义拆解。", emotionalRhythm: "本地预览不读取原始样本。", retentionDevices: "待人工填写。", longFormEngine: "待人工验证。", marketGap: "需与多本样本交叉验证。", risks: "浏览器预览仅展示流程。", evidenceCount: book.chapterCount, confidence: "低", createdAt: now() }; state.insights.unshift(insight); persist(); return insight; },
+    async listResearchAnalyses() { return []; },
+    async attachInsights(projectId, insightIds) { getProject(state, projectId).insightIds = insightIds; persist(); },
+    async generateConcepts(projectId): Promise<ConceptCandidate[]> { const project = getProject(state, projectId); if (!project.insightIds.length) throw new Error("请先关联洞察"); return ["回声协议", "逆光档案", "城市第七码"].map((title, index) => ({ id: id(), title, oneLinePitch: ["维修员以记忆为代价改写事故结果。", "记者追查能被提前听见的城市灾难。", "普通人组成互助网络对抗灾难交易者。"][index], audience: "偏好现实锚点与高概念悬念的读者", coreConflict: "救人越多，个人付出的不可逆代价越大", differentiation: "能力代价直接改变人物关系", longFormCapacity: "事件规模、规则和组织层级三线扩张", originalityRisk: "低" })); },
+    async generateChapterDraft() { throw new Error("浏览器预览不调用云模型，请在桌面版配置 API 密钥"); },
+    async previewChapterBatch(projectId, chapterId) { const project = getProject(state, projectId); const start = project.chapters.find((chapter) => chapter.id === chapterId); const chapters = start ? project.chapters.filter((chapter) => chapter.number >= start.number && chapter.number < start.number + 5).map((chapter) => ({ id: chapter.id, number: chapter.number, title: chapter.title })) : []; const canRun = chapters.length === 5 && start?.batchMode === "五章批次"; return { chapters, inputTokens: chapters.length * 2200, outputTokens: chapters.length * 1530, estimatedCost: 0, canRun, blockingReason: canRun ? null : chapters.length === 5 ? "请先保存“五章批次”模式" : "需要从当前章开始预先建立连续五章及其章纲" }; },
+    async generateChapterBatch() { throw new Error("浏览器预览不调用云模型，请在桌面版运行五章批次"); },
+    async getAiSettings() { return state.settings; },
+    async saveAiSettings(settings, apiKey) { state.settings = { ...settings, hasApiKey: Boolean(apiKey) || state.settings.hasApiKey }; persist(); return state.settings; },
+    async exportProject(projectId, format) { const project = getProject(state, projectId); const content = project.chapters.filter((chapter) => ["已定稿", "待发布", "已发布"].includes(chapter.status)).map((chapter) => `第${chapter.number}章 ${chapter.title}\n\n${chapter.content}`).join("\n\n"); const blob = new Blob([content], { type: "text/plain;charset=utf-8" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${project.summary.title}.${format === "docx" ? "txt" : format}`; anchor.click(); URL.revokeObjectURL(url); return anchor.download; },
+    async importMetricsCsv(projectId, csvText) { const project = getProject(state, projectId); const lines = csvText.trim().split(/\r?\n/).slice(1); const metrics: MetricSnapshot[] = lines.map((line) => { const cells = line.split(","); return { id: id(), recordedAt: cells[0] || now(), chapterNumber: Number(cells[1]) || null, exposure: Number(cells[2]) || 0, reads: Number(cells[3]) || 0, retention: Number(cells[4]) || 0, follows: Number(cells[5]) || 0, revenue: Number(cells[6]) || 0, comments: cells[7] || "" }; }); project.metrics.unshift(...metrics); persist(); return metrics.length; },
+    async getReviewSuggestions(projectId) { return analyzeMetrics(getProject(state, projectId).metrics); },
+    async createBackup() { throw new Error("加密备份仅在桌面版可用"); },
+    async restoreBackup() { throw new Error("备份恢复仅在桌面版可用"); },
+    async getWorkspacePath() { return "浏览器预览使用 localStorage"; },
+  };
+}

@@ -1,0 +1,9 @@
+node_modules/
+node_modules.partial-*/
+dist/
+dist-electron/
+release/
+test-results/
+playwright-report/
+*.log
+.DS_Store
