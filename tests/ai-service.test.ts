@@ -144,7 +144,7 @@ describe("chapter draft streaming", () => {
       getAiSettings: () => ({ baseUrl: "https://model.invalid/v1", model: "deepseek-chat", embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
       findAiJob: () => undefined, startAiJob: () => "job-stream", finishAiJob, updateAiJobTelemetry,
     } as unknown as WorkspaceDatabase;
-    const content = "正文".repeat(300);
+    const content = "正文".repeat(1000);
     const raw = JSON.stringify({ title: "流式章节", content });
     const pieces = [raw.slice(0, 37), raw.slice(37, 190), raw.slice(190)];
     const sse = pieces.map((piece) => `data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`).join("") + "data: [DONE]\n\n";

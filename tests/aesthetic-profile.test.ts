@@ -34,8 +34,10 @@ describe("project aesthetic profile", () => {
     });
 
     expect(cold).toContain("情绪温度：冷峻");
+    expect(cold).toContain("冷峻不等于人物没有反应");
     expect(cold).toContain("叙事距离：远距");
     expect(warm).toContain("情绪温度：热烈");
+    expect(warm).toContain("鲜明反应、直接关系碰撞");
     expect(warm).toContain("叙事距离：贴身");
     expect(cold).not.toBe(warm);
   });

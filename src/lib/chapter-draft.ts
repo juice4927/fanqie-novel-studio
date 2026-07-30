@@ -31,6 +31,11 @@ export class AutosaveCoordinator {
   private running = false;
   private stopped = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private waiters: Array<{
+    signature: string;
+    resolve: (chapter: Chapter) => void;
+    reject: (error: Error) => void;
+  }> = [];
 
   constructor(
     private readonly save: (chapter: Chapter) => Promise<Chapter>,
@@ -45,6 +50,18 @@ export class AutosaveCoordinator {
     void this.flush();
   }
 
+  saveLatest(chapter: Chapter) {
+    if (this.stopped) return Promise.reject(new Error("自动保存已停止"));
+    const snapshot = { ...chapter };
+    this.pending = snapshot;
+    const signature = chapterDraftSignature(snapshot);
+    const promise = new Promise<Chapter>((resolve, reject) => {
+      this.waiters.push({ signature, resolve, reject });
+    });
+    void this.flush();
+    return promise;
+  }
+
   private async flush() {
     if (this.running || !this.pending || this.stopped) return;
     const snapshot = this.pending;
@@ -52,7 +69,15 @@ export class AutosaveCoordinator {
     this.running = true;
     try {
       const saved = await this.save(snapshot);
-      if (!this.stopped) this.onSaved(snapshot, saved);
+      if (!this.stopped) {
+        this.onSaved(snapshot, saved);
+        const signature = chapterDraftSignature(snapshot);
+        const completed = this.pending
+          ? this.waiters.filter((waiter) => waiter.signature === signature)
+          : this.waiters;
+        this.waiters = this.waiters.filter((waiter) => !completed.includes(waiter));
+        completed.forEach((waiter) => waiter.resolve(saved));
+      }
     } catch (error) {
       if (this.stopped) return;
       this.pending ??= snapshot;
@@ -70,5 +95,7 @@ export class AutosaveCoordinator {
   stop() {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    const error = new Error("自动保存已停止");
+    this.waiters.splice(0).forEach((waiter) => waiter.reject(error));
   }
 }

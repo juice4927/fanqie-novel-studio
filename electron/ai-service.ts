@@ -99,6 +99,14 @@ const DraftSchema = z.object({
   content: z.string().min(500),
 });
 
+const ChapterDraftSchema = z.object({
+  title: z.string().min(1).max(80),
+  content: z.string().min(500).refine((value) => {
+    const characters = [...value].filter((character) => !/\s/.test(character)).length;
+    return characters >= 1600 && characters <= 3000;
+  }, "正文有效字符数必须在 1600-3000 之间"),
+});
+
 const AestheticProfileSuggestionSchema = z.object({
   profile: z.object({
     narrativeDistance: z.enum(["贴身", "适中", "远距"]),
@@ -728,9 +736,9 @@ export class AiService {
       projectId,
       taskType: "draft-chapter",
       inputSummary: `第${chapter.number}章 ${chapter.title || "未命名"}`,
-      system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、项目审美、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑、契约或本书审美。不要自行套用清冷、热烈、幽默或煽情等固定风格模板。",
-      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标 1800-2600 汉字。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响。按上下文中的项目审美决定叙事距离、情绪温度、文字质地、对话和情绪表达。留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
-      schema: DraftSchema,
+      system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、项目审美、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑、契约或本书审美。项目审美是本书唯一的文风基准：冷峻、克制、均衡、热烈都可能是正确答案，不得默认采用清冷克制风，也不得把任一温度写成所有作品共用的模板。",
+      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标 1800-2600 个非空白字符，完整结果必须落在 1600-3000 个非空白字符内。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响。把上下文中的叙事距离、情绪温度、文字质地、对话风格、情绪表达和标志手法落实到具体句段；不要只在措辞上贴风格标签。遵守审美避用项。留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
+      schema: ChapterDraftSchema,
       retryContext,
       timeoutMs: 300_000,
       stream: true,

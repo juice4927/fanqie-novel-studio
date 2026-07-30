@@ -83,6 +83,6 @@ export function Progress({ value }: { value: number }) {
   return <div className="progress" aria-label={`完成 ${Math.round(value)}%`}><span style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>;
 }
 
-export function Segmented<T extends string>({ options, value, onChange }: { options: readonly T[]; value: T; onChange: (value: T) => void }) {
-  return <div className="segmented">{options.map((option) => <button key={option} className={value === option ? "active" : ""} onClick={() => onChange(option)}>{option}</button>)}</div>;
+export function Segmented<T extends string>({ options, value, onChange, disabled = false }: { options: readonly T[]; value: T; onChange: (value: T) => void; disabled?: boolean }) {
+  return <div className="segmented">{options.map((option) => <button key={option} disabled={disabled} className={value === option ? "active" : ""} onClick={() => onChange(option)}>{option}</button>)}</div>;
 }

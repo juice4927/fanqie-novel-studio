@@ -61,4 +61,29 @@ describe("chapter draft reliability", () => {
     const storage = { setItem: () => { throw new Error("quota exceeded"); } };
     expect(writeRecoveredChapter("project", chapter("无法落盘"), storage)).toBe(false);
   });
+
+  it("lets an explicit action wait until the newest draft wins an in-flight autosave race", async () => {
+    const first = deferred<Chapter>();
+    const save = vi.fn().mockReturnValueOnce(first.promise).mockImplementation(async (value: Chapter) => value);
+    const coordinator = new AutosaveCoordinator(save, vi.fn(), vi.fn());
+    coordinator.enqueue(chapter("旧内容"));
+    const latest = coordinator.saveLatest(chapter("生成前最新内容"));
+    first.resolve(chapter("旧内容"));
+    await expect(latest).resolves.toMatchObject({ content: "生成前最新内容" });
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves coalesced explicit saves with the final persisted draft", async () => {
+    const first = deferred<Chapter>();
+    const save = vi.fn().mockReturnValueOnce(first.promise).mockImplementation(async (value: Chapter) => value);
+    const coordinator = new AutosaveCoordinator(save, vi.fn(), vi.fn());
+    coordinator.enqueue(chapter("自动保存中"));
+    const earlier = coordinator.saveLatest(chapter("较早操作"));
+    const final = coordinator.saveLatest(chapter("最终操作"));
+    first.resolve(chapter("自动保存中"));
+    await expect(Promise.all([earlier, final])).resolves.toEqual([
+      expect.objectContaining({ content: "最终操作" }),
+      expect.objectContaining({ content: "最终操作" }),
+    ]);
+  });
 });
