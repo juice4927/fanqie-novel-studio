@@ -24,6 +24,9 @@ export type ProjectStatus =
 export type ChapterStatus =
   "章纲" | "草稿" | "待质检" | "待定稿" | "已定稿" | "待发布" | "已发布";
 
+export const CHAPTER_FUNCTIONS = ["行动", "调查", "关系", "经营", "训练", "生存", "群像", "氛围", "过渡", "揭秘", "高潮"] as const;
+export type ChapterFunction = (typeof CHAPTER_FUNCTIONS)[number];
+
 export interface ProjectSummary {
   id: string;
   title: string;
@@ -191,7 +194,18 @@ export interface StoryContract extends GenreComposition {
   premise: string;
   genreSubtype?: string;
   fanqieCategoryKey?: string;
+  audience?: string;
+  commercialHook?: string;
+  openingMechanism?: string;
+  growthCarrier?: string;
+  primaryPayoff?: string;
+  longFormEngine?: string;
   protagonistDesire: string;
+  protagonistArc?: string;
+  keyRelationships?: string[];
+  worldRules?: string[];
+  majorForces?: string[];
+  timelineAnchors?: string[];
   readerPromise: string;
   coreEmotion: string;
   ending: string;
@@ -226,6 +240,8 @@ export interface Chapter {
   status: ChapterStatus;
   batchMode: "逐章" | "五章批次";
   isKeyChapter: boolean;
+  chapterFunction?: ChapterFunction;
+  targetWords?: number;
   chapterPromise?: string;
   expectedPayoff?: string;
   crisis?: string;

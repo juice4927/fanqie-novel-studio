@@ -359,7 +359,7 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
             )}
             <div className="planning-ai-summary">
               <strong>{aiInput.mode === "全书结构" ? "输出：4–8 个专属阶段 + 3–6 个分卷" : `输出：第${aiInput.fromChapter}–${(aiInput.fromChapter ?? 1) + (aiInput.chapterCount ?? 10) - 1}章`}</strong>
-              <p>{aiInput.mode === "全书结构" ? "每个节点包含目标、核心矛盾、预期结果和目标字数。" : "同步建立滚动粗纲、逐章细纲、每章三张场景卡，以及章节承诺、回报、危机、章末期待和兑现目标章。"}</p>
+              <p>{aiInput.mode === "全书结构" ? "每个节点包含目标、核心矛盾、预期结果和目标字数。" : "先判断章节功能，再按内容需要建立 1–5 张场景卡和可变目标字数，并同步章节承诺、回报、张力与章末期待。"}</p>
             </div>
             <div className="modal-actions">
               <Button variant="secondary" disabled={aiBusy} onClick={() => setAiModal(false)}>取消</Button>

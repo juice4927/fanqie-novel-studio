@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GENRES } from "../src/shared/types";
+import { CHAPTER_FUNCTIONS, GENRES } from "../src/shared/types";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import type { AppApi } from "../src/shared/types";
 
@@ -64,7 +64,18 @@ const contract = z.object({
   secondaryGenres,
   genreElements,
   customGenreDirection,
+  audience: mediumText.optional(),
+  commercialHook: mediumText.optional(),
+  openingMechanism: mediumText.optional(),
+  growthCarrier: mediumText.optional(),
+  primaryPayoff: mediumText.optional(),
+  longFormEngine: mediumText.optional(),
   protagonistDesire: mediumText,
+  protagonistArc: mediumText.optional(),
+  keyRelationships: z.array(shortText).max(50).optional(),
+  worldRules: z.array(shortText).max(50).optional(),
+  majorForces: z.array(shortText).max(50).optional(),
+  timelineAnchors: z.array(shortText).max(50).optional(),
   readerPromise: mediumText,
   coreEmotion: mediumText,
   ending: mediumText,
@@ -107,6 +118,8 @@ const chapter = z.object({
   status: z.enum(["章纲", "草稿", "待质检", "待定稿", "已定稿", "待发布", "已发布"]),
   batchMode: z.enum(["逐章", "五章批次"]),
   isKeyChapter: z.boolean(),
+  chapterFunction: z.enum(CHAPTER_FUNCTIONS).optional(),
+  targetWords: z.number().int().min(800).max(5000).optional(),
   chapterPromise: mediumText.optional(),
   expectedPayoff: mediumText.optional(),
   crisis: mediumText.optional(),

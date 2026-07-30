@@ -302,7 +302,18 @@ export class WorkspaceDatabase {
       secondaryGenres: input.secondaryGenres ?? [],
       genreElements: input.genreElements ?? [],
       customGenreDirection: input.customGenreDirection ?? "",
+      audience: "",
+      commercialHook: "",
+      openingMechanism: "",
+      growthCarrier: "",
+      primaryPayoff: "",
+      longFormEngine: "",
       protagonistDesire: "",
+      protagonistArc: "",
+      keyRelationships: [],
+      worldRules: [],
+      majorForces: [],
+      timelineAnchors: [],
       readerPromise: "",
       coreEmotion: "",
       ending: "",
@@ -497,7 +508,18 @@ export class WorkspaceDatabase {
         secondaryGenres: contract.secondaryGenres ?? [],
         genreElements: contract.genreElements ?? [],
         customGenreDirection: contract.customGenreDirection ?? "",
+        audience: contract.audience ?? "",
+        commercialHook: contract.commercialHook ?? "",
+        openingMechanism: contract.openingMechanism ?? "",
+        growthCarrier: contract.growthCarrier ?? "",
+        primaryPayoff: contract.primaryPayoff ?? "",
+        longFormEngine: contract.longFormEngine ?? "",
         protagonistDesire: contract.protagonistDesire,
+        protagonistArc: contract.protagonistArc ?? "",
+        keyRelationships: contract.keyRelationships ?? [],
+        worldRules: contract.worldRules ?? [],
+        majorForces: contract.majorForces ?? [],
+        timelineAnchors: contract.timelineAnchors ?? [],
         readerPromise: contract.readerPromise,
         coreEmotion: contract.coreEmotion,
         ending: contract.ending,
@@ -512,7 +534,18 @@ export class WorkspaceDatabase {
         secondaryGenres: previous.secondaryGenres ?? [],
         genreElements: previous.genreElements ?? [],
         customGenreDirection: previous.customGenreDirection ?? "",
+        audience: previous.audience ?? "",
+        commercialHook: previous.commercialHook ?? "",
+        openingMechanism: previous.openingMechanism ?? "",
+        growthCarrier: previous.growthCarrier ?? "",
+        primaryPayoff: previous.primaryPayoff ?? "",
+        longFormEngine: previous.longFormEngine ?? "",
         protagonistDesire: previous.protagonistDesire,
+        protagonistArc: previous.protagonistArc ?? "",
+        keyRelationships: previous.keyRelationships ?? [],
+        worldRules: previous.worldRules ?? [],
+        majorForces: previous.majorForces ?? [],
+        timelineAnchors: previous.timelineAnchors ?? [],
         readerPromise: previous.readerPromise,
         coreEmotion: previous.coreEmotion,
         ending: previous.ending,
@@ -543,8 +576,13 @@ export class WorkspaceDatabase {
   approveContract(id: string) {
     const db = this.projectDb(id);
     const contract = this.getState<StoryContract>(db, "contract");
-    if (!contract.premise || !contract.readerPromise || !contract.ending)
-      throw new Error("创作契约的故事前提、读者承诺和终局不能为空");
+    const required: Array<[string, string | undefined]> = [
+      ["故事前提", contract.premise], ["读者承诺", contract.readerPromise], ["故事终局", contract.ending],
+      ["开局机制", contract.openingMechanism], ["成长载体", contract.growthCarrier],
+      ["核心回报", contract.primaryPayoff], ["长篇发动机", contract.longFormEngine],
+    ];
+    const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label);
+    if (missing.length) throw new Error(`创作契约尚未补全：${missing.join("、")}`);
     const next = { ...contract, approved: true, updatedAt: now() };
     this.setState(db, "contract", next);
     this.updateProject(id, { status: "大纲审批" });

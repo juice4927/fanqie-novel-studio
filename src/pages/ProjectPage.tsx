@@ -675,6 +675,17 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
     secondaryGenres: value.secondaryGenres ?? [],
     genreElements: value.genreElements ?? [],
     customGenreDirection: value.customGenreDirection ?? "",
+    audience: value.audience ?? "",
+    commercialHook: value.commercialHook ?? "",
+    openingMechanism: value.openingMechanism ?? "",
+    growthCarrier: value.growthCarrier ?? "",
+    primaryPayoff: value.primaryPayoff ?? "",
+    longFormEngine: value.longFormEngine ?? "",
+    protagonistArc: value.protagonistArc ?? "",
+    keyRelationships: value.keyRelationships ?? [],
+    worldRules: value.worldRules ?? [],
+    majorForces: value.majorForces ?? [],
+    timelineAnchors: value.timelineAnchors ?? [],
     aestheticProfile: normalizeAestheticProfile(value.aestheticProfile),
   });
   const [contract, setContract] = useState<StoryContract>(() => normalizeContract(project.contract));
@@ -895,6 +906,53 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
             placeholder="终局状态、主角代价与主题落点"
           />
         </Field>
+        <div className="bible-subsection-heading">
+          <div>
+            <h2>叙事发动机</h2>
+            <p>从开局到长篇扩张持续生效，规划台会直接读取这些约束。</p>
+          </div>
+        </div>
+        <div className="form-grid two">
+          <Field label="目标读者">
+            <Textarea rows={3} value={contract.audience ?? ""} onChange={(event) => set("audience", event.target.value)} placeholder="谁会追读，以及他们最在意什么" />
+          </Field>
+          <Field label="商业钩子">
+            <Textarea rows={3} value={contract.commercialHook ?? ""} onChange={(event) => set("commercialHook", event.target.value)} placeholder="一句话说明最容易被感知的独特卖点" />
+          </Field>
+          <Field label="开局机制">
+            <Textarea rows={3} value={contract.openingMechanism ?? ""} onChange={(event) => set("openingMechanism", event.target.value)} placeholder="什么具体事件打破原有生活并迫使主角行动" />
+          </Field>
+          <Field label="成长载体">
+            <Textarea rows={3} value={contract.growthCarrier ?? ""} onChange={(event) => set("growthCarrier", event.target.value)} placeholder="能力、关系、认知、资源或事业如何积累" />
+          </Field>
+          <Field label="核心回报">
+            <Textarea rows={3} value={contract.primaryPayoff ?? ""} onChange={(event) => set("primaryPayoff", event.target.value)} placeholder="读者最主要看到什么状态改变" />
+          </Field>
+          <Field label="长篇发动机">
+            <Textarea rows={3} value={contract.longFormEngine ?? ""} onChange={(event) => set("longFormEngine", event.target.value)} placeholder="至少三轮冲突、关系或世界范围如何变化" />
+          </Field>
+        </div>
+        <div className="bible-subsection-heading">
+          <div>
+            <h2>人物与世界骨架</h2>
+            <p>只记录会跨阶段约束故事的骨架信息，细节在状态账本持续演化。</p>
+          </div>
+        </div>
+        <Field label="主角弧光">
+          <Textarea rows={3} value={contract.protagonistArc ?? ""} onChange={(event) => set("protagonistArc", event.target.value)} placeholder="起点认知、关键转变、代价与终局状态" />
+        </Field>
+        <div className="form-grid two">
+          {([
+            ["keyRelationships", "关键关系", "每行一条：人物双方、初始张力与不可替代作用"],
+            ["worldRules", "世界规则", "每行一条：能力、职业、社会或超自然规则及边界"],
+            ["majorForces", "主要势力", "每行一条：势力目标、资源与冲突位置"],
+            ["timelineAnchors", "时间锚点", "每行一条：故事前史或未来必须发生的节点"],
+          ] as const).map(([key, label, placeholder]) => (
+            <Field key={key} label={label} hint="每行一条">
+              <Textarea rows={4} value={(contract[key] ?? []).join("\n")} onChange={(event) => set(key, event.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} placeholder={placeholder} />
+            </Field>
+          ))}
+        </div>
         <div className="bible-subsection-heading">
           <div>
             <h2>审美设定</h2>

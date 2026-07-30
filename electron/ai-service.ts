@@ -27,6 +27,7 @@ import { contextForModel } from "../src/shared/context-diagnostics";
 import { parseStoryNumber } from "../src/shared/story-constraints";
 import { compileAestheticGuidance } from "../src/shared/aesthetic-profile";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
+import { CHAPTER_FUNCTIONS } from "../src/shared/types";
 
 export function abortableDelay(milliseconds: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -104,6 +105,19 @@ type GeneratedBookConcept = z.infer<typeof BookConceptSchema>["candidates"][numb
 
 const diversityKey = (value: string) => value.toLowerCase().replace(/[\s，。、“”‘’：；！？,.!?:;\-_/]+/g, "");
 
+const ngramSimilarity = (left: string, right: string, size = 2) => {
+  const grams = (value: string) => {
+    const normalized = diversityKey(value);
+    if (normalized.length <= size) return new Set([normalized]);
+    return new Set(Array.from({ length: normalized.length - size + 1 }, (_, index) => normalized.slice(index, index + size)));
+  };
+  const leftGrams = grams(left);
+  const rightGrams = grams(right);
+  const smallest = Math.min(leftGrams.size, rightGrams.size);
+  if (!smallest) return 0;
+  return [...leftGrams].filter((gram) => rightGrams.has(gram)).length / smallest;
+};
+
 export function conceptDiversityIssues(
   candidates: Array<Pick<GeneratedBookConcept, "genreSubtype" | "secondaryGenres" | "openingMechanism" | "growthCarrier" | "primaryPayoff" | "premise" | "longFormEngine">>,
   requireDistinctNarrativeAxis = false,
@@ -124,6 +138,23 @@ export function conceptDiversityIssues(
   }
   if (requireDistinctNarrativeAxis && new Set(candidates.map((candidate) => candidate.secondaryGenres[0])).size < candidates.length)
     issues.push("未指定复合方向时，三个方案的首要叙事主轴必须不同");
+  for (let left = 0; left < candidates.length; left += 1) {
+    for (let right = left + 1; right < candidates.length; right += 1) {
+      const similarCoreDimensions = dimensions.filter(([, select]) =>
+        ngramSimilarity(select(candidates[left]), select(candidates[right])) >= 0.68,
+      ).map(([name]) => name);
+      const combinedCoreSimilarity = ngramSimilarity(
+        dimensions.map(([, select]) => select(candidates[left])).join("；"),
+        dimensions.map(([, select]) => select(candidates[right])).join("；"),
+      );
+      if (similarCoreDimensions.length >= 3 || combinedCoreSimilarity >= 0.58)
+        issues.push(`方案${left + 1}与方案${right + 1}的核心结构高度近似：${similarCoreDimensions.length ? similarCoreDimensions.join("、") : "组合路线"}`);
+      for (const field of ["premise", "longFormEngine"] as const) {
+        if (ngramSimilarity(candidates[left][field], candidates[right][field]) >= 0.78)
+          issues.push(`方案${left + 1}与方案${right + 1}的${field === "premise" ? "故事前提" : "长篇发动机"}近似改写`);
+      }
+    }
+  }
   for (const field of ["premise", "longFormEngine"] as const) {
     if (new Set(candidates.map((candidate) => diversityKey(candidate[field]))).size < candidates.length)
       issues.push(`${field === "premise" ? "故事前提" : "长篇发动机"}存在重复`);
@@ -136,12 +167,12 @@ const DraftSchema = z.object({
   content: z.string().min(500),
 });
 
-const ChapterDraftSchema = z.object({
+const chapterDraftSchema = (minimumCharacters: number, maximumCharacters: number) => z.object({
   title: z.string().min(1).max(80),
   content: z.string().min(500).refine((value) => {
     const characters = [...value].filter((character) => !/\s/.test(character)).length;
-    return characters >= 1600 && characters <= 3000;
-  }, "正文有效字符数必须在 1600-3000 之间"),
+    return characters >= minimumCharacters && characters <= maximumCharacters;
+  }, `正文有效字符数必须在 ${minimumCharacters}-${maximumCharacters} 之间`),
 });
 
 const AestheticProfileSuggestionSchema = z.object({
@@ -189,17 +220,38 @@ const StructurePlanningSchema = z.object({
   })).min(3).max(6),
 });
 
+const PlannedChapterSchema = z.object({
+  title: z.string().min(2).max(80), goal: z.string().min(5).max(300),
+  conflict: z.string().min(5).max(300), outcome: z.string().min(5).max(300),
+  chapterFunction: z.enum(CHAPTER_FUNCTIONS), targetWords: z.number().int().min(1400).max(3500),
+  chapterPromise: z.string().min(5).max(300), expectedPayoff: z.string().min(5).max(300),
+  crisis: z.string().min(5).max(300), endingExpectation: z.string().min(5).max(300),
+  payoffOffset: z.number().int().min(1).max(30), isKeyChapter: z.boolean(),
+  scenes: z.array(z.object({
+    title: z.string().min(2).max(80).refine((title) => !/^(入场|对抗|转向|回报|冲突|收束)$/.test(title), "场景标题必须是具体事件"),
+    goal: z.string().min(4).max(300), conflict: z.string().min(4).max(300), outcome: z.string().min(4).max(300),
+    targetWords: z.number().int().min(250).max(2200),
+  })).min(1).max(5),
+}).refine((chapter) => {
+  const sceneWords = chapter.scenes.reduce((sum, scene) => sum + scene.targetWords, 0);
+  return sceneWords >= chapter.targetWords * 0.6 && sceneWords <= chapter.targetWords * 1.4;
+}, "场景目标字数之和必须接近本章目标字数");
+
 const ChapterPlanningSchema = z.object({
   batchGoal: z.string().min(10).max(800),
   batchConflict: z.string().min(10).max(800),
   batchOutcome: z.string().min(10).max(800),
-  chapters: z.array(z.object({
-    title: z.string().min(2).max(80), goal: z.string().min(5).max(300),
-    conflict: z.string().min(5).max(300), outcome: z.string().min(5).max(300),
-    chapterPromise: z.string().min(5).max(300), expectedPayoff: z.string().min(5).max(300),
-    crisis: z.string().min(5).max(300), endingExpectation: z.string().min(5).max(300),
-    payoffOffset: z.number().int().min(1).max(30), isKeyChapter: z.boolean(),
-  })).min(1).max(30),
+  chapters: z.array(PlannedChapterSchema).min(1).max(30),
+}).superRefine((result, context) => {
+  if (result.chapters.length < 5) return;
+  const dimensions = [
+    ["章节功能", new Set(result.chapters.map((chapter) => chapter.chapterFunction)).size, 3],
+    ["场景数量", new Set(result.chapters.map((chapter) => chapter.scenes.length)).size, 2],
+    ["目标字数", new Set(result.chapters.map((chapter) => chapter.targetWords)).size, 3],
+  ] as const;
+  for (const [name, actual, minimum] of dimensions) {
+    if (actual < minimum) context.addIssue({ code: "custom", message: `${name}变化不足，至少需要 ${minimum} 种` });
+  }
 });
 
 type InsightResult = z.infer<typeof InsightSchema>;
@@ -700,27 +752,27 @@ export class AiService {
       }));
       const result = await this.runJson({
         projectId: project.summary.id, taskType: "generate-chapter-plans", inputSummary: `${project.summary.title} 第${batchStart}-${batchStart + batchCount - 1}章章纲`,
-        system: "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。每章必须承接上一章状态，包含目标、阻碍、主动行动、结果影响和自然续读问题；回报类型要变化，禁止连续重复打脸、误会或突发事故。",
-        user: `${shared}\n本次任务前面刚生成且必须承接的章纲：${JSON.stringify(priorChapters)}\n从第${batchStart}章开始，严格输出${batchCount}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
+        system: "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。先判断每章承担行动、调查、关系、经营、训练、生存、群像、氛围、过渡、揭秘或高潮中的哪种主要功能，再决定节奏。章节必须承接上一章，但关系、调查、氛围和过渡章可以通过认知、情绪、证据、关系或气氛积累推进，不得强塞打斗、反转或即时胜利。相邻章节的功能、场景数量和回报形态应有变化。",
+        user: `${shared}\n本次任务前面刚生成且必须承接的章纲：${JSON.stringify(priorChapters)}\n从第${batchStart}章开始，严格输出${batchCount}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterFunction、targetWords、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter 和 scenes。chapterFunction 必须使用规定枚举；targetWords 在 1400–3500 之间，按内容密度决定，不要全都相同；scenes 为 1–5 个真正需要的场景，每个包含 title、goal、conflict、outcome、targetWords，标题必须是本章具体事件，不得使用“入场、对抗、转向”等通用功能名。关系或氛围章可以只有 1–2 场，高潮章可以 4–5 场。各场景目标字数之和应接近本章 targetWords。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
         schema: ChapterPlanningSchema,
         longTask: true,
         stream: true,
       });
       if (result.chapters.length !== batchCount) throw new Error(`模型返回 ${result.chapters.length} 章，预期 ${batchCount} 章，请重试`);
-      const roughPlan = { id: randomUUID(), kind: "粗纲" as const, title: `第${batchStart}–${batchStart + batchCount - 1}章滚动粗纲`, ordinal: batchStart, goal: result.batchGoal, conflict: result.batchConflict, outcome: result.batchOutcome, targetWords: batchCount * 2300, status: "草稿" as const, parentId: null };
+      const roughPlan = { id: randomUUID(), kind: "粗纲" as const, title: `第${batchStart}–${batchStart + batchCount - 1}章滚动粗纲`, ordinal: batchStart, goal: result.batchGoal, conflict: result.batchConflict, outcome: result.batchOutcome, targetWords: result.chapters.reduce((sum, item) => sum + item.targetWords, 0), status: "草稿" as const, parentId: null };
       const chapters = result.chapters.map((item, index) => {
         const number = batchStart + index;
-        return { id: randomUUID(), number, title: item.title, outline: `目标：${item.goal}；冲突：${item.conflict}；结果：${item.outcome}`, content: "", wordCount: 0, status: "章纲" as const, batchMode: item.isKeyChapter ? "逐章" as const : "五章批次" as const, isKeyChapter: item.isKeyChapter, chapterPromise: item.chapterPromise, expectedPayoff: item.expectedPayoff, crisis: item.crisis, endingExpectation: item.endingExpectation, expectationTargetChapter: number + item.payoffOffset, revision: 0, updatedAt: now() };
+        return { id: randomUUID(), number, title: item.title, outline: `功能：${item.chapterFunction}；目标：${item.goal}；张力：${item.conflict}；结果：${item.outcome}`, content: "", wordCount: 0, status: "章纲" as const, batchMode: item.isKeyChapter ? "逐章" as const : "五章批次" as const, isKeyChapter: item.isKeyChapter, chapterFunction: item.chapterFunction, targetWords: item.targetWords, chapterPromise: item.chapterPromise, expectedPayoff: item.expectedPayoff, crisis: item.crisis, endingExpectation: item.endingExpectation, expectationTargetChapter: number + item.payoffOffset, revision: 0, updatedAt: now() };
       });
-      const detailPlans = result.chapters.map((item, index) => ({ id: randomUUID(), kind: "细纲" as const, title: `第${batchStart + index}章 ${item.title}`, ordinal: batchStart + index, goal: item.goal, conflict: item.conflict, outcome: item.outcome, targetWords: 2300, status: "草稿" as const, parentId: roughPlan.id }));
+      const detailPlans = result.chapters.map((item, index) => ({ id: randomUUID(), kind: "细纲" as const, title: `第${batchStart + index}章 ${item.title} · ${item.chapterFunction}`, ordinal: batchStart + index, goal: item.goal, conflict: item.conflict, outcome: item.outcome, targetWords: item.targetWords, status: "草稿" as const, parentId: roughPlan.id }));
       const scenePlans = result.chapters.flatMap((item, index) => {
         const number = batchStart + index;
         const parentId = detailPlans[index].id;
-        return [
-          { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·入场与压力`, ordinal: number * 10 + 1, goal: `让主角明确并主动推进：${item.goal}`, conflict: item.crisis, outcome: "落下本章必须处理的具体压力与第一步行动", targetWords: 700, status: "草稿" as const, parentId },
-          { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·对抗与选择`, ordinal: number * 10 + 2, goal: "让行动遭遇有效反作用，并迫使主角作出有代价的选择", conflict: item.conflict, outcome: item.outcome, targetWords: 900, status: "草稿" as const, parentId },
-          { id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·回报与转向`, ordinal: number * 10 + 3, goal: `兑现或推进：${item.expectedPayoff}`, conflict: "回报必须改变人物、关系、资源或局势，不能停在口头胜利", outcome: `${item.outcome}；章末转向：${item.endingExpectation}`, targetWords: 700, status: "草稿" as const, parentId },
-        ];
+        return item.scenes.map((scene, sceneIndex) => ({
+          id: randomUUID(), kind: "场景卡" as const, title: `第${number}章·${scene.title}`,
+          ordinal: number * 10 + sceneIndex + 1, goal: scene.goal, conflict: scene.conflict,
+          outcome: scene.outcome, targetWords: scene.targetWords, status: "草稿" as const, parentId,
+        }));
       });
       const batch = { startChapter: batchStart, plans: [roughPlan, ...detailPlans, ...scenePlans], chapters };
       await onChapterBatch?.(batch);
@@ -782,13 +834,17 @@ export class AiService {
     onStream?: (event: { type: "attempt-start"; attempt: number } | { type: "delta"; attempt: number; delta: string } | { type: "complete"; attempt: number }) => void,
   ): Promise<Chapter> {
     let currentAttempt = 0;
+    const targetCharacters = Math.min(3500, Math.max(1400, chapter.targetWords ?? 2300));
+    const minimumCharacters = Math.max(900, Math.round(targetCharacters * 0.68));
+    const maximumCharacters = Math.min(4800, Math.round(targetCharacters * 1.35));
+    const chapterFunction = chapter.chapterFunction ?? "行动";
     const result = await this.runJson({
       projectId,
       taskType: "draft-chapter",
       inputSummary: `第${chapter.number}章 ${chapter.title || "未命名"}`,
       system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、项目审美、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑、契约或本书审美。项目审美是本书唯一的文风基准：冷峻、克制、均衡、热烈都可能是正确答案，不得默认采用清冷克制风，也不得把任一温度写成所有作品共用的模板。",
-      user: `本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标 1800-2600 个非空白字符，完整结果必须落在 1600-3000 个非空白字符内。完成本章目标，使事件产生可观察的状态变化；若本章承担回报，展示其实际影响。把上下文中的叙事距离、情绪温度、文字质地、对话风格、情绪表达和标志手法落实到具体句段；不要只在措辞上贴风格标签。遵守审美避用项。留下来自未完成行动、新问题或局势变化的自然续读动力，禁止无因强行反转。`,
-      schema: ChapterDraftSchema,
+      user: `本章主要功能：${chapterFunction}\n本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标约 ${targetCharacters} 个非空白字符，完整结果必须落在 ${minimumCharacters}-${maximumCharacters} 个非空白字符内。按本章功能完成有效推进：行动、生存、经营或高潮章应产生可观察的局势变化；调查、关系、群像、氛围或过渡章可以通过证据重排、认知变化、关系位移、情绪积累或环境信息完成推进，不得为了显得刺激而强塞冲突、打脸或反转。若本章承担回报，展示其实际影响；若只承担蓄势，不要提前透支回报。把上下文中的叙事距离、情绪温度、文字质地、对话风格、情绪表达和标志手法落实到具体句段。遵守审美避用项，并以符合本章功能的自然余波结束。`,
+      schema: chapterDraftSchema(minimumCharacters, maximumCharacters),
       retryContext,
       timeoutMs: 300_000,
       stream: true,

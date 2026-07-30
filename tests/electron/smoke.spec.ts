@@ -22,7 +22,14 @@ test("starts the production Electron app and persists through the preload API", 
       const api = window.novelStudio!;
       const project = await api.createProject({ title: "桌面烟雾测试", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
       const detailBefore = await api.getProject(project.id);
-      await api.saveContract(project.id, { ...detailBefore.contract, premise: "维修员发现事故回声", protagonistDesire: "保护家人", readerPromise: "规则解谜", coreEmotion: "守护", ending: "关闭回声源头" });
+      await api.saveContract(project.id, {
+        ...detailBefore.contract,
+        premise: "维修员发现事故回声", protagonistDesire: "保护家人", readerPromise: "规则解谜", coreEmotion: "守护", ending: "关闭回声源头",
+        openingMechanism: "一次检修事故让维修员听见尚未发生的回声",
+        growthCarrier: "维修经验、事故证据与可信协作者共同积累",
+        primaryPayoff: "提前阻止事故并揭开责任链条",
+        longFormEngine: "个人事故、企业掩盖与回声源头形成三轮升级",
+      });
       await api.approveContract(project.id);
       for (let number = 1; number <= 5; number += 1) {
         await api.saveChapter(project.id, { id: "", number, title: `批次第${number}章`, outline: `目标：完成第${number}步；冲突：资源有限；结果：线索推进`, content: "", wordCount: 0, status: "章纲", batchMode: "五章批次", isKeyChapter: false, revision: 0, updatedAt: new Date().toISOString() });

@@ -23,6 +23,13 @@ function createChapter(number: number, content = "这是一段用于验证章节
     wordCount: 0, status: "待质检", batchMode: "逐章", isKeyChapter: false, revision: 0, updatedAt: now() };
 }
 
+const completeNarrativeEngine = {
+  openingMechanism: "一次异常事件迫使主角主动调查",
+  growthCarrier: "专业能力、关系网络与认知共同积累",
+  primaryPayoff: "解决现实问题并改变人物处境",
+  longFormEngine: "个人困境、组织阻力和规则真相形成三轮升级",
+};
+
 afterEach(() => {
   while (databases.length) databases.pop()?.close();
   while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
@@ -367,7 +374,7 @@ describe("approval gates", () => {
     const project = database.createProject({ title: "门禁测试", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
     const initial = database.saveContract(project.id, {
       ...database.getProject(project.id).contract,
-      premise: "主角发现异常规则", readerPromise: "持续解谜与成长", ending: "主角关闭规则源头",
+      premise: "主角发现异常规则", readerPromise: "持续解谜与成长", ending: "主角关闭规则源头", ...completeNarrativeEngine,
     });
     database.approveContract(project.id);
     expect(() => database.saveContract(project.id, { ...initial, premise: "未经审批的新前提" })).toThrow(/变更单/);
@@ -391,7 +398,7 @@ describe("approval gates", () => {
     expect(database.saveChapter(project.id, { ...first, status: "已发布" }).status).toBe("草稿");
     expect(() => database.transitionChapter(project.id, first.id, "已发布")).toThrow("不允许");
 
-    const contract = database.saveContract(project.id, { ...database.getProject(project.id).contract, premise: "前提", readerPromise: "承诺", ending: "终局" });
+    const contract = database.saveContract(project.id, { ...database.getProject(project.id).contract, premise: "前提", readerPromise: "承诺", ending: "终局", ...completeNarrativeEngine });
     database.approveContract(project.id);
     const unrelated = database.saveChangeRequest(project.id, {
       id: "伪造编号", targetKind: "章节", targetId: second.id, baseVersion: 999, title: "无关章节变更", reason: "测试",
@@ -400,5 +407,12 @@ describe("approval gates", () => {
     expect(unrelated.status).toBe("待审批");
     expect(unrelated.baseVersion).toBe(second.revision);
     expect(() => database.saveContract(project.id, { ...contract, premise: "不能挪用审批" })).toThrow("变更单");
+  });
+
+  it("rejects approval when the long-form narrative engine is incomplete", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "空壳契约", genre: "玄幻/仙侠", targetWords: 1000000, updateCadence: "每日2章" });
+    database.saveContract(project.id, { ...database.getProject(project.id).contract, premise: "主角进入陌生城池", readerPromise: "持续探索真相", ending: "主角作出最终选择" });
+    expect(() => database.approveContract(project.id)).toThrow(/开局机制.*成长载体.*核心回报.*长篇发动机/);
   });
 });

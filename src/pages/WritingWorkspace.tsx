@@ -48,6 +48,7 @@ import type {
   SearchHit,
   RevisionRecord,
 } from "../shared/types";
+import { CHAPTER_FUNCTIONS } from "../shared/types";
 import { AutosaveCoordinator, chapterDraftSignature, clearRecoveredChapter, readRecoveredChapter, writeRecoveredChapter } from "../lib/chapter-draft";
 import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
 import type { GenrePluginDefinition } from "../shared/genre-plugins";
@@ -596,6 +597,26 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               </Field>
             </div>
             <div className="intent-meta">
+              <Field label="章节功能">
+                <Select
+                  disabled={busy}
+                  value={draft.chapterFunction ?? "行动"}
+                  onChange={(event) => setDraft({ ...draft, chapterFunction: event.target.value as Chapter["chapterFunction"] })}
+                >
+                  {CHAPTER_FUNCTIONS.map((item) => <option key={item}>{item}</option>)}
+                </Select>
+              </Field>
+              <Field label="目标字数">
+                <Input
+                  type="number"
+                  disabled={busy}
+                  min={800}
+                  max={5000}
+                  step={100}
+                  value={draft.targetWords ?? 2300}
+                  onChange={(event) => setDraft({ ...draft, targetWords: Number(event.target.value) })}
+                />
+              </Field>
               <Field label="预计兑现章">
                 <Input
                   type="number"

@@ -479,7 +479,12 @@ export function createBrowserApi(): AppApi {
         ...project.contract, premise: concept.premise, genreSubtype: concept.genreSubtype,
         secondaryGenres: concept.secondaryGenres, genreElements: concept.genreElements,
         customGenreDirection: input.customGenreDirection ?? "",
+        audience: concept.audience, commercialHook: concept.commercialHook,
+        openingMechanism: concept.openingMechanism, growthCarrier: concept.growthCarrier,
+        primaryPayoff: concept.primaryPayoff, longFormEngine: concept.longFormEngine,
         protagonistDesire: concept.protagonistDesire, readerPromise: concept.readerPromise,
+        protagonistArc: `${concept.protagonistDesire}；最终走向：${concept.ending}`,
+        keyRelationships: [], worldRules: [], majorForces: [], timelineAnchors: [],
         coreEmotion: concept.coreEmotion, ending: concept.ending,
         immutableRules: concept.immutableRules, prohibitedPatterns: concept.prohibitedPatterns,
       };
@@ -539,12 +544,13 @@ export function createBrowserApi(): AppApi {
     },
     async approveContract(projectId) {
       const project = getProject(state, projectId);
-      if (
-        !project.contract.premise ||
-        !project.contract.readerPromise ||
-        !project.contract.ending
-      )
-        throw new Error("故事前提、读者承诺和终局不能为空");
+      const required: Array<[string, string | undefined]> = [
+        ["故事前提", project.contract.premise], ["读者承诺", project.contract.readerPromise], ["故事终局", project.contract.ending],
+        ["开局机制", project.contract.openingMechanism], ["成长载体", project.contract.growthCarrier],
+        ["核心回报", project.contract.primaryPayoff], ["长篇发动机", project.contract.longFormEngine],
+      ];
+      const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label);
+      if (missing.length) throw new Error(`创作契约尚未补全：${missing.join("、")}`);
       project.contract.approved = true;
       project.summary.status = "大纲审批";
       persist();
