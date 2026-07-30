@@ -475,8 +475,8 @@ function ProjectDashboard({
       <section className="section-band genre-stage-model">
         <div className="section-heading">
           <div>
-            <h2>六阶段商业模型</h2>
-            <p>按故事进度切换目标、冲突与回报，不用固定字数机械卡点。</p>
+            <h2>题材节奏参考</h2>
+            <p>六个常见功能仅作工具；本书实际阶段由已审批宏观规划决定。</p>
           </div>
           <Badge>{project.summary.genre}</Badge>
         </div>
@@ -705,11 +705,11 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
   };
   const optimizeAesthetic = async () => {
     setOptimizingAesthetic(true);
+    setAestheticSuggestion(null);
     try {
-      const suggestion = await api.suggestAestheticProfile(project.summary.id);
+      const suggestion = await api.suggestAestheticProfile(project.summary.id, contract);
       setAestheticSuggestion(suggestion);
-      setContract((current) => ({ ...current, aestheticProfile: suggestion.profile }));
-      notify("审美优化提案已回填，请审阅后保存");
+      notify("审美优化提案已生成，请审阅后采用");
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -771,6 +771,8 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
                 ...current,
                 fanqieCategoryKey: event.target.value,
                 genreSubtype: current.genreSubtype || profile?.recommendedSubtype || "",
+                secondaryGenres: current.secondaryGenres?.length ? current.secondaryGenres : profile?.narrativeGenres ?? [],
+                genreElements: current.genreElements?.length ? current.genreElements : profile?.genreElements ?? [],
               }));
             }}
           >
@@ -790,6 +792,7 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
             <div><span>目标读者</span><strong>{selectedFanqieCategory.audience}</strong></div>
             <div><span>开篇抓手</span><strong>{selectedFanqieCategory.openingFocus}</strong></div>
             <div><span>禁忌边界</span><strong>{selectedFanqieCategory.taboo}</strong></div>
+            <div><span>叙事主轴</span><strong>{selectedFanqieCategory.narrativeGenres.join(" + ")}</strong></div>
           </div>
         )}
         <Field
@@ -907,15 +910,53 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
           </Button>
         </div>
         {aestheticSuggestion && (
-          <div className="aesthetic-suggestion" role="status">
+          <div className="aesthetic-suggestion" aria-live="polite">
             <div>
               <strong>本书审美诊断</strong>
-              <Badge tone="warning">提案尚未保存</Badge>
+              <Badge tone="warning">待采用</Badge>
             </div>
             <p>{aestheticSuggestion.diagnosis}</p>
             <ul>
               {aestheticSuggestion.rationale.map((item) => <li key={item}>{item}</li>)}
             </ul>
+            <dl className="aesthetic-proposal-preview">
+              <div><dt>叙事距离</dt><dd>{aestheticSuggestion.profile.narrativeDistance}</dd></div>
+              <div><dt>情绪温度</dt><dd>{aestheticSuggestion.profile.emotionalTemperature}</dd></div>
+              <div><dt>文字质地</dt><dd>{aestheticSuggestion.profile.proseTexture}</dd></div>
+              <div><dt>对话风格</dt><dd>{aestheticSuggestion.profile.dialogueStyle}</dd></div>
+              <div><dt>情绪表达</dt><dd>{aestheticSuggestion.profile.emotionalExpression}</dd></div>
+              <div><dt>标志手法</dt><dd>{aestheticSuggestion.profile.signatureTechniques.join("；")}</dd></div>
+              <div><dt>审美避用</dt><dd>{aestheticSuggestion.profile.avoidPatterns.join("；")}</dd></div>
+            </dl>
+            {contract.approved && (
+              <p className="aesthetic-approval-note">
+                当前契约已经审批。采用后仍需先提交并批准创作契约变更单，才能保存为新版本。
+              </p>
+            )}
+            <div className="aesthetic-suggestion-actions">
+              <Button variant="ghost" onClick={() => setAestheticSuggestion(null)}>
+                放弃提案
+              </Button>
+              <Button
+                variant="secondary"
+                icon={<Check size={15} />}
+                onClick={() => {
+                  setContract((current) => ({
+                    ...current,
+                    aestheticProfile: normalizeAestheticProfile(aestheticSuggestion.profile),
+                  }));
+                  setAestheticSuggestion(null);
+                  notify(
+                    contract.approved
+                      ? "提案已采用到表单；保存前需先批准创作契约变更单"
+                      : "审美提案已采用到表单，请确认后保存",
+                    contract.approved ? "error" : "success",
+                  );
+                }}
+              >
+                采用提案
+              </Button>
+            </div>
           </div>
         )}
         <div className="form-grid two">

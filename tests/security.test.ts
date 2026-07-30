@@ -96,6 +96,8 @@ describe("IPC runtime validation", () => {
     };
 
     expect(validateIpcArgs("saveContract", ["project", contract])).toEqual(["project", contract]);
+    expect(validateIpcArgs("suggestAestheticProfile", ["project", contract])).toEqual(["project", contract]);
+    expect(() => validateIpcArgs("suggestAestheticProfile", ["project"])).toThrow("参数无效");
     expect(() => validateIpcArgs("saveContract", ["project", {
       ...contract,
       aestheticProfile: { ...contract.aestheticProfile, emotionalTemperature: "统一模板" },

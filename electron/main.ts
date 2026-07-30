@@ -34,7 +34,7 @@ import {
   volumeBoundaryChapters,
 } from "../src/shared/planning";
 import { deleteAutoBackupCredential, readApiCredential, readAutoBackupCredential, writeApiCredential, writeAutoBackupCredential } from "./credential-store";
-import { compileCommercialGuidance } from "../src/shared/commercial-knowledge";
+import { compileCommercialGuidance, resolveStoryStage } from "../src/shared/commercial-knowledge";
 import { buildContextDiagnostics } from "../src/shared/context-diagnostics";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { buildLongTermMemory } from "../src/shared/summaries";
@@ -346,6 +346,7 @@ function compileContext(
         secondaryGenres: project.contract.secondaryGenres,
         genreElements: project.contract.genreElements,
         customGenreDirection: project.contract.customGenreDirection,
+        storyStage: resolveStoryStage(project.plans, project.summary.currentWords),
       },
     ),
     chapterIntent: [
@@ -648,8 +649,8 @@ function registerHandlers() {
       premise: concept.premise,
       genreSubtype: concept.genreSubtype,
       fanqieCategoryKey: "",
-      secondaryGenres: input.secondaryGenres ?? [],
-      genreElements: input.genreElements ?? [],
+      secondaryGenres: concept.secondaryGenres,
+      genreElements: concept.genreElements,
       customGenreDirection: input.customGenreDirection ?? "",
       protagonistDesire: concept.protagonistDesire,
       readerPromise: concept.readerPromise,
@@ -667,9 +668,10 @@ function registerHandlers() {
   handle("getProject", (id) => database.getProject(id));
   handle("updateProject", (id, patch) => database.updateProject(id, patch));
   handle("saveContract", (id, contract) => database.saveContract(id, contract));
-  handle("suggestAestheticProfile", (id) =>
-    ai.suggestAestheticProfile(database.getProject(id)),
-  );
+  handle("suggestAestheticProfile", (id, contract) => {
+    const project = database.getProject(id);
+    return ai.suggestAestheticProfile({ ...project, contract });
+  });
   handle("approveContract", (id) => database.approveContract(id));
   handle("savePlan", (id, plan) => database.savePlan(id, plan));
   handle("approvePlan", (id, planId) => database.approvePlan(id, planId));

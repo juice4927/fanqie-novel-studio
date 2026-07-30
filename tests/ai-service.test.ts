@@ -1,9 +1,35 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { abortableDelay, AiService } from "../electron/ai-service";
+import { abortableDelay, AiService, conceptDiversityIssues } from "../electron/ai-service";
 import type { WorkspaceDatabase } from "../electron/database";
 import type { Chapter, ContextPackage, ProjectDetail, QualityIssue, ResearchBook } from "../src/shared/types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("book concept diversity", () => {
+  const concept = (overrides: Partial<{ genreSubtype: string; secondaryGenres: Array<"成长" | "悬疑" | "经营">; openingMechanism: string; growthCarrier: string; primaryPayoff: string; premise: string; longFormEngine: string }> = {}) => ({
+    genreSubtype: "职业成长", secondaryGenres: ["成长"] as Array<"成长" | "悬疑" | "经营">,
+    openingMechanism: "职业事故迫使主角调查", growthCarrier: "专业能力和同行网络", primaryPayoff: "解决事故并获得职业认可",
+    premise: "主角从一次职业事故中发现长期隐患并主动调查。", longFormEngine: "案件、关系和职业责任分三轮升级。", ...overrides,
+  });
+
+  it("rejects three renamed variants of the same route", () => {
+    const repeated = [concept(), concept({ genreSubtype: "职场成长" }), concept({ genreSubtype: "现实成长" })];
+    expect(conceptDiversityIssues(repeated, true)).toEqual(expect.arrayContaining([
+      expect.stringContaining("开局机制"),
+      expect.stringContaining("首要叙事主轴"),
+      expect.stringContaining("故事前提"),
+    ]));
+  });
+
+  it("accepts structurally distinct routes", () => {
+    const candidates = [
+      concept(),
+      concept({ genreSubtype: "规则探案", secondaryGenres: ["悬疑"], openingMechanism: "死者留下互相矛盾的证词", growthCarrier: "证据链和推理同盟", primaryPayoff: "还原真相并改变案件定性", premise: "法医发现证词与尸检结果矛盾，决定追查被掩盖的真相。", longFormEngine: "单案证据、组织阻挠和旧案真相逐层展开。" }),
+      concept({ genreSubtype: "灾后经营", secondaryGenres: ["经营"], openingMechanism: "安全区断粮迫使主角组织交换", growthCarrier: "生产方法和社区契约", primaryPayoff: "建立可持续供给并重建信任", premise: "灾后社区即将断粮，主角尝试用有限资源恢复生产。", longFormEngine: "生产、分配和社区治理形成三轮冲突。" }),
+    ];
+    expect(conceptDiversityIssues(candidates, true)).toEqual([]);
+  });
+});
 
 describe("AI request timeout", () => {
   it("aborts a hung request and records the failed job", async () => {

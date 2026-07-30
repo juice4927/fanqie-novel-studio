@@ -18,9 +18,9 @@ import type {
   ResearchAnalysisRecord,
   ResearchBook,
 } from "../src/shared/types";
-import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
+import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
 import { WorkspaceDatabase, now } from "./database";
-import { compileCommercialGuidance, compileDeconstructionFramework } from "../src/shared/commercial-knowledge";
+import { compileCommercialGuidance, compileDeconstructionFramework, resolveStoryStage } from "../src/shared/commercial-knowledge";
 import { aiEndpoint, inferProviderCapabilities, JsonStringFieldExtractor, normalizeProviderUrl, parseProviderUsage, parseResponsesOutput, providerError, readChatCompletionStream, readResponsesStream, rejectsJsonMode, rejectsStreaming, usesResponsesApi } from "./ai-provider";
 import { PROMPT_VERSION } from "../src/shared/prompt-version";
 import { contextForModel } from "../src/shared/context-diagnostics";
@@ -83,6 +83,11 @@ const BookConceptSchema = z.object({
     title: z.string().min(4).max(40),
     premise: z.string().min(20).max(500),
     genreSubtype: z.string().min(2).max(40),
+    secondaryGenres: z.array(z.enum(NARRATIVE_GENRES)).min(1).max(3),
+    genreElements: z.array(z.string().min(1).max(40)).max(8),
+    openingMechanism: z.string().min(4).max(120),
+    growthCarrier: z.string().min(4).max(120),
+    primaryPayoff: z.string().min(4).max(120),
     protagonistDesire: z.string().min(8).max(200),
     readerPromise: z.string().min(10).max(300),
     coreEmotion: z.string().min(2).max(80),
@@ -94,6 +99,37 @@ const BookConceptSchema = z.object({
     longFormEngine: z.string().min(10).max(400),
   })).length(3),
 });
+
+type GeneratedBookConcept = z.infer<typeof BookConceptSchema>["candidates"][number];
+
+const diversityKey = (value: string) => value.toLowerCase().replace(/[\s，。、“”‘’：；！？,.!?:;\-_/]+/g, "");
+
+export function conceptDiversityIssues(
+  candidates: Array<Pick<GeneratedBookConcept, "genreSubtype" | "secondaryGenres" | "openingMechanism" | "growthCarrier" | "primaryPayoff" | "premise" | "longFormEngine">>,
+  requireDistinctNarrativeAxis = false,
+) {
+  const issues: string[] = [];
+  const dimensions: Array<[string, (candidate: typeof candidates[number]) => string]> = [
+    ["子类型", (candidate) => candidate.genreSubtype],
+    ["开局机制", (candidate) => candidate.openingMechanism],
+    ["成长载体", (candidate) => candidate.growthCarrier],
+    ["主要回报", (candidate) => candidate.primaryPayoff],
+  ];
+  const fullyDistinct = dimensions.filter(([, select]) =>
+    new Set(candidates.map((candidate) => diversityKey(select(candidate)))).size === candidates.length,
+  );
+  if (fullyDistinct.length < 3) {
+    const repeated = dimensions.filter(([name]) => !fullyDistinct.some(([distinctName]) => distinctName === name)).map(([name]) => name);
+    issues.push(`至少三个核心维度必须完全不同；当前重复：${repeated.join("、")}`);
+  }
+  if (requireDistinctNarrativeAxis && new Set(candidates.map((candidate) => candidate.secondaryGenres[0])).size < candidates.length)
+    issues.push("未指定复合方向时，三个方案的首要叙事主轴必须不同");
+  for (const field of ["premise", "longFormEngine"] as const) {
+    if (new Set(candidates.map((candidate) => diversityKey(candidate[field]))).size < candidates.length)
+      issues.push(`${field === "premise" ? "故事前提" : "长篇发动机"}存在重复`);
+  }
+  return issues;
+}
 
 const DraftSchema = z.object({
   title: z.string(),
@@ -144,9 +180,9 @@ const FactCandidateSchema = z.object({
 
 const StructurePlanningSchema = z.object({
   stages: z.array(z.object({
-    title: z.string().min(2).max(80), startChapter: z.number().int().positive(),
+    title: z.string().min(2).max(80).refine((title) => !(GENRE_STAGES as readonly string[]).includes(title), "阶段标题必须是本书专属状态"), startChapter: z.number().int().positive(),
     goal: z.string().min(10).max(500), conflict: z.string().min(10).max(500), outcome: z.string().min(10).max(500), targetWords: z.number().int().positive(),
-  })).length(6),
+  })).min(4).max(8),
   volumes: z.array(z.object({
     title: z.string().min(2).max(80),
     goal: z.string().min(10).max(500), conflict: z.string().min(10).max(500), outcome: z.string().min(10).max(500), targetWords: z.number().int().positive(),
@@ -599,16 +635,29 @@ export class AiService {
 
   async generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]> {
     const plugin = GENRE_PLUGINS[input.genre];
-    const result = await this.runJson({
+    const system = "你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案不得共享同一套升级换皮结构：主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机至少有四项实质不同。genreSubtype 必须分别概括三条不同路线，不得使用近义词伪装差异。书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。";
+    const baseUser = `平台主题材：${input.genre}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。三个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n输出 candidates，严格三项。先在内部为三案分别确定叙事主轴、开局机制、成长载体和主要回报，确认至少三项互不相同后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，每个方案的 secondaryGenres 都必须包含作者所选类型，但三案仍须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、secondaryGenres、genreElements、openingMechanism、growthCarrier、primaryPayoff、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。secondaryGenres 必须使用给定的叙事主轴枚举。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`;
+    const run = (retryIssues?: string[]) => this.runJson({
       projectId: null,
-      taskType: "generate-book-concepts",
-      inputSummary: `${input.genre} 从零开书三案`,
-      system: "你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案不得共享同一套升级换皮结构：主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机至少有四项实质不同。genreSubtype 必须分别概括三条不同路线，不得使用近义词伪装差异。书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。",
-      user: `平台主题材：${input.genre}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。三个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n输出 candidates，严格三项。先在内部为三案分别确定叙事主轴、开局机制、成长载体和主要回报，确认至少三项互不相同后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，三案也必须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`,
+      taskType: retryIssues ? "generate-book-concepts-diversity-retry" : "generate-book-concepts",
+      inputSummary: `${input.genre} 从零开书三案${retryIssues ? "差异重试" : ""}`,
+      system,
+      user: retryIssues ? `${baseUser}\n上一次方案未通过差异检查：${retryIssues.join("；")}。请完全重做三案，不要只改名称。` : baseUser,
       schema: BookConceptSchema,
       longTask: true,
       stream: true,
     });
+    let result = await run();
+    const selectionIssues = (candidates: GeneratedBookConcept[]) => (input.secondaryGenres ?? []).flatMap((genre) =>
+      candidates.every((candidate) => candidate.secondaryGenres.includes(genre)) ? [] : [`部分方案未保留作者选择的叙事主轴：${genre}`],
+    );
+    let issues = [...conceptDiversityIssues(result.candidates, !(input.secondaryGenres?.length)), ...selectionIssues(result.candidates)];
+    if (issues.length) {
+      this.log("warn", "book-concepts.diversity-retry", { issues });
+      result = await run(issues);
+      issues = [...conceptDiversityIssues(result.candidates, !(input.secondaryGenres?.length)), ...selectionIssues(result.candidates)];
+      if (issues.length) throw new Error(`三套方案仍过于相似：${issues.join("；")}。请补充更具体的复合类型或自定义方向后重试。`);
+    }
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
   }
 
@@ -619,12 +668,12 @@ export class AiService {
   ): Promise<PlanningGenerationResult> {
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
     const startChapter = input.fromChapter ?? Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1));
-    const shared = `项目：${project.summary.title}\n题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n创作契约：${JSON.stringify(project.contract)}\n商业规则：${compileCommercialGuidance(project.summary.genre, startChapter, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, subtype: project.contract.genreSubtype, fanqieCategoryKey: project.contract.fanqieCategoryKey, secondaryGenres: project.contract.secondaryGenres, genreElements: project.contract.genreElements, customGenreDirection: project.contract.customGenreDirection })}\n已批准规划：${JSON.stringify(project.plans.filter((plan) => plan.status === "已批准"))}\n已有章节：${JSON.stringify(project.chapters.slice(-20).map((chapter) => ({ number: chapter.number, title: chapter.title, outline: chapter.outline, endingExpectation: chapter.endingExpectation })))}`;
+    const shared = `项目：${project.summary.title}\n题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n创作契约：${JSON.stringify(project.contract)}\n商业规则：${compileCommercialGuidance(project.summary.genre, startChapter, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, subtype: project.contract.genreSubtype, fanqieCategoryKey: project.contract.fanqieCategoryKey, secondaryGenres: project.contract.secondaryGenres, genreElements: project.contract.genreElements, customGenreDirection: project.contract.customGenreDirection, storyStage: resolveStoryStage(project.plans, project.summary.currentWords) })}\n已批准规划：${JSON.stringify(project.plans.filter((plan) => plan.status === "已批准"))}\n已有章节：${JSON.stringify(project.chapters.slice(-20).map((chapter) => ({ number: chapter.number, title: chapter.title, outline: chapter.outline, endingExpectation: chapter.endingExpectation })))}`;
     if (input.mode === "全书结构") {
       const result = await this.runJson({
-        projectId: project.summary.id, taskType: "generate-story-structure", inputSummary: `${project.summary.title} 六阶段与分卷`,
-        system: "你是中国商业网文总编。根据已审批契约规划六阶段和分卷，只细化结构，不写正文。阶段必须依次覆盖开篇、追读、扩张、中期、高潮、收束；总字数接近项目目标，冲突和回报逐层升级，终局必须兑现契约。",
-        user: `${shared}\n输出 stages（必须6项）和 volumes（3至6项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。不得照抄商业规则文字。`,
+        projectId: project.summary.id, taskType: "generate-story-structure", inputSummary: `${project.summary.title} 自适应阶段与分卷`,
+        system: "你是中国商业网文总编。根据已审批契约规划作品自己的宏观阶段和分卷，只细化结构，不写正文。阶段数量与功能必须由核心矛盾、叙事主轴和长篇发动机决定，不得机械套用开篇、追读、扩张、中期、高潮、收束六阶段。每次阶段切换必须由不可逆状态变化触发，终局必须兑现契约。",
+        user: `${shared}\n输出 stages（4至8项）和 volumes（3至6项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。阶段标题必须是本书专属事件或状态，不得直接使用“开篇、追读、扩张、中期、高潮、收束”。各阶段目标字数之和应接近项目目标。`,
         schema: StructurePlanningSchema,
         longTask: true,
         stream: true,

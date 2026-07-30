@@ -471,6 +471,11 @@ export interface BookConceptCandidate {
   title: string;
   premise: string;
   genreSubtype: string;
+  secondaryGenres: NarrativeGenre[];
+  genreElements: string[];
+  openingMechanism: string;
+  growthCarrier: string;
+  primaryPayoff: string;
   protagonistDesire: string;
   readerPromise: string;
   coreEmotion: string;
@@ -641,7 +646,7 @@ export interface AppApi {
   getProject(id: string): Promise<ProjectDetail>;
   updateProject(id: string, patch: ProjectPatch): Promise<ProjectSummary>;
   saveContract(id: string, contract: StoryContract): Promise<StoryContract>;
-  suggestAestheticProfile(id: string): Promise<AestheticProfileSuggestion>;
+  suggestAestheticProfile(id: string, contract: StoryContract): Promise<AestheticProfileSuggestion>;
   approveContract(id: string): Promise<StoryContract>;
   savePlan(id: string, plan: PlanNode): Promise<PlanNode>;
   approvePlan(id: string, planId: string): Promise<void>;

@@ -4,6 +4,7 @@ import {
   compileCommercialGuidance,
   compileDeconstructionFramework,
   resolveGenreStage,
+  resolveStoryStage,
 } from "../src/shared/commercial-knowledge";
 import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
 import { FANQIE_CATEGORY_PROFILES } from "../src/shared/fanqie-taxonomy";
@@ -55,7 +56,7 @@ describe("structured Chinese web-fiction genre packages", () => {
     const outputs = GENRES.map((genre) => compileCommercialGuidance(genre, 20));
     GENRES.forEach((genre, index) => {
       expect(outputs[index]).toContain(uniqueMechanisms[genre]);
-      expect(outputs[index]).toContain("回报阶梯（由小到大）");
+      expect(outputs[index]).toContain("回报工具箱（不要求按固定顺序升级）");
       expect(outputs[index]).toContain("重复疲劳识别");
       expect(outputs[index]).toContain("基础题材母题（按需选用，不是固定套路）");
       expect(outputs[index]).toContain("不作为机械硬门禁");
@@ -97,6 +98,19 @@ describe("structured Chinese web-fiction genre packages", () => {
     expect(guidance).toContain("不强套内置子类型");
   });
 
+  it("uses an approved project stage instead of imposing the generic chapter threshold", () => {
+    const plans = [
+      { kind: "宏观阶段", status: "已批准", ordinal: 1, targetWords: 100000, title: "困城求生", goal: "建立可信的小队协作", conflict: "资源与信任同时短缺", outcome: "获得第一个稳定据点" },
+      { kind: "宏观阶段", status: "已批准", ordinal: 2, targetWords: 200000, title: "据点分裂", goal: "处理内部路线冲突", conflict: "救人与守城无法兼得", outcome: "小队形成新的行动原则" },
+    ];
+    const storyStage = resolveStoryStage(plans, 150000);
+    expect(storyStage?.title).toBe("据点分裂");
+    const guidance = compileCommercialGuidance("都市脑洞", 80, { currentWords: 150000, targetWords: 1000000, storyStage });
+    expect(guidance).toContain("当前项目阶段：据点分裂");
+    expect(guidance).toContain("项目阶段冲突：救人与守城无法兼得");
+    expect(guidance).not.toContain("当前题材节奏参考：中期");
+  });
+
   it("uses the same structured package for deconstruction", () => {
     const framework = compileDeconstructionFramework("古言宅斗");
     expect(framework).toContain("证据链");
@@ -131,7 +145,21 @@ describe("structured Chinese web-fiction genre packages", () => {
       expect(profile.expansionAxis.length).toBeGreaterThan(20);
       expect(profile.fatigueSignal.length).toBeGreaterThan(20);
       expect(profile.qualityChecks).toHaveLength(4);
+      expect(profile.narrativeGenres.length).toBeGreaterThan(0);
+      expect(profile.expansionRoutes.length).toBeGreaterThanOrEqual(3);
     }
+  });
+
+  it("maps independent categories to fitting narrative rules and expansion routes", () => {
+    const scienceFiction = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:8")!;
+    const sports = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:746")!;
+    const suspense = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:747")!;
+    expect(scienceFiction).toMatchObject({ genre: "都市脑洞", recommendedSubtype: "异能规则", narrativeGenres: ["生存", "冒险"] });
+    expect(sports).toMatchObject({ genre: "都市脑洞", recommendedSubtype: "系统成长", narrativeGenres: ["竞技", "成长"] });
+    expect(suspense.narrativeGenres[0]).toBe("悬疑");
+    expect(scienceFiction.expansionRoutes).not.toEqual(sports.expansionRoutes);
+    expect(sports.expansionRoutes).not.toEqual(suspense.expansionRoutes);
+    expect(scienceFiction.expansionAxis).toContain("不使用统一扩张公式");
   });
 
   it("gives distinct executable rules to categories inside the same broad genre", () => {

@@ -145,7 +145,7 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
                 <strong>{group}</strong>
                 <small>
                   {group === "宏观阶段"
-                    ? "全书 3–5 个阶段"
+                    ? "全书 4–8 个自适应阶段"
                     : group === "分卷"
                       ? "建议每卷 12–18 万字"
                       : group === "粗纲"
@@ -346,7 +346,7 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
               <Segmented options={["全书结构", "后续章纲"] as const} value={aiInput.mode} onChange={(mode) => setAiInput({ ...aiInput, mode })} />
             </Field>
             {aiInput.mode === "全书结构" ? (
-              <p className="inline-warning">生成六个商业阶段与 3–6 个分卷。当前已有宏观阶段或分卷时会拒绝执行，防止重复结构。</p>
+              <p className="inline-warning">根据本书契约生成 4–8 个专属阶段与 3–6 个分卷。当前已有宏观阶段或分卷时会拒绝执行，防止重复结构。</p>
             ) : (
               <div className="form-grid two">
                 <Field label="起始章节">
@@ -358,7 +358,7 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
               </div>
             )}
             <div className="planning-ai-summary">
-              <strong>{aiInput.mode === "全书结构" ? "输出：六阶段 + 分卷" : `输出：第${aiInput.fromChapter}–${(aiInput.fromChapter ?? 1) + (aiInput.chapterCount ?? 10) - 1}章`}</strong>
+              <strong>{aiInput.mode === "全书结构" ? "输出：4–8 个专属阶段 + 3–6 个分卷" : `输出：第${aiInput.fromChapter}–${(aiInput.fromChapter ?? 1) + (aiInput.chapterCount ?? 10) - 1}章`}</strong>
               <p>{aiInput.mode === "全书结构" ? "每个节点包含目标、核心矛盾、预期结果和目标字数。" : "同步建立滚动粗纲、逐章细纲、每章三张场景卡，以及章节承诺、回报、危机、章末期待和兑现目标章。"}</p>
             </div>
             <div className="modal-actions">

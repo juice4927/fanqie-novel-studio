@@ -4,7 +4,7 @@ import { getFanqieCategoryProfile } from "./fanqie-taxonomy";
 import { compileGenreComposition, type GenreComposition } from "./genre-composition";
 
 export const COMMERCIAL_KNOWLEDGE_VERSION =
-  "cn-web-fiction.2026-07.v3-composable-genres";
+  "cn-web-fiction.2026-07.v4-adaptive-genres";
 
 export interface CommercialKnowledgeSource {
   title: string;
@@ -67,6 +67,23 @@ export interface CommercialProgress extends GenreComposition {
   stage?: GenreStage;
   subtype?: string;
   fanqieCategoryKey?: string;
+  storyStage?: { title: string; goal: string; conflict: string; outcome: string };
+}
+
+export function resolveStoryStage(
+  plans: Array<{ kind: string; status: string; ordinal: number; targetWords: number; title: string; goal: string; conflict: string; outcome: string }>,
+  currentWords: number,
+) {
+  const stages = plans
+    .filter((plan) => plan.kind === "宏观阶段" && plan.status === "已批准")
+    .sort((left, right) => left.ordinal - right.ordinal);
+  if (!stages.length) return undefined;
+  let boundary = 0;
+  for (const stage of stages) {
+    boundary += Math.max(0, stage.targetWords);
+    if (currentWords < boundary) return stage;
+  }
+  return stages.at(-1);
 }
 
 export function resolveGenreStage(
@@ -97,7 +114,9 @@ export function compileCommercialGuidance(
   const fanqieCategory = getFanqieCategoryProfile(progress?.fanqieCategoryKey);
   return [
     `知识库：${COMMERCIAL_KNOWLEDGE_VERSION}`,
-    `当前阶段：${phase}（第${chapterNumber}章）`,
+    progress?.storyStage
+      ? `当前项目阶段：${progress.storyStage.title}（第${chapterNumber}章）`
+      : `当前题材节奏参考：${phase}（第${chapterNumber}章；尚无已审批宏观阶段）`,
     `题材承诺：${plugin.readerPromise}`,
     compileGenreComposition(progress),
     subtype
@@ -107,6 +126,8 @@ export function compileCommercialGuidance(
         : `可选子类型：${plugin.subtypes.map((item) => item.name).join("、")}`,
     fanqieCategory ? `番茄分类映射：${fanqieCategory.channel}·${fanqieCategory.name}｜建议子类型：${fanqieCategory.recommendedSubtype}｜核心幻想：${fanqieCategory.coreFantasy}｜目标读者：${fanqieCategory.audience}｜开篇抓手：${fanqieCategory.openingFocus}｜禁忌：${fanqieCategory.taboo}` : "番茄分类映射：尚未选择，先按六套基础题材规则执行",
     ...(fanqieCategory ? [
+      `分类叙事主轴：${fanqieCategory.narrativeGenres.join(" + ")}`,
+      `分类元素参考：${fanqieCategory.genreElements.join("、") || "无固定元素"}`,
       `分类冲突发动机：${fanqieCategory.conflictEngine}`,
       `分类回报模式：${fanqieCategory.payoffPattern}`,
       `分类长线扩张：${fanqieCategory.expansionAxis}`,
@@ -117,16 +138,23 @@ export function compileCommercialGuidance(
     `目标读者：${plugin.targetAudience.join("；")}`,
     `基础题材母题（按需选用，不是固定套路）：${plugin.coreFantasies.join("；")}`,
     `禁忌边界：${plugin.tabooBoundaries.join("；")}`,
-    `本阶段目标：${phaseRule.objective}`,
-    `本阶段冲突：${phaseRule.conflict}`,
-    `本阶段回报：${phaseRule.payoff}`,
-    `阶段完成信号：${phaseRule.exitSignal}`,
+    ...(progress?.storyStage ? [
+      `项目阶段目标：${progress.storyStage.goal}`,
+      `项目阶段冲突：${progress.storyStage.conflict}`,
+      `项目阶段预期结果：${progress.storyStage.outcome}`,
+      `题材节奏参考（仅作工具）：${phaseRule.objective}；${phaseRule.payoff}`,
+    ] : [
+      `参考阶段目标：${phaseRule.objective}`,
+      `参考阶段冲突：${phaseRule.conflict}`,
+      `参考阶段回报：${phaseRule.payoff}`,
+      `参考阶段完成信号：${phaseRule.exitSignal}`,
+    ]),
     "商业叙事循环：",
     ...CORE_LOOP.map((item) => `- ${item}`),
-    "可用冲突发动机：",
+    "冲突工具箱（本章最多选择一项，不要求全部使用）：",
     ...plugin.conflictEngines.map((item) => `- ${item}`),
-    `回报阶梯（由小到大）：${plugin.rewardLadder.join(" → ")}`,
-    "长线扩张轴：",
+    `回报工具箱（不要求按固定顺序升级）：${plugin.rewardLadder.join("、")}`,
+    "扩张轴工具箱（每个项目阶段选择一条主轴）：",
     ...plugin.expansionAxes.map((item) => `- ${item}`),
     "重复疲劳识别：",
     ...plugin.fatigueRules.map(

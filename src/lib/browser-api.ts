@@ -30,7 +30,7 @@ import type {
 import { compileAestheticGuidance, normalizeAestheticProfile } from "../shared/aesthetic-profile";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { findCurrentVolume } from "../shared/planning";
-import { compileCommercialGuidance } from "../shared/commercial-knowledge";
+import { compileCommercialGuidance, resolveStoryStage } from "../shared/commercial-knowledge";
 import { buildContextDiagnostics } from "../shared/context-diagnostics";
 import { buildLongTermMemory } from "../shared/summaries";
 import {
@@ -450,9 +450,17 @@ export function createBrowserApi(): AppApi {
         ["离婚当天，我接手了倒闭供销社", "被夺走婚房的基层职员接手濒临倒闭的供销社，用一张异常进货单串起女性互助生意。"],
         ["全家等我认输，我却承包了荒山", "返乡姑娘被逼让出工作名额，她用一份旧承包合同把荒山变成整个县的新产业。"],
       ];
+      const routes = [
+        { secondaryGenres: ["悬疑", "成长"] as const, genreElements: ["现代都市", "探案"], openingMechanism: "一笔恶意欠款暴露可追索证据", growthCarrier: "职业调查能力与证据网络", primaryPayoff: "揭穿利益链并夺回职业尊严" },
+        { secondaryGenres: ["经营", "群像"] as const, genreElements: ["年代", "经商"], openingMechanism: "接手即将倒闭的供销社", growthCarrier: "商品渠道与女性互助团队", primaryPayoff: "经营成果改变个人和社区处境" },
+        { secondaryGenres: ["冒险", "经营"] as const, genreElements: ["乡村", "种田"], openingMechanism: "旧承包合同引出荒山争夺", growthCarrier: "土地改造技术与产业合作", primaryPayoff: "守住土地并建立区域产业" },
+      ];
       return ideas.map(([title, premise], index) => ({
         id: id(), title, premise: `${premise} 她必须在事业扩张与亲密关系重建中守住自己的选择。`,
         genreSubtype: input.genre === "年代重生" ? "年代经营" : "现实成长",
+        secondaryGenres: [...routes[index].secondaryGenres], genreElements: routes[index].genreElements,
+        openingMechanism: routes[index].openingMechanism, growthCarrier: routes[index].growthCarrier,
+        primaryPayoff: routes[index].primaryPayoff,
         protagonistDesire: "夺回人生选择权，并建立不依附任何人的事业与关系。",
         readerPromise: "持续提供止损反击、能力变现、关系升温与阶段性事业成果。",
         coreEmotion: index === 1 ? "治愈与重建" : "憋屈后的清醒反击",
@@ -469,7 +477,7 @@ export function createBrowserApi(): AppApi {
       const project = getProject(state, created.id);
       project.contract = {
         ...project.contract, premise: concept.premise, genreSubtype: concept.genreSubtype,
-        secondaryGenres: input.secondaryGenres ?? [], genreElements: input.genreElements ?? [],
+        secondaryGenres: concept.secondaryGenres, genreElements: concept.genreElements,
         customGenreDirection: input.customGenreDirection ?? "",
         protagonistDesire: concept.protagonistDesire, readerPromise: concept.readerPromise,
         coreEmotion: concept.coreEmotion, ending: concept.ending,
@@ -526,7 +534,7 @@ export function createBrowserApi(): AppApi {
       persist();
       return project.contract;
     },
-    async suggestAestheticProfile() {
+    async suggestAestheticProfile(_projectId, _contract) {
       throw new Error("AI 审美优化需要在桌面版配置模型后使用");
     },
     async approveContract(projectId) {
@@ -702,6 +710,7 @@ export function createBrowserApi(): AppApi {
             secondaryGenres: project.contract.secondaryGenres,
             genreElements: project.contract.genreElements,
             customGenreDirection: project.contract.customGenreDirection,
+            storyStage: resolveStoryStage(project.plans, project.summary.currentWords),
           },
         ),
         chapterIntent: `本章承诺：${chapter.chapterPromise || "未填写"}\n预期回报：${chapter.expectedPayoff || "未填写"}\n当前危机：${chapter.crisis || "未填写"}\n结尾期待：${chapter.endingExpectation || "未填写"}`,

@@ -27,7 +27,7 @@ test("navigates through research and the complete project workflow", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "商业知识" }).click();
   await expect(
-    page.getByText("cn-web-fiction.2026-07.v3-composable-genres"),
+    page.getByText("cn-web-fiction.2026-07.v4-adaptive-genres"),
   ).toBeVisible();
   for (const genre of [
     "都市脑洞",
@@ -52,7 +52,10 @@ test("navigates through research and the complete project workflow", async ({
   await page.locator(".project-row").filter({ hasText: "回声备忘录" }).click();
   await expect(page.getByRole("heading", { name: "回声备忘录" })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "六阶段商业模型" }),
+    page.getByRole("heading", { name: "题材节奏参考" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("六个常见功能仅作工具；本书实际阶段由已审批宏观规划决定。"),
   ).toBeVisible();
   for (const stage of ["开篇", "追读", "扩张", "中期", "高潮", "收束"])
     await expect(
@@ -194,6 +197,8 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await expect(page.getByRole("heading", { name: "离婚当天，我接手了倒闭供销社" })).toBeVisible();
   await page.getByRole("button", { name: /故事圣经/ }).click();
   await expect(page.getByLabel("故事前提")).toHaveValue(/被夺走婚房的基层职员/);
+  await expect(page.getByLabel("经营", { exact: true })).toBeChecked();
+  await expect(page.getByLabel("群像", { exact: true })).toBeChecked();
   await expect(page.getByRole("heading", { name: "审美设定" })).toBeVisible();
   await expect(page.getByRole("button", { name: "AI 优化本书审美" })).toBeVisible();
   await expect(page.getByLabel("叙事距离")).toHaveValue("适中");

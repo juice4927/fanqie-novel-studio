@@ -1403,6 +1403,40 @@ p {
 .aesthetic-suggestion ul {
   padding-left: 18px;
 }
+.aesthetic-proposal-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.aesthetic-proposal-preview > div {
+  min-width: 0;
+}
+.aesthetic-proposal-preview dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+.aesthetic-proposal-preview dd {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.aesthetic-proposal-preview > div:nth-child(n + 3) {
+  grid-column: 1 / -1;
+}
+.aesthetic-suggestion .aesthetic-approval-note {
+  color: var(--danger);
+}
+.aesthetic-suggestion-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
 .modal-actions {
   display: flex;
   align-items: center;
