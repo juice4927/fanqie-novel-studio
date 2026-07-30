@@ -755,8 +755,11 @@ export class AiService {
       taskType: "extract-chapter-facts",
       inputSummary: `第${chapter.number}章状态候选`,
       system: "你是长篇小说状态记录员。只提取本章正文明确发生且会影响后续连续性的持久状态变化。不得推测心理、补全设定或把临时动作当成长期事实；无可靠变化时返回空数组。",
-      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n已确认事实：${JSON.stringify(project.facts.filter((fact) => fact.confidence === "已确认").slice(0, 120))}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 facts；每项包含 kind、subject、predicate、value、knowledgeScope、evidence。evidence 必须是正文中的连续短句。秘密必须说明当前知情角色，公开事实的 knowledgeScope 写“公开”。`,
+      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n本地检索到的相关有效事实：${JSON.stringify(project.facts.filter((fact) => fact.confidence === "已确认" || fact.confidence === "有冲突"))}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 facts；每项包含 kind、subject、predicate、value、knowledgeScope、evidence。evidence 必须是正文中的连续短句。秘密必须说明当前知情角色，公开事实的 knowledgeScope 写“公开”。`,
       schema: FactCandidateSchema,
+      longTask: true,
+      stream: true,
+      reasoningEffort: "low",
     });
     const compactContent = chapter.content.replace(/\s+/g, "");
     const activeFacts = project.facts

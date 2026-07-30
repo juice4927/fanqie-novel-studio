@@ -892,7 +892,16 @@ function registerHandlers() {
     const chapter = project.chapters.find((item) => item.id === chapterId);
     if (!chapter) throw new Error("章节不存在");
     if (!chapter.content.trim()) throw new Error("章节还没有正文");
-    const candidates = await ai.extractChapterFacts(project, chapter);
+    const relevantFacts = database.searchRelevantFacts(
+      id,
+      `${chapter.title}\n${chapter.outline}\n${chapter.content.slice(0, 4_000)}`,
+      chapter.number,
+      40,
+    );
+    const candidates = await ai.extractChapterFacts(
+      { ...project, facts: relevantFacts },
+      chapter,
+    );
     const existing = new Set(project.facts.map((fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`));
     const saved = [];
     for (const fact of candidates) {
