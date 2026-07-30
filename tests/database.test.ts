@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,6 +28,19 @@ afterEach(() => {
 });
 
 describe("per-book isolation and gates", () => {
+  it("moves a title-confirmed project to the recoverable trash directory", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "待移除作品", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    database.saveChapter(project.id, createChapter(1));
+    expect(() => database.deleteProject(project.id, "错误书名")).toThrow("书名");
+    expect(database.listProjects().some((item) => item.id === project.id)).toBe(true);
+    const destination = database.deleteProject(project.id, project.title);
+    expect(database.listProjects().some((item) => item.id === project.id)).toBe(false);
+    expect(existsSync(destination)).toBe(true);
+    expect(readdirSync(destination)).toContain("project.sqlite");
+    expect(existsSync(path.join(database.projectsRoot, project.id))).toBe(false);
+  });
+
   it("persists chapter intent and synchronizes the cross-chapter expectation ledger", () => {
     const database = createDatabase();
     const project = database.createProject({ title: "期待账本", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });

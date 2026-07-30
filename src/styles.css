@@ -532,6 +532,12 @@ p {
 .project-row:hover {
   background: #fbfbf8;
 }
+.project-row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.project-row-actions .icon-button { opacity: 0; }
+.project-row:hover .project-row-actions .icon-button, .project-row:focus-within .project-row-actions .icon-button { opacity: 1; }
+.delete-project-warning { display: flex; gap: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line)); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); border-radius: 6px; }
+.delete-project-warning svg { flex: 0 0 auto; color: var(--danger); }
+.delete-project-warning p { margin: 5px 0 0; color: var(--muted); line-height: 1.6; }
 .book-cell {
   display: flex;
   align-items: center;

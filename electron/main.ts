@@ -491,6 +491,11 @@ function registerHandlers() {
   handle("getDashboard", () => getDashboard());
   handle("listProjects", () => database.listProjects());
   handle("createProject", (input) => database.createProject(input));
+  handle("deleteProject", (id, confirmationTitle) => {
+    if (activeGenerationProjects.has(id))
+      throw new Error("该作品仍有正文生成任务运行，暂时不能删除");
+    return database.deleteProject(id, confirmationTitle);
+  });
   handle("getProject", (id) => database.getProject(id));
   handle("updateProject", (id, patch) => database.updateProject(id, patch));
   handle("saveContract", (id, contract) => database.saveContract(id, contract));

@@ -454,6 +454,7 @@ export interface AppApi {
   getDashboard(): Promise<DashboardData>;
   listProjects(): Promise<ProjectSummary[]>;
   createProject(input: CreateProjectInput): Promise<ProjectSummary>;
+  deleteProject(id: string, confirmationTitle: string): Promise<string>;
   getProject(id: string): Promise<ProjectDetail>;
   updateProject(id: string, patch: ProjectPatch): Promise<ProjectSummary>;
   saveContract(id: string, contract: StoryContract): Promise<StoryContract>;

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
@@ -65,6 +65,7 @@ export class WorkspaceDatabase {
   readonly projectsRoot: string;
   readonly researchRoot: string;
   readonly backupRoot: string;
+  readonly trashRoot: string;
   private readonly catalog: DatabaseSync;
   private readonly research: DatabaseSync;
   private readonly projectDbs = new Map<string, DatabaseSync>();
@@ -74,11 +75,13 @@ export class WorkspaceDatabase {
     this.projectsRoot = path.join(root, "projects");
     this.researchRoot = path.join(root, "research");
     this.backupRoot = path.join(root, "backups");
+    this.trashRoot = path.join(root, "trash");
     for (const directory of [
       root,
       this.projectsRoot,
       this.researchRoot,
       this.backupRoot,
+      this.trashRoot,
     ])
       mkdirSync(directory, { recursive: true });
     this.catalog = openDatabase(path.join(root, "catalog.sqlite"));
@@ -252,6 +255,41 @@ export class WorkspaceDatabase {
       )
       .all() as unknown as CatalogRow[];
     return rows.map((row) => this.hydrateSummary(row));
+  }
+
+  deleteProject(id: string, confirmationTitle: string) {
+    const row = this.catalog
+      .prepare("SELECT * FROM projects WHERE id = ?")
+      .get(id) as unknown as CatalogRow | undefined;
+    if (!row) throw new Error("作品不存在或已经删除");
+    if (confirmationTitle.trim() !== row.title)
+      throw new Error("输入的书名与作品名不一致");
+    const open = this.projectDbs.get(id);
+    if (open) {
+      open.close();
+      this.projectDbs.delete(id);
+    }
+    const source = path.resolve(this.projectsRoot, id);
+    const destination = path.resolve(
+      this.trashRoot,
+      `${id}-${Date.now()}`,
+    );
+    if (!source.startsWith(`${path.resolve(this.projectsRoot)}${path.sep}`))
+      throw new Error("作品目录校验失败");
+    if (!destination.startsWith(`${path.resolve(this.trashRoot)}${path.sep}`))
+      throw new Error("回收站目录校验失败");
+    renameSync(source, destination);
+    try {
+      this.catalog.exec("BEGIN IMMEDIATE");
+      this.catalog.prepare("DELETE FROM ai_jobs WHERE project_id = ?").run(id);
+      this.catalog.prepare("DELETE FROM projects WHERE id = ?").run(id);
+      this.catalog.exec("COMMIT");
+    } catch (error) {
+      try { this.catalog.exec("ROLLBACK"); } catch { /* no active transaction */ }
+      renameSync(destination, source);
+      throw error;
+    }
+    return destination;
   }
 
   getProjectSummary(id: string): ProjectSummary {

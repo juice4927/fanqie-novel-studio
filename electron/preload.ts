@@ -7,6 +7,7 @@ const api: AppApi = {
   getDashboard: () => invoke("getDashboard"),
   listProjects: () => invoke("listProjects"),
   createProject: (input) => invoke("createProject", input),
+  deleteProject: (id, confirmationTitle) => invoke("deleteProject", id, confirmationTitle),
   getProject: (id) => invoke("getProject", id),
   updateProject: (id, patch) => invoke("updateProject", id, patch),
   saveContract: (id, contract) => invoke("saveContract", id, contract),
