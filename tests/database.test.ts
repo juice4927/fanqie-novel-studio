@@ -34,8 +34,10 @@ describe("per-book isolation and gates", () => {
     database.saveChapter(project.id, createChapter(1));
     expect(() => database.deleteProject(project.id, "错误书名")).toThrow("书名");
     expect(database.listProjects().some((item) => item.id === project.id)).toBe(true);
-    const destination = database.deleteProject(project.id, project.title);
+    const result = database.deleteProject(project.id, project.title);
     expect(database.listProjects().some((item) => item.id === project.id)).toBe(false);
+    expect(result).toContain("回收目录");
+    const destination = path.join(database.trashRoot, readdirSync(database.trashRoot)[0]);
     expect(existsSync(destination)).toBe(true);
     expect(readdirSync(destination)).toContain("project.sqlite");
     expect(existsSync(path.join(database.projectsRoot, project.id))).toBe(false);

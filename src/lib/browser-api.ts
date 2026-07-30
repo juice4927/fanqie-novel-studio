@@ -456,7 +456,7 @@ export function createBrowserApi(): AppApi {
         throw new Error("输入的书名与作品名不一致");
       state.projects = state.projects.filter((item) => item.summary.id !== projectId);
       persist();
-      return "浏览器预览数据已从 localStorage 移除";
+      return "浏览器预览作品已从 localStorage 移除";
     },
     async getProject(projectId) {
       return structuredClone(getProject(state, projectId));

@@ -41,6 +41,15 @@ let ai: AiService;
 let apiCredential = "";
 const activeGenerationProjects = new Set<string>();
 let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) app.quit();
+else app.on("second-instance", () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
 
 async function runRankingSchedule(id: string) {
   const schedule = database.listRankingSchedules().find((item) => item.id === id);
@@ -946,7 +955,7 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(async () => {
+if (hasSingleInstanceLock) app.whenReady().then(async () => {
   const workspaceRoot =
     process.env.NOVEL_STUDIO_WORKSPACE ||
     path.join(app.getPath("documents"), "长篇创作工作台数据");

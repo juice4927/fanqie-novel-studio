@@ -278,18 +278,28 @@ export class WorkspaceDatabase {
       throw new Error("作品目录校验失败");
     if (!destination.startsWith(`${path.resolve(this.trashRoot)}${path.sep}`))
       throw new Error("回收站目录校验失败");
-    renameSync(source, destination);
+    let moved = false;
+    try {
+      renameSync(source, destination);
+      moved = true;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      if (!["EBUSY", "EPERM", "EACCES"].includes(code)) throw error;
+    }
     try {
       this.catalog.exec("BEGIN IMMEDIATE");
       this.catalog.prepare("DELETE FROM ai_jobs WHERE project_id = ?").run(id);
-      this.catalog.prepare("DELETE FROM projects WHERE id = ?").run(id);
+      if (moved) this.catalog.prepare("DELETE FROM projects WHERE id = ?").run(id);
+      else this.catalog.prepare("UPDATE projects SET status = '归档', updated_at = ? WHERE id = ?").run(now(), id);
       this.catalog.exec("COMMIT");
     } catch (error) {
       try { this.catalog.exec("ROLLBACK"); } catch { /* no active transaction */ }
-      renameSync(destination, source);
+      if (moved) renameSync(destination, source);
       throw error;
     }
-    return destination;
+    return moved
+      ? `作品已移入回收目录：${destination}`
+      : "作品已从工作台移除；项目文件正被另一个工作台窗口占用，已原地归档，关闭其他窗口后仍可人工恢复或移动。";
   }
 
   getProjectSummary(id: string): ProjectSummary {
