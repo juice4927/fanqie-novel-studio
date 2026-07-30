@@ -13,6 +13,8 @@ import type {
   MarketOpportunity,
   PlanningGenerationInput,
   PlanningGenerationResult,
+  PlanningReviewInput,
+  PlanningReviewResult,
   ProjectDetail,
   QualityIssue,
   ResearchAnalysisRecord,
@@ -252,6 +254,34 @@ const ChapterPlanningSchema = z.object({
   for (const [name, actual, minimum] of dimensions) {
     if (actual < minimum) context.addIssue({ code: "custom", message: `${name}变化不足，至少需要 ${minimum} 种` });
   }
+});
+
+const PlanningReviewSchema = z.object({
+  summary: z.string().min(10).max(1000),
+  verdict: z.enum(["可执行", "建议修复", "存在硬伤"]),
+  issues: z.array(z.object({
+    severity: z.enum(["硬性", "警告", "建议"]),
+    category: z.enum(["因果", "人物动机", "设定", "结构覆盖", "章节承接", "节奏重复", "期待兑现", "篇幅"]),
+    targetType: z.enum(["规划", "章节", "全局"]), targetId: z.string().nullable(),
+    location: z.string().min(1).max(120), message: z.string().min(4).max(500),
+    evidence: z.string().min(2).max(500), repairSummary: z.string().min(4).max(500),
+  })).max(40),
+  planRepairs: z.array(z.object({
+    targetId: z.string(), after: z.object({
+      title: z.string().min(1).max(80), goal: z.string().min(4).max(500),
+      conflict: z.string().min(4).max(500), outcome: z.string().min(4).max(500),
+      targetWords: z.number().int().positive(),
+    }),
+  })).max(200),
+  chapterRepairs: z.array(z.object({
+    targetId: z.string(), after: z.object({
+      title: z.string().min(1).max(80), outline: z.string().min(4).max(1000),
+      chapterFunction: z.enum(CHAPTER_FUNCTIONS).optional(), targetWords: z.number().int().min(800).max(5000).optional(),
+      chapterPromise: z.string().max(500).optional(), expectedPayoff: z.string().max(500).optional(),
+      crisis: z.string().max(500).optional(), endingExpectation: z.string().max(500).optional(),
+      expectationTargetChapter: z.number().int().positive().nullable().optional(),
+    }),
+  })).max(100),
 });
 
 type InsightResult = z.infer<typeof InsightSchema>;
@@ -782,6 +812,61 @@ export class AiService {
       startChapter,
       plans: batches.flatMap((batch) => batch.plans),
       chapters: batches.flatMap((batch) => batch.chapters),
+    };
+  }
+
+  async reviewPlanning(project: ProjectDetail, input: PlanningReviewInput): Promise<PlanningReviewResult> {
+    if (!project.contract.approved) throw new Error("必须先审批创作契约");
+    const toChapter = input.fromChapter + input.chapterCount - 1;
+    const structuralPlans = project.plans.filter((plan) => plan.kind === "宏观阶段" || plan.kind === "分卷");
+    const scopedPlans = project.plans.filter((plan) =>
+      !structuralPlans.includes(plan) && plan.ordinal >= input.fromChapter && plan.ordinal <= toChapter,
+    );
+    const reviewedPlans = [...structuralPlans, ...scopedPlans];
+    const reviewedChapters = project.chapters.filter((chapter) => chapter.number >= input.fromChapter && chapter.number <= toChapter);
+    if (!reviewedPlans.length && !reviewedChapters.length) throw new Error("当前范围没有可审核的规划或章纲");
+    const result = await this.runJson({
+      projectId: project.summary.id,
+      taskType: "review-planning-logic",
+      inputSummary: `审核第${input.fromChapter}-${toChapter}章规划逻辑`,
+      system: [
+        "你是中文长篇小说的规划审稿总编。审核规划能否在不依赖作者脑补的情况下连续执行，并给出最小必要修复。",
+        "逐项检查：宏观阶段与分卷是否覆盖契约；上下级目标是否一致；事件是否有原因、行动、反作用与结果；人物行动是否符合欲望和已知信息；设定与事实是否冲突；相邻章节是否重复同一功能和解法；期待是否有兑现位置；场景与篇幅是否匹配。",
+        "关系、调查、氛围和过渡章不要求强冲突或即时胜利，但必须有可识别的认知、关系、证据、情绪或环境推进。不得用商业节奏名义把所有章节改成同一种结构。",
+        "只依据输入指出问题。evidence 必须引用输入中的具体文字或编号，禁止编造缺失设定。没有证据的问题不要输出。",
+        "修复必须保留 targetId，只改真正有问题的字段；不得改变核心契约、擅自新增关键设定或重写本来合理的节点。对全局问题可以只给 issue，不得伪造 targetId。",
+      ].join("\n"),
+      user: `审核范围：第${input.fromChapter}-${toChapter}章\n创作契约：${JSON.stringify(project.contract)}\n规划节点：${JSON.stringify(reviewedPlans)}\n章节章纲：${JSON.stringify(reviewedChapters.map((chapter) => ({ id: chapter.id, number: chapter.number, title: chapter.title, outline: chapter.outline, chapterFunction: chapter.chapterFunction, targetWords: chapter.targetWords, chapterPromise: chapter.chapterPromise, expectedPayoff: chapter.expectedPayoff, crisis: chapter.crisis, endingExpectation: chapter.endingExpectation, expectationTargetChapter: chapter.expectationTargetChapter, status: chapter.status })))}\n已确认事实：${JSON.stringify(project.facts.slice(-100))}\n期待账本：${JSON.stringify(project.expectations.filter((item) => item.status === "待兑现" || item.status === "部分兑现" || (item.sourceChapter >= input.fromChapter && item.sourceChapter <= toChapter)).slice(0, 100))}\n输出 summary、verdict、issues、planRepairs、chapterRepairs。修复对象必须来自输入 ID；每个 after 提供该对象修复后的完整可编辑字段。`,
+      schema: PlanningReviewSchema,
+      longTask: true,
+      stream: true,
+      reasoningEffort: "medium",
+    });
+    const plansById = new Map(reviewedPlans.map((plan) => [plan.id, plan]));
+    const chaptersById = new Map(reviewedChapters.map((chapter) => [chapter.id, chapter]));
+    const validTargetIds = new Set([...plansById.keys(), ...chaptersById.keys()]);
+    const evidenceSource = JSON.stringify({ contract: project.contract, plans: reviewedPlans, chapters: reviewedChapters, facts: project.facts, expectations: project.expectations }).replace(/\s+/g, "");
+    const reviewedIssues = result.issues
+      .filter((issue) => issue.targetType === "全局" || (issue.targetId !== null && validTargetIds.has(issue.targetId)))
+      .map((issue) => {
+        const supported = issue.evidence.trim().length >= 4 && evidenceSource.includes(issue.evidence.replace(/\s+/g, ""));
+        return { issue: { ...issue, severity: issue.severity === "硬性" && !supported ? "警告" as const : issue.severity }, supported };
+      });
+    const repairableTargetIds = new Set(reviewedIssues.filter((item) => item.supported && item.issue.targetId).map((item) => item.issue.targetId!));
+    const planRepairs = [...new Map(result.planRepairs.filter((repair) => plansById.has(repair.targetId) && repairableTargetIds.has(repair.targetId)).map((repair) => [repair.targetId, repair])).values()]
+      .map((repair) => ({ ...repair, blockedReason: plansById.get(repair.targetId)!.status === "已批准" ? "规划已批准，需先建立并批准改纲变更单" : null }));
+    const protectedStatuses = new Set(["已定稿", "待发布", "已发布"]);
+    const chapterRepairs = [...new Map(result.chapterRepairs.filter((repair) => chaptersById.has(repair.targetId) && repairableTargetIds.has(repair.targetId)).map((repair) => [repair.targetId, repair])).values()]
+      .map((repair) => ({ ...repair, blockedReason: protectedStatuses.has(chaptersById.get(repair.targetId)!.status) ? "章节已定稿或进入发布流程，需先建立并批准章节变更单" : null }));
+    const issues = reviewedIssues.map((item) => item.issue);
+    return {
+      summary: result.summary,
+      verdict: result.verdict,
+      issues,
+      planRepairs,
+      chapterRepairs,
+      reviewedPlanCount: reviewedPlans.length,
+      reviewedChapterCount: reviewedChapters.length,
     };
   }
 

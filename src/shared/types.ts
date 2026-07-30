@@ -584,6 +584,54 @@ export interface PlanningGenerationResult {
   startChapter: number;
 }
 
+export interface PlanningReviewInput {
+  fromChapter: number;
+  chapterCount: 10 | 30;
+}
+
+export interface PlanningReviewIssue {
+  severity: "硬性" | "警告" | "建议";
+  category: "因果" | "人物动机" | "设定" | "结构覆盖" | "章节承接" | "节奏重复" | "期待兑现" | "篇幅";
+  targetType: "规划" | "章节" | "全局";
+  targetId: string | null;
+  location: string;
+  message: string;
+  evidence: string;
+  repairSummary: string;
+}
+
+export interface PlanningPlanRepair {
+  targetId: string;
+  after: Pick<PlanNode, "title" | "goal" | "conflict" | "outcome" | "targetWords">;
+  blockedReason: string | null;
+}
+
+export interface PlanningChapterRepair {
+  targetId: string;
+  after: Pick<Chapter, "title" | "outline" | "chapterFunction" | "targetWords" | "chapterPromise" | "expectedPayoff" | "crisis" | "endingExpectation" | "expectationTargetChapter">;
+  blockedReason: string | null;
+}
+
+export interface PlanningReviewResult {
+  summary: string;
+  verdict: "可执行" | "建议修复" | "存在硬伤";
+  issues: PlanningReviewIssue[];
+  planRepairs: PlanningPlanRepair[];
+  chapterRepairs: PlanningChapterRepair[];
+  reviewedPlanCount: number;
+  reviewedChapterCount: number;
+}
+
+export interface PlanningRepairInput {
+  plans: Array<{ targetId: string; after: PlanningPlanRepair["after"] }>;
+  chapters: Array<{ targetId: string; after: PlanningChapterRepair["after"] }>;
+}
+
+export interface PlanningRepairResult {
+  appliedPlanIds: string[];
+  appliedChapterIds: string[];
+}
+
 export interface SearchHit {
   id: string;
   type: "章节" | "规划" | "事实";
@@ -667,6 +715,8 @@ export interface AppApi {
   savePlan(id: string, plan: PlanNode): Promise<PlanNode>;
   approvePlan(id: string, planId: string): Promise<void>;
   generatePlanningDraft(id: string, input: PlanningGenerationInput): Promise<PlanningGenerationResult>;
+  reviewPlanning(id: string, input: PlanningReviewInput): Promise<PlanningReviewResult>;
+  applyPlanningRepairs(id: string, input: PlanningRepairInput): Promise<PlanningRepairResult>;
   saveChapter(id: string, chapter: Chapter, mode?: ChapterSaveMode): Promise<Chapter>;
   saveExpectation(
     id: string,

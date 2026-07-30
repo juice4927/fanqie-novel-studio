@@ -199,6 +199,15 @@ const schemas: Partial<Record<keyof AppApi, z.ZodType<unknown[]>>> = {
   suggestAestheticProfile: z.tuple([id, contract]),
   savePlan: z.tuple([id, plan]),
   generatePlanningDraft: z.tuple([id, z.object({ mode: z.enum(["全书结构", "后续章纲"]), fromChapter: positiveInt.optional(), chapterCount: z.union([z.literal(10), z.literal(30)]).optional() }).strict()]),
+  reviewPlanning: z.tuple([id, z.object({ fromChapter: positiveInt, chapterCount: z.union([z.literal(10), z.literal(30)]) }).strict()]),
+  applyPlanningRepairs: z.tuple([id, z.object({
+    plans: z.array(z.object({ targetId: id, after: z.object({ title: shortText, goal: mediumText, conflict: mediumText, outcome: mediumText, targetWords: positiveInt }).strict() }).strict()).max(500),
+    chapters: z.array(z.object({ targetId: id, after: z.object({
+      title: shortText, outline: mediumText, chapterFunction: z.enum(CHAPTER_FUNCTIONS).optional(), targetWords: z.number().int().min(800).max(5000).optional(),
+      chapterPromise: mediumText.optional(), expectedPayoff: mediumText.optional(), crisis: mediumText.optional(), endingExpectation: mediumText.optional(),
+      expectationTargetChapter: positiveInt.nullable().optional(),
+    }).strict() }).strict()).max(100),
+  }).strict()]),
   saveChapter: z.tuple([id, chapter, z.enum(["version", "autosave"]).optional()]),
   saveExpectation: z.tuple([id, expectation]),
   transitionChapter: z.tuple([id, id, z.enum(["章纲", "草稿", "待质检", "待定稿", "已定稿", "待发布", "已发布"])]),

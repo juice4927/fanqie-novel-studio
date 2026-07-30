@@ -475,4 +475,33 @@ describe("AI planning", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ batchGoal: "建立首个可以持续运转的生产小组", batchConflict: "原料渠道与家庭阻力同时升级并形成选择", batchOutcome: "获得稳定订单并建立明确的合作规则", chapters: [one] }) } }] }), { status: 200 })));
     await expect(new AiService(planningDatabase(), () => "secret").generatePlanning(planningProject, { mode: "后续章纲", fromChapter: 6, chapterCount: 10 })).rejects.toThrow("预期 10 章");
   });
+
+  it("reviews planning with evidence and blocks protected repair targets", async () => {
+    const approvedPlan = { id: "plan-approved", kind: "宏观阶段", title: "旧城封锁", ordinal: 1, goal: "查清封锁原因", conflict: "资源持续减少", outcome: "找到离城路线", targetWords: 100000, status: "已批准", parentId: null } as const;
+    const draftPlan = { ...approvedPlan, id: "plan-draft", kind: "细纲" as const, title: "检查旧站", ordinal: 3, status: "草稿" as const };
+    const protectedChapter = { id: "chapter-final", number: 3, title: "旧站", outline: "直接找到出口", content: "已定稿正文", wordCount: 5, status: "已定稿", batchMode: "逐章", isKeyChapter: false, revision: 2, updatedAt: new Date().toISOString() } as const;
+    const project = { ...planningProject, plans: [approvedPlan, draftPlan], chapters: [protectedChapter], facts: [], expectations: [] } as unknown as ProjectDetail;
+    const response = {
+      summary: "第三章缺少从检查旧站到找到出口的因果步骤，需要补充证据获取过程。", verdict: "存在硬伤",
+      issues: [
+        { severity: "硬性", category: "因果", targetType: "章节", targetId: "chapter-final", location: "第3章", message: "结果缺少行动依据", evidence: "直接找到出口", repairSummary: "增加检查记录与验证路线" },
+        { severity: "警告", category: "结构覆盖", targetType: "规划", targetId: "plan-approved", location: "旧城封锁", message: "阶段结果跳过验证", evidence: "找到离城路线", repairSummary: "把结果改为待验证路线" },
+        { severity: "警告", category: "因果", targetType: "规划", targetId: "plan-draft", location: "检查旧站", message: "目标与结果之间缺少核对过程", evidence: "检查旧站", repairSummary: "增加记录核对步骤" },
+        { severity: "建议", category: "设定", targetType: "规划", targetId: "forged", location: "伪造节点", message: "不应保留", evidence: "虚构证据", repairSummary: "无需处理该项" },
+      ],
+      planRepairs: [
+        { targetId: "plan-approved", after: { title: "旧城封锁", goal: "通过旧站记录查清封锁原因", conflict: "资源减少且记录残缺", outcome: "确认一条待验证路线", targetWords: 100000 } },
+        { targetId: "plan-draft", after: { title: "核对旧站记录", goal: "取得并核对路线记录", conflict: "记录缺页且时间有限", outcome: "得到可验证的出口坐标", targetWords: 2400 } },
+        { targetId: "forged", after: { title: "伪造", goal: "伪造目标", conflict: "伪造冲突", outcome: "伪造结果", targetWords: 1000 } },
+      ],
+      chapterRepairs: [{ targetId: "chapter-final", after: { title: "旧站记录", outline: "先取得维修记录，再交叉验证出口坐标", chapterFunction: "调查", targetWords: 2200, chapterPromise: "确认路线真实性", expectedPayoff: "获得可信坐标", crisis: "封锁即将收紧", endingExpectation: "坐标指向禁区", expectationTargetChapter: 5 } }],
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(response) } }] }), { status: 200 })));
+    const result = await new AiService(planningDatabase(), () => "secret").reviewPlanning(project, { fromChapter: 1, chapterCount: 10 });
+    expect(result.issues).toHaveLength(3);
+    expect(result.planRepairs.map((item) => item.targetId)).toEqual(["plan-approved", "plan-draft"]);
+    expect(result.planRepairs[0].blockedReason).toContain("已批准");
+    expect(result.planRepairs[1].blockedReason).toBeNull();
+    expect(result.chapterRepairs[0].blockedReason).toContain("已定稿");
+  });
 });

@@ -69,6 +69,12 @@ test("navigates through research and the complete project workflow", async ({
       ),
       fullPage: true,
     });
+  await page.getByRole("button", { name: /规划台/ }).click();
+  await page.getByRole("button", { name: "AI 审核与修复" }).click();
+  await expect(page.getByRole("dialog", { name: "AI 审核规划合理性" })).toBeVisible();
+  await expect(page.getByText("AI 只生成带证据的修复提案，不会直接覆盖规划。")).toBeVisible();
+  await expect(page.getByLabel("审核章数")).toHaveValue("30");
+  await page.getByRole("dialog", { name: "AI 审核规划合理性" }).locator(".modal-actions").getByRole("button", { name: "关闭" }).click();
   await page.getByRole("button", { name: /写作台/ }).click();
   await expect(page.getByPlaceholder("检索正文")).toBeVisible();
   await expect(page.getByText("本章承诺", { exact: true })).toBeVisible();

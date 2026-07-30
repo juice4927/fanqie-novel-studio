@@ -847,6 +847,28 @@ p {
 .pending-facts-list .inline-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .planning-ai-summary { padding: 14px; border: 1px solid var(--line); background: var(--surface-muted); border-radius: 6px; }
 .planning-ai-summary p { margin: 6px 0 0; color: var(--muted); line-height: 1.6; }
+.planning-review-empty { display: grid; justify-items: center; gap: 8px; padding: 28px 16px; border: 1px dashed var(--line-strong); color: var(--muted); text-align: center; }
+.planning-review-empty strong { color: var(--text); }
+.planning-review-empty p { margin: 0; }
+.planning-review-summary { display: grid; gap: 8px; padding: 14px; border-left: 3px solid var(--teal); background: var(--surface-muted); }
+.planning-review-summary > span { display: flex; align-items: center; gap: 10px; }
+.planning-review-summary p { margin: 0; line-height: 1.65; }
+.planning-review-summary small { color: var(--muted); }
+.planning-review-issues { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
+.planning-review-issues article { display: grid; gap: 7px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.planning-review-issues header { display: flex; align-items: center; gap: 8px; }
+.planning-review-issues p, .planning-review-issues blockquote { margin: 0; line-height: 1.6; }
+.planning-review-issues blockquote { padding-left: 10px; border-left: 2px solid var(--line-strong); color: var(--muted); }
+.planning-review-issues small { color: var(--teal-strong); }
+.planning-repair-summary { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid var(--line); background: var(--surface-soft); }
+.planning-repair-summary small { color: var(--warning-text); }
+.planning-repair-preview { display: grid; gap: 6px; margin-top: 5px; }
+.planning-repair-preview details { padding: 9px 11px; border-top: 1px solid var(--line); background: var(--surface); }
+.planning-repair-preview summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; font-weight: 650; }
+.planning-repair-preview dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 10px 0 4px; }
+.planning-repair-preview dl > div { min-width: 0; }
+.planning-repair-preview dt { color: var(--muted); font-size: 11px; }
+.planning-repair-preview dd { margin: 3px 0 0; overflow-wrap: anywhere; line-height: 1.55; }
 .rank-number {
   color: var(--accent);
   font-size: 15px;
@@ -3106,6 +3128,9 @@ p {
     padding: 0 10px;
   }
   .plan-level {
+    grid-template-columns: 1fr;
+  }
+  .planning-repair-preview dl {
     grid-template-columns: 1fr;
   }
   .plan-level-title {

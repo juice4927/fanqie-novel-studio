@@ -604,6 +604,12 @@ export function createBrowserApi(): AppApi {
     async generatePlanningDraft() {
       throw new Error("AI 规划生成需要在桌面版配置模型后使用");
     },
+    async reviewPlanning() {
+      throw new Error("AI 规划审核需要在桌面版配置模型后使用");
+    },
+    async applyPlanningRepairs() {
+      throw new Error("AI 规划修复需要在桌面版使用");
+    },
     async saveChapter(projectId, chapter: Chapter, mode = "version") {
       const project = getProject(state, projectId);
       const existing = project.chapters.findIndex(

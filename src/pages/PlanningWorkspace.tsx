@@ -40,6 +40,8 @@ import type {
   LedgerKind,
   PlanNode,
   PlanningGenerationInput,
+  PlanningReviewInput,
+  PlanningReviewResult,
   ProjectDetail,
   ProjectStatus,
   ScheduleItem,
@@ -88,6 +90,10 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
   const [modal, setModal] = useState(false);
   const [aiModal, setAiModal] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  const [reviewModal, setReviewModal] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewInput, setReviewInput] = useState<PlanningReviewInput>({ fromChapter: project.chapters[0]?.number ?? 1, chapterCount: 30 });
+  const [planningReview, setPlanningReview] = useState<PlanningReviewResult | null>(null);
   const [aiInput, setAiInput] = useState<PlanningGenerationInput>({ mode: project.plans.some((plan) => plan.kind === "宏观阶段" || plan.kind === "分卷") ? "后续章纲" : "全书结构", fromChapter: Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1)), chapterCount: 10 });
   const [kind, setKind] = useState<PlanNode["kind"]>("宏观阶段");
   const [draft, setDraft] = useState<PlanNode>({
@@ -133,6 +139,7 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
           <p>远期只定目标，未来 30 章粗纲、5 章细纲和当前场景卡逐级收敛。</p>
         </div>
         <div className="heading-actions">
+          <Button variant="secondary" icon={<SearchCheck size={16} />} disabled={!project.contract.approved || (!project.plans.length && !project.chapters.length)} onClick={() => { setPlanningReview(null); setReviewModal(true); }}>AI 审核与修复</Button>
           <Button variant="secondary" icon={<Sparkles size={16} />} disabled={!project.contract.approved} onClick={() => setAiModal(true)}>AI 生成规划</Button>
           <Button icon={<Plus size={16} />} onClick={() => open("宏观阶段")}>新建规划节点</Button>
         </div>
@@ -377,6 +384,79 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
                 }
                 finally { setAiBusy(false); }
               }}>{aiBusy ? "生成中" : "生成草稿"}</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {reviewModal && (
+        <Modal title="AI 审核规划合理性" onClose={() => !reviewBusy && setReviewModal(false)} width={900}>
+          <div className="form-stack planning-review-modal">
+            <div className="form-grid two">
+              <Field label="起始章节" hint="宏观阶段和分卷始终一并审核">
+                <Input type="number" min={1} disabled={reviewBusy} value={reviewInput.fromChapter} onChange={(event) => { setReviewInput({ ...reviewInput, fromChapter: Math.max(1, Number(event.target.value)) }); setPlanningReview(null); }} />
+              </Field>
+              <Field label="审核章数">
+                <Select disabled={reviewBusy} value={reviewInput.chapterCount} onChange={(event) => { setReviewInput({ ...reviewInput, chapterCount: Number(event.target.value) as 10 | 30 }); setPlanningReview(null); }}><option value={10}>10 章</option><option value={30}>30 章</option></Select>
+              </Field>
+            </div>
+            {!planningReview ? (
+              <div className="planning-review-empty">
+                <SearchCheck size={24} />
+                <strong>检查因果、人物动机、设定、承接、重复与期待兑现</strong>
+                <p>AI 只生成带证据的修复提案，不会直接覆盖规划。</p>
+              </div>
+            ) : (
+              <>
+                <div className="planning-review-summary" aria-live="polite">
+                  <span><Badge tone={planningReview.verdict === "存在硬伤" ? "danger" : planningReview.verdict === "建议修复" ? "warning" : "success"}>{planningReview.verdict}</Badge><strong>{planningReview.issues.length} 项问题</strong></span>
+                  <small>已审核 {planningReview.reviewedPlanCount} 个规划节点、{planningReview.reviewedChapterCount} 个章纲</small>
+                  <p>{planningReview.summary}</p>
+                </div>
+                <div className="planning-review-issues">
+                  {planningReview.issues.map((issue, index) => (
+                    <article key={`${issue.targetId ?? "global"}-${index}`}>
+                      <header><Badge tone={issueTone(issue.severity)}>{issue.severity}</Badge><strong>{issue.category} · {issue.location}</strong></header>
+                      <p>{issue.message}</p>
+                      <blockquote>{issue.evidence}</blockquote>
+                      <small>修复：{issue.repairSummary}</small>
+                    </article>
+                  ))}
+                  {!planningReview.issues.length && <p className="muted-line">当前范围没有发现有证据支持的逻辑问题。</p>}
+                </div>
+                {(planningReview.planRepairs.length > 0 || planningReview.chapterRepairs.length > 0) && (
+                  <div className="planning-repair-summary">
+                    <strong>修复提案</strong>
+                    <span>{planningReview.planRepairs.filter((item) => !item.blockedReason).length} 个规划节点 · {planningReview.chapterRepairs.filter((item) => !item.blockedReason).length} 个章纲可直接修复</span>
+                    <div className="planning-repair-preview">
+                      {planningReview.planRepairs.map((repair) => <details key={repair.targetId}><summary><span>规划 · {repair.after.title}</span>{repair.blockedReason && <Badge tone="warning">受保护</Badge>}</summary><dl><div><dt>目标</dt><dd>{repair.after.goal}</dd></div><div><dt>冲突</dt><dd>{repair.after.conflict}</dd></div><div><dt>结果</dt><dd>{repair.after.outcome}</dd></div><div><dt>字数</dt><dd>{formatCount(repair.after.targetWords)}</dd></div></dl>{repair.blockedReason && <small>{repair.blockedReason}</small>}</details>)}
+                      {planningReview.chapterRepairs.map((repair) => <details key={repair.targetId}><summary><span>章纲 · {repair.after.title}</span>{repair.blockedReason && <Badge tone="warning">受保护</Badge>}</summary><dl><div><dt>章纲</dt><dd>{repair.after.outline}</dd></div><div><dt>功能</dt><dd>{repair.after.chapterFunction ?? "保持原值"}</dd></div><div><dt>回报</dt><dd>{repair.after.expectedPayoff || "保持原值"}</dd></div><div><dt>结尾期待</dt><dd>{repair.after.endingExpectation || "保持原值"}</dd></div></dl>{repair.blockedReason && <small>{repair.blockedReason}</small>}</details>)}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            <div className="modal-actions">
+              <Button variant="secondary" disabled={reviewBusy} onClick={() => setReviewModal(false)}>关闭</Button>
+              <Button variant="secondary" disabled={reviewBusy} icon={reviewBusy ? <LoaderCircle className="spin" size={16} /> : <SearchCheck size={16} />} onClick={async () => {
+                setReviewBusy(true);
+                try { setPlanningReview(await api.reviewPlanning(project.summary.id, reviewInput)); }
+                catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
+                finally { setReviewBusy(false); }
+              }}>{reviewBusy ? "审核中" : planningReview ? "重新审核" : "开始审核"}</Button>
+              {planningReview && (
+                <Button disabled={reviewBusy || (![...planningReview.planRepairs, ...planningReview.chapterRepairs].some((item) => !item.blockedReason))} icon={<Check size={16} />} onClick={async () => {
+                  setReviewBusy(true);
+                  try {
+                    const result = await api.applyPlanningRepairs(project.summary.id, {
+                      plans: planningReview.planRepairs.filter((item) => !item.blockedReason).map(({ targetId, after }) => ({ targetId, after })),
+                      chapters: planningReview.chapterRepairs.filter((item) => !item.blockedReason).map(({ targetId, after }) => ({ targetId, after })),
+                    });
+                    await reload(); setReviewModal(false);
+                    notify(`已应用 ${result.appliedPlanIds.length} 个规划节点和 ${result.appliedChapterIds.length} 个章纲修复，请复核后审批`);
+                  } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
+                  finally { setReviewBusy(false); }
+                }}>确认应用修复</Button>
+              )}
             </div>
           </div>
         </Modal>

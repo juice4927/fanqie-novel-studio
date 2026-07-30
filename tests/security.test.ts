@@ -98,6 +98,8 @@ describe("IPC runtime validation", () => {
     expect(validateIpcArgs("saveContract", ["project", contract])).toEqual(["project", contract]);
     expect(validateIpcArgs("suggestAestheticProfile", ["project", contract])).toEqual(["project", contract]);
     expect(() => validateIpcArgs("suggestAestheticProfile", ["project"])).toThrow("参数无效");
+    expect(validateIpcArgs("reviewPlanning", ["project", { fromChapter: 1, chapterCount: 30 }])).toEqual(["project", { fromChapter: 1, chapterCount: 30 }]);
+    expect(validateIpcArgs("applyPlanningRepairs", ["project", { plans: [], chapters: [] }])).toEqual(["project", { plans: [], chapters: [] }]);
     expect(() => validateIpcArgs("saveContract", ["project", {
       ...contract,
       aestheticProfile: { ...contract.aestheticProfile, emotionalTemperature: "统一模板" },

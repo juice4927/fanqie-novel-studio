@@ -34,17 +34,28 @@ test("starts the production Electron app and persists through the preload API", 
       for (let number = 1; number <= 5; number += 1) {
         await api.saveChapter(project.id, { id: "", number, title: `批次第${number}章`, outline: `目标：完成第${number}步；冲突：资源有限；结果：线索推进`, content: "", wordCount: 0, status: "章纲", batchMode: "五章批次", isKeyChapter: false, revision: 0, updatedAt: new Date().toISOString() });
       }
+      const plan = await api.savePlan(project.id, { id: "", kind: "细纲", title: "旧章纲", ordinal: 1, goal: "直接获得线索", conflict: "没有阻碍", outcome: "找到答案", targetWords: 2300, status: "草稿", parentId: null });
       const first = (await api.getProject(project.id)).chapters[0];
+      const repaired = await api.applyPlanningRepairs(project.id, {
+        plans: [{ targetId: plan.id, after: { title: "核对事故记录", goal: "交叉验证事故线索", conflict: "记录残缺且时间有限", outcome: "确认下一处调查地点", targetWords: 2200 } }],
+        chapters: [{ targetId: first.id, after: { title: "残缺记录", outline: "先取得记录，再核对时间矛盾", chapterFunction: "调查", targetWords: 2200, chapterPromise: "验证事故线索", expectedPayoff: "确认一处矛盾", crisis: "记录即将被销毁", endingExpectation: "矛盾指向维修主管", expectationTargetChapter: 3 } }],
+      });
+      await api.approvePlan(project.id, plan.id);
+      let protectedRepairBlocked = false;
+      try { await api.applyPlanningRepairs(project.id, { plans: [{ targetId: plan.id, after: { title: "越权改写", goal: "越权改写目标", conflict: "越权改写冲突", outcome: "越权改写结果", targetWords: 2200 } }], chapters: [] }); }
+      catch { protectedRepairBlocked = true; }
       const batch = await api.previewChapterBatch(project.id, first.id);
       const autoBackup = await api.getAutoBackupSettings();
       const health = await api.runSystemHealthCheck();
       const detail = await api.getProject(project.id);
-      return { workspace: await api.getWorkspacePath(), projectId: project.id, title: detail.summary.title, batch, autoBackup, health };
+      return { workspace: await api.getWorkspacePath(), projectId: project.id, title: detail.summary.title, batch, autoBackup, health, repaired, protectedRepairBlocked };
     });
     expect(result.workspace).toBe(workspace);
     expect(result.title).toBe("桌面烟雾测试");
     expect(result.batch.canRun).toBe(true);
     expect(result.batch.chapters).toHaveLength(5);
+    expect(result.repaired).toMatchObject({ appliedPlanIds: [expect.any(String)], appliedChapterIds: [expect.any(String)] });
+    expect(result.protectedRepairBlocked).toBe(true);
     expect(result.autoBackup).toMatchObject({ enabled: false, retentionCount: 7, hasPassword: false });
     expect(result.health).toMatchObject({ status: "正常", projectCount: 1, chapterCount: 5 });
     expect(existsSync(path.join(workspace, "catalog.sqlite"))).toBe(true);
