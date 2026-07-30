@@ -63,6 +63,7 @@ import {
   Textarea,
 } from "../components/UI";
 import { formatCount, formatDate } from "../lib/format";
+import { summarizeMetrics } from "../shared/metrics";
 
 type ProjectTab =
   | "驾驶舱"
@@ -2900,21 +2901,7 @@ function ReviewPage({ project, api, reload, notify }: CommonProjectProps) {
   useEffect(() => {
     void api.getReviewSuggestions(project.summary.id).then(setSuggestions);
   }, [project.summary.id, project.metrics.length]);
-  const averages = useMemo(() => {
-    if (!project.metrics.length)
-      return { exposure: 0, reads: 0, retention: 0, follows: 0, revenue: 0 };
-    const total = project.metrics.reduce(
-      (sum, item) => ({
-        exposure: sum.exposure + item.exposure,
-        reads: sum.reads + item.reads,
-        retention: sum.retention + item.retention,
-        follows: sum.follows + item.follows,
-        revenue: sum.revenue + item.revenue,
-      }),
-      { exposure: 0, reads: 0, retention: 0, follows: 0, revenue: 0 },
-    );
-    return { ...total, retention: total.retention / project.metrics.length };
-  }, [project.metrics]);
+  const funnel = useMemo(() => summarizeMetrics(project.metrics), [project.metrics]);
   return (
     <div className="page project-page">
       <header className="page-header">
@@ -2931,25 +2918,25 @@ function ReviewPage({ project, api, reload, notify }: CommonProjectProps) {
         <div className="stat">
           <div>
             <span>累计曝光</span>
-            <strong>{formatCount(averages.exposure)}</strong>
+            <strong>{formatCount(funnel.exposure)}</strong>
           </div>
         </div>
         <div className="stat">
           <div>
-            <span>累计阅读</span>
-            <strong>{formatCount(averages.reads)}</strong>
+            <span>入口点击率</span>
+            <strong>{funnel.clickRate === null ? "待导入" : `${funnel.clickRate.toFixed(1)}%`}</strong>
           </div>
         </div>
         <div className="stat">
           <div>
-            <span>平均留存</span>
-            <strong>{averages.retention.toFixed(1)}%</strong>
+            <span>首章 / 三章</span>
+            <strong>{funnel.firstChapterCompletion === null ? "待导入" : `${funnel.firstChapterCompletion.toFixed(1)}%`} / {funnel.threeChapterRetention === null ? "待导入" : `${funnel.threeChapterRetention.toFixed(1)}%`}</strong>
           </div>
         </div>
         <div className="stat">
           <div>
-            <span>累计收益</span>
-            <strong>¥{averages.revenue.toFixed(2)}</strong>
+            <span>追读 / 书架</span>
+            <strong>{funnel.followRate === null ? "待导入" : `${funnel.followRate.toFixed(1)}%`} / {funnel.bookshelfRate === null ? "待导入" : `${funnel.bookshelfRate.toFixed(1)}%`}</strong>
           </div>
         </div>
       </section>
@@ -2988,9 +2975,10 @@ function ReviewPage({ project, api, reload, notify }: CommonProjectProps) {
               <span>日期</span>
               <span>关联章节</span>
               <span>曝光</span>
+              <span>点击</span>
               <span>阅读</span>
-              <span>留存</span>
-              <span>追读</span>
+              <span>首章 / 三章</span>
+              <span>追读 / 书架</span>
               <span>收益</span>
             </div>
             {project.metrics.map((metric) => (
@@ -3002,9 +2990,10 @@ function ReviewPage({ project, api, reload, notify }: CommonProjectProps) {
                     : "全书"}
                 </span>
                 <span>{formatCount(metric.exposure)}</span>
+                <span>{formatCount(metric.clicks ?? 0)}</span>
                 <span>{formatCount(metric.reads)}</span>
-                <span>{metric.retention}%</span>
-                <span>{formatCount(metric.follows)}</span>
+                <span>{metric.firstChapterCompletion === undefined ? "-" : `${metric.firstChapterCompletion}%`} / {metric.threeChapterRetention === undefined ? "-" : `${metric.threeChapterRetention}%`}</span>
+                <span>{formatCount(metric.follows)} / {formatCount(metric.bookshelfAdds ?? 0)}</span>
                 <span>¥{metric.revenue}</span>
               </div>
             ))}
@@ -3013,7 +3002,7 @@ function ReviewPage({ project, api, reload, notify }: CommonProjectProps) {
           <EmptyState
             icon={<SearchCheck />}
             title="还没有运营指标"
-            description="从可获得的数据中导入曝光、阅读、留存、追读、收益和评论摘要。"
+            description="导入曝光、点击、阅读、首章读完、三章留存、追读、书架和收益，系统只提供可审查建议。"
             action={<Button onClick={() => setModal(true)}>导入 CSV</Button>}
           />
         )}
@@ -3023,13 +3012,13 @@ function ReviewPage({ project, api, reload, notify }: CommonProjectProps) {
           <div className="form-stack">
             <Field
               label="CSV 内容"
-              hint="支持：日期、章节、曝光、阅读、留存、追读、收益、评论摘要"
+              hint="支持：日期、章节、曝光、点击、阅读、首章读完、三章留存、留存、追读、加书架、收益、评论摘要；旧字段仍兼容"
             >
               <Textarea
                 rows={14}
                 value={csv}
                 onChange={(event) => setCsv(event.target.value)}
-                placeholder="日期,章节,曝光,阅读,留存,追读,收益\n2026-07-30,1,10000,3500,42.5,900,128.5"
+                placeholder="日期,章节,曝光,点击,阅读,首章读完,三章留存,留存,追读,加书架,收益\n2026-07-30,1,10000,3500,3000,48,32,42.5,900,280,128.5"
               />
             </Field>
             <div className="modal-actions">

@@ -10,6 +10,9 @@ import {
   Lightbulb,
   Link2,
   LoaderCircle,
+  Clock3,
+  Play,
+  Trash2,
   TrendingUp,
   Upload,
 } from "lucide-react";
@@ -21,6 +24,7 @@ import type {
   InsightPack,
   RankingAnalytics,
   RankingSnapshot,
+  RankingCaptureSchedule,
   ResearchAnalysisRecord,
   ResearchBook,
 } from "../shared/types";
@@ -116,6 +120,9 @@ export function ResearchPage({
   const [fanqieCategoryId, setFanqieCategoryId] = useState("262");
   const [rankingName, setRankingName] = useState("番茄男频阅读榜·都市脑洞");
   const [publicModal, setPublicModal] = useState(false);
+  const [scheduleModal, setScheduleModal] = useState(false);
+  const [rankingSchedules, setRankingSchedules] = useState<RankingCaptureSchedule[]>([]);
+  const [scheduleFrequency, setScheduleFrequency] = useState<RankingCaptureSchedule["frequency"]>("每日");
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [pasteModal, setPasteModal] = useState(false);
   const [pastedText, setPastedText] = useState("");
@@ -146,17 +153,19 @@ export function ResearchPage({
   };
 
   const reload = async () => {
-    const [rankingData, rankingAnalytics, bookData, insightData] =
+    const [rankingData, rankingAnalytics, bookData, insightData, schedules] =
       await Promise.all([
         api.listRankings(),
         api.getRankingAnalytics(),
         api.listResearchBooks(),
         api.listInsights(),
+        api.listRankingSchedules(),
       ]);
     setRankings(rankingData);
     setAnalytics(rankingAnalytics);
     setBooks(bookData);
     setInsights(insightData);
+    setRankingSchedules(schedules);
   };
   useEffect(() => {
     void reload();
@@ -225,6 +234,13 @@ export function ResearchPage({
         <div className="toolbar-actions">
           {tab === "榜单快照" && (
             <>
+              <Button
+                variant="secondary"
+                icon={<Clock3 size={17} />}
+                onClick={() => setScheduleModal(true)}
+              >
+                定时采榜
+              </Button>
               <Button
                 variant="secondary"
                 icon={<Link2 size={17} />}
@@ -305,10 +321,12 @@ export function ResearchPage({
                   <article key={opportunity.listName}>
                     <div className="opportunity-head">
                       <div><Badge tone="accent">{opportunity.genre}</Badge><strong>{opportunity.categoryName}</strong></div>
-                      <span className="opportunity-score">{opportunity.opportunityScore}</span>
+                      <span className={`opportunity-score ${opportunity.opportunityScore === null ? "is-baseline" : ""}`}>{opportunity.opportunityScore ?? "--"}</span>
                     </div>
                     <p>{opportunity.recommendation}</p>
-                    <small>{opportunity.snapshots}次快照 · 新晋率 {opportunity.newEntrantRate}% · 平均升位 {opportunity.averageRankChange} · 竞争{opportunity.competition}</small>
+                    <small>{opportunity.evidenceLevel} · 证据 {opportunity.dataSufficiency}% · 动能 {opportunity.momentumScore ?? "待观察"} · 竞争{opportunity.competition}</small>
+                    <small>{opportunity.snapshots}次快照 · 新晋率 {opportunity.newEntrantRate}% · 平均升位 {opportunity.averageRankChange}{opportunity.scoreRange ? ` · 机会区间 ${opportunity.scoreRange[0]}–${opportunity.scoreRange[1]}` : ""}</small>
+                    {opportunity.sampleWarning && <small className="warning-text">{opportunity.sampleWarning}</small>}
                   </article>
                 ))}
               </div>
@@ -739,6 +757,51 @@ export function ResearchPage({
               >
                 开始采集
               </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {scheduleModal && (
+        <Modal title="定时采集番茄榜单" onClose={() => setScheduleModal(false)} width={720}>
+          <div className="form-stack">
+            <div className="schedule-create-row">
+              <span><strong>{rankingName}</strong><small>{publicUrl}</small></span>
+              <Select value={scheduleFrequency} onChange={(event) => setScheduleFrequency(event.target.value as RankingCaptureSchedule["frequency"])}>
+                <option>每日</option><option>每周</option>
+              </Select>
+              <Button onClick={async () => {
+                try {
+                  await api.saveRankingSchedule({ url: publicUrl, listName: rankingName, frequency: scheduleFrequency, enabled: true });
+                  await reload();
+                  notify("定时采榜任务已保存");
+                } catch (error) { notify(String(error), "error"); }
+              }}>添加任务</Button>
+            </div>
+            <p className="inline-warning">仅在桌面应用运行时检查任务；失败会记录并顺延到下一周期，不会绕过验证或访问限制。</p>
+            <div className="ranking-schedule-list">
+              {rankingSchedules.length ? rankingSchedules.map((schedule) => (
+                <article key={schedule.id}>
+                  <div><strong>{schedule.listName}</strong><small>{schedule.frequency} · 下次 {formatDate(schedule.nextRunAt, true)}</small>{schedule.lastError && <small className="error-text">{schedule.lastError}</small>}</div>
+                  <Badge tone={schedule.lastStatus === "成功" ? "success" : schedule.lastStatus === "失败" ? "danger" : "neutral"}>{schedule.lastStatus}</Badge>
+                  <label className="schedule-toggle" title={schedule.enabled ? "暂停任务" : "启用任务"}>
+                    <input type="checkbox" checked={schedule.enabled} onChange={async (event) => {
+                      try {
+                        await api.saveRankingSchedule({ id: schedule.id, url: schedule.url, listName: schedule.listName, frequency: schedule.frequency, enabled: event.target.checked });
+                        await reload();
+                      } catch (error) { notify(String(error), "error"); }
+                    }} />
+                    <span>{schedule.enabled ? "运行中" : "已暂停"}</span>
+                  </label>
+                  <button className="icon-button" title="立即运行" aria-label="立即运行" onClick={async () => {
+                    try { await api.runRankingSchedule(schedule.id); await reload(); notify("榜单任务已运行"); }
+                    catch (error) { notify(String(error), "error"); }
+                  }}><Play size={15} /></button>
+                  <button className="icon-button" title="删除任务" aria-label="删除任务" onClick={async () => {
+                    try { await api.deleteRankingSchedule(schedule.id); await reload(); }
+                    catch (error) { notify(String(error), "error"); }
+                  }}><Trash2 size={15} /></button>
+                </article>
+              )) : <p className="muted-line">还没有定时任务。上方会按当前频道、榜型和题材创建任务。</p>}
             </div>
           </div>
         </Modal>

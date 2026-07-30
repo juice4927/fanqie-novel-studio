@@ -16,6 +16,7 @@ import type {
   ProjectDetail,
   QualityIssue,
   RankingSnapshot,
+  RankingCaptureSchedule,
   ResearchBook,
 } from "../src/shared/types";
 import { WorkspaceDatabase, now } from "./database";
@@ -23,13 +24,14 @@ import { BackgroundWorker } from "./worker-client";
 import { AiService } from "./ai-service";
 import { createEncryptedBackup, restoreEncryptedBackup } from "./backup";
 import { analyzeRankings, capturePublicRankingPage } from "./ranking-service";
-import { analyzeMetrics } from "../src/shared/metrics";
+import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
 import {
   findCurrentVolume,
   volumeBoundaryChapters,
 } from "../src/shared/planning";
 import { readApiCredential, writeApiCredential } from "./credential-store";
 import { compileCommercialGuidance } from "../src/shared/commercial-knowledge";
+import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
 
 let mainWindow: BrowserWindow | null = null;
 let database: WorkspaceDatabase;
@@ -37,6 +39,26 @@ let worker: BackgroundWorker;
 let ai: AiService;
 let apiCredential = "";
 const activeGenerationProjects = new Set<string>();
+let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
+
+async function runRankingSchedule(id: string) {
+  const schedule = database.listRankingSchedules().find((item) => item.id === id);
+  if (!schedule) throw new Error("定时采榜任务不存在");
+  const snapshot = await capturePublicRankingPage(schedule.url, schedule.listName);
+  database.saveRanking(snapshot);
+  database.saveRankingSchedule(completeRankingSchedule(schedule, snapshot));
+  return snapshot;
+}
+
+async function runDueRankingSchedules() {
+  const current = Date.now();
+  for (const schedule of database.listRankingSchedules()) {
+    if (!schedule.enabled || Date.parse(schedule.nextRunAt) > current) continue;
+    try { await runRankingSchedule(schedule.id); } catch (error) {
+      database.saveRankingSchedule(failRankingSchedule(schedule, error));
+    }
+  }
+}
 
 const majorStateChange =
   /死亡|牺牲|突破|晋级|身份揭露|身份暴露|决裂|成婚|离婚|重生|穿越|失忆|叛变|真相揭晓|终局/;
@@ -371,27 +393,6 @@ function parseRankingCsv(csvText: string, listName: string): RankingSnapshot {
   };
 }
 
-function parseMetricsCsv(csvText: string): MetricSnapshot[] {
-  const parsed = Papa.parse<Record<string, string>>(csvText, {
-    header: true,
-    skipEmptyLines: true,
-  });
-  if (parsed.errors.length && !parsed.data.length)
-    throw new Error(parsed.errors[0].message);
-  return parsed.data.map((row) => ({
-    id: randomUUID(),
-    chapterNumber:
-      parseNumber(value(row, ["章节", "章节号", "chapter"])) || null,
-    recordedAt: value(row, ["日期", "记录时间", "date"], now()),
-    exposure: parseNumber(value(row, ["曝光", "exposure"])),
-    reads: parseNumber(value(row, ["阅读", "阅读人数", "reads"])),
-    retention: Number(value(row, ["留存", "retention"], "0").replace("%", "")),
-    follows: parseNumber(value(row, ["追读", "追更", "follows"])),
-    revenue: Number(value(row, ["收益", "revenue"], "0")),
-    comments: value(row, ["评论摘要", "评论", "comments"]),
-  }));
-}
-
 async function exportProject(projectId: string, format: "txt" | "md" | "docx") {
   if (!mainWindow) return null;
   const project = database.getProject(projectId);
@@ -650,6 +651,24 @@ function registerHandlers() {
     database.saveRanking(snapshot);
     return snapshot;
   });
+  handle("listRankingSchedules", () => database.listRankingSchedules());
+  handle("saveRankingSchedule", (input: Parameters<AppApi["saveRankingSchedule"]>[0]) => {
+    const existing = input.id ? database.listRankingSchedules().find((item) => item.id === input.id) : undefined;
+    const restartCycle = !existing || existing.frequency !== input.frequency || (!existing.enabled && input.enabled);
+    return database.saveRankingSchedule({
+      id: input.id || randomUUID(),
+      url: input.url,
+      listName: input.listName,
+      frequency: input.frequency,
+      enabled: input.enabled,
+      lastRunAt: existing?.lastRunAt ?? null,
+      nextRunAt: restartCycle ? nextRankingRun(input.frequency) : existing.nextRunAt,
+      lastStatus: existing?.lastStatus ?? "未运行",
+      lastError: existing?.lastError ?? null,
+    });
+  });
+  handle("runRankingSchedule", (id) => runRankingSchedule(id));
+  handle("deleteRankingSchedule", (id) => database.deleteRankingSchedule(id));
   handle("getRankingAnalytics", () => analyzeRankings(database.listRankings()));
   handle("listResearchBooks", () => database.listResearchBooks());
   handle("previewResearchFile", async () => {
@@ -718,6 +737,7 @@ function registerHandlers() {
     const project = database.getProject(id);
     const opportunities = analyzeRankings(database.listRankings()).marketOpportunities
       .filter((item) => project.contract.fanqieCategoryKey ? item.categoryKey === project.contract.fanqieCategoryKey : item.genre === project.summary.genre)
+      .filter((item) => item.evidenceLevel !== "基线")
       .slice(0, 5);
     return ai.generateConcepts(
       project,
@@ -890,6 +910,8 @@ app.whenReady().then(async () => {
   worker = new BackgroundWorker();
   ai = new AiService(database, getApiKey);
   registerHandlers();
+  void runDueRankingSchedules();
+  rankingScheduleTimer = setInterval(() => void runDueRankingSchedules(), 15 * 60 * 1000);
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -897,6 +919,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  if (rankingScheduleTimer) clearInterval(rankingScheduleTimer);
   void worker?.close();
   database?.close();
   if (process.platform !== "darwin") app.quit();

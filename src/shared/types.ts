@@ -76,6 +76,18 @@ export interface RankingSnapshot {
   entries: RankingEntry[];
 }
 
+export interface RankingCaptureSchedule {
+  id: string;
+  url: string;
+  listName: string;
+  frequency: "每日" | "每周";
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string;
+  lastStatus: RankingSnapshot["status"] | "未运行";
+  lastError: string | null;
+}
+
 export interface RankingAnalytics {
   snapshotCount: number;
   sampleSize: number;
@@ -100,8 +112,14 @@ export interface MarketOpportunity {
   newEntrantRate: number;
   averageRankChange: number;
   stabilityRate: number;
-  competition: "低" | "中" | "高";
-  opportunityScore: number;
+  competition: "未知" | "低" | "中" | "高";
+  momentumScore: number | null;
+  dataSufficiency: number;
+  evidenceLevel: "基线" | "暂定" | "可参考";
+  opportunityScore: number | null;
+  scoreRange: [number, number] | null;
+  sampleWarning: string | null;
+  formulaVersion: string;
   confidence: "低" | "中" | "高";
   recommendation: string;
 }
@@ -284,16 +302,20 @@ export interface MetricSnapshot {
   chapterNumber: number | null;
   recordedAt: string;
   exposure: number;
+  clicks?: number;
   reads: number;
+  firstChapterCompletion?: number;
+  threeChapterRetention?: number;
   retention: number;
   follows: number;
+  bookshelfAdds?: number;
   revenue: number;
   comments: string;
 }
 
 export interface ReviewSuggestion {
   id: string;
-  category: "开篇" | "节奏" | "简介" | "章纲" | "数据质量";
+  category: "开篇" | "节奏" | "简介" | "章纲" | "转化" | "数据质量";
   observation: string;
   recommendation: string;
   evidence: string;
@@ -458,6 +480,10 @@ export interface AppApi {
   listRankings(): Promise<RankingSnapshot[]>;
   importRankingCsv(csvText: string, listName: string): Promise<RankingSnapshot>;
   capturePublicRanking(url: string, listName: string): Promise<RankingSnapshot>;
+  listRankingSchedules(): Promise<RankingCaptureSchedule[]>;
+  saveRankingSchedule(input: Omit<RankingCaptureSchedule, "id" | "lastRunAt" | "nextRunAt" | "lastStatus" | "lastError"> & { id?: string }): Promise<RankingCaptureSchedule>;
+  runRankingSchedule(id: string): Promise<RankingSnapshot>;
+  deleteRankingSchedule(id: string): Promise<void>;
   getRankingAnalytics(): Promise<RankingAnalytics>;
   listResearchBooks(): Promise<ResearchBook[]>;
   previewResearchFile(): Promise<ImportPreview | null>;

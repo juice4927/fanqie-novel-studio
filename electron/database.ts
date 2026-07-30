@@ -18,6 +18,7 @@ import type {
   ProjectSummary,
   QualityIssue,
   RankingSnapshot,
+  RankingCaptureSchedule,
   ResearchBook,
   ResearchAnalysisRecord,
   ScheduleItem,
@@ -951,6 +952,23 @@ export class WorkspaceDatabase {
         entry.officialReaderUrl ?? null,
         entry.platform ?? null,
       );
+  }
+
+  listRankingSchedules(): RankingCaptureSchedule[] {
+    return parseJson<RankingCaptureSchedule[]>(this.getSetting("ranking.schedules", "[]"));
+  }
+
+  saveRankingSchedule(schedule: RankingCaptureSchedule) {
+    const schedules = this.listRankingSchedules();
+    const index = schedules.findIndex((item) => item.id === schedule.id);
+    if (index >= 0) schedules[index] = schedule;
+    else schedules.push(schedule);
+    this.setSetting("ranking.schedules", JSON.stringify(schedules));
+    return schedule;
+  }
+
+  deleteRankingSchedule(id: string) {
+    this.setSetting("ranking.schedules", JSON.stringify(this.listRankingSchedules().filter((item) => item.id !== id)));
   }
 
   listResearchBooks(): ResearchBook[] {

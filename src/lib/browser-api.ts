@@ -24,7 +24,7 @@ import type {
   ScheduleItem,
   StoryContract,
 } from "../shared/types";
-import { analyzeMetrics } from "../shared/metrics";
+import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { findCurrentVolume } from "../shared/planning";
 import { compileCommercialGuidance } from "../shared/commercial-knowledge";
 
@@ -888,6 +888,16 @@ export function createBrowserApi(): AppApi {
     async capturePublicRanking() {
       throw new Error("公开页采集仅在桌面版运行，浏览器预览请使用 CSV");
     },
+    async listRankingSchedules() {
+      return [];
+    },
+    async saveRankingSchedule() {
+      throw new Error("定时采榜仅在桌面版运行");
+    },
+    async runRankingSchedule() {
+      throw new Error("定时采榜仅在桌面版运行");
+    },
+    async deleteRankingSchedule() {},
     async getRankingAnalytics() {
       return browserRankingAnalytics(state.rankings);
     },
@@ -1048,21 +1058,7 @@ export function createBrowserApi(): AppApi {
     },
     async importMetricsCsv(projectId, csvText) {
       const project = getProject(state, projectId);
-      const lines = csvText.trim().split(/\r?\n/).slice(1);
-      const metrics: MetricSnapshot[] = lines.map((line) => {
-        const cells = line.split(",");
-        return {
-          id: id(),
-          recordedAt: cells[0] || now(),
-          chapterNumber: Number(cells[1]) || null,
-          exposure: Number(cells[2]) || 0,
-          reads: Number(cells[3]) || 0,
-          retention: Number(cells[4]) || 0,
-          follows: Number(cells[5]) || 0,
-          revenue: Number(cells[6]) || 0,
-          comments: cells[7] || "",
-        };
-      });
+      const metrics = parseMetricsCsv(csvText, id);
       project.metrics.unshift(...metrics);
       persist();
       return metrics.length;

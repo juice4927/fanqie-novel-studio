@@ -813,12 +813,22 @@ p {
 .opportunity-head > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .opportunity-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .opportunity-score { color: var(--accent); font-size: 20px; font-weight: 750; }
+.opportunity-score.is-baseline { color: var(--subtle); }
 .market-opportunity-grid p { min-height: 42px; margin: 10px 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .market-opportunity-grid small { color: var(--subtle); font-size: 10px; }
 .fanqie-category-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
 .fanqie-category-summary > div { padding: 12px; background: var(--surface-soft); }
 .fanqie-category-summary span { display: block; margin-bottom: 5px; color: var(--subtle); font-size: 10px; }
 .fanqie-category-summary strong { color: var(--ink); font-size: 11px; line-height: 1.55; }
+.schedule-create-row { display: grid; grid-template-columns: minmax(0, 1fr) 100px auto; align-items: end; gap: 10px; }
+.schedule-create-row > span { display: flex; min-width: 0; flex-direction: column; }
+.schedule-create-row small { overflow: hidden; color: var(--subtle); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.ranking-schedule-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 34px 34px; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.ranking-schedule-list article > div { display: flex; min-width: 0; flex-direction: column; }
+.ranking-schedule-list small { color: var(--subtle); font-size: 10px; }
+.ranking-schedule-list .error-text { color: var(--danger); }
+.schedule-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.schedule-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
 .rank-number {
   color: var(--accent);
   font-size: 15px;
@@ -2108,7 +2118,7 @@ p {
   font-size: 9px;
 }
 .metrics-grid {
-  grid-template-columns: 110px 80px repeat(5, minmax(70px, 1fr));
+  grid-template-columns: 110px 80px repeat(6, minmax(78px, 1fr));
 }
 .review-suggestions {
   display: grid;
@@ -2791,7 +2801,8 @@ p {
     justify-content: flex-end;
   }
   .form-grid.two,
-  .form-grid.three {
+  .form-grid.three,
+  .schedule-create-row {
     grid-template-columns: 1fr;
   }
   .genre-stage-grid,

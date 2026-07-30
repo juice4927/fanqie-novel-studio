@@ -251,11 +251,22 @@ export function analyzeRankings(snapshots: RankingSnapshot[]): RankingAnalytics 
     const averageRankChange = changes.length ? changes.reduce((sum, value) => sum + value, 0) / changes.length : 0;
     const previousIdentities = new Set(previousEntries.map(identity));
     const stabilityRate = latestEntries.length ? latestEntries.filter((entry) => previousIdentities.has(identity(entry))).length / latestEntries.length : 0;
-    const competition: MarketOpportunity["competition"] = stabilityRate >= 0.7 ? "高" : stabilityRate >= 0.4 ? "中" : "低";
-    const score = Math.round(Math.max(0, Math.min(100, 50 + newRate * 30 + Math.max(0, averageRankChange) * 4 - stabilityRate * 20 + (listName.includes("新书榜") ? 5 : 0))));
+    const hasTrend = list.length >= 2;
+    const competition: MarketOpportunity["competition"] = !hasTrend ? "未知" : stabilityRate >= 0.7 ? "高" : stabilityRate >= 0.4 ? "中" : "低";
+    const momentumScore = hasTrend
+      ? Math.round(Math.max(0, Math.min(100, 35 + newRate * 45 + Math.max(-5, Math.min(5, averageRankChange)) * 4 + (listName.includes("新书榜") ? 5 : 0))))
+      : null;
+    const dataSufficiency = list.length === 1 ? 10 : list.length === 2 ? 30 : Math.min(100, 45 + (list.length - 3) * 10);
+    const evidenceLevel: MarketOpportunity["evidenceLevel"] = list.length === 1 ? "基线" : list.length === 2 ? "暂定" : "可参考";
+    const score = momentumScore === null ? null : Math.round(Math.max(0, Math.min(100, momentumScore * 0.75 + (100 - stabilityRate * 100) * 0.25)));
+    const uncertainty = list.length >= 7 ? 8 : list.length >= 3 ? 13 : 20;
+    const scoreRange: [number, number] | null = score === null ? null : [Math.max(0, score - uncertainty), Math.min(100, score + uncertainty)];
     const profile = profileForList(listName);
     const confidence: MarketOpportunity["confidence"] = list.length >= 7 ? "高" : list.length >= 3 ? "中" : "低";
-    const recommendation = score >= 65
+    const sampleWarning = list.length === 1 ? "仅有一次快照，只能建立榜单基线，不能判断趋势。" : list.length === 2 ? "仅有两个时间点，变化可能来自短期波动。" : list.length < 7 ? "样本尚未覆盖完整周周期，结论需继续复核。" : null;
+    const recommendation = score === null
+      ? `先继续采集${profile?.name ?? "该榜单"}，当前不据单点数据判断机会。`
+      : score >= 65
       ? `可作为${profile?.genre ?? "该题材"}候选方向：保留${profile?.coreFantasy ?? "题材核心幻想"}，用差异化主角、冲突发动机和开篇回报避开同质化。`
       : score >= 50
         ? `适合小规模验证：优先测试${profile?.openingFocus ?? "开篇承诺和首轮回报"}，连续采样后再决定是否扩张。`
@@ -271,11 +282,17 @@ export function analyzeRankings(snapshots: RankingSnapshot[]): RankingAnalytics 
       averageRankChange: Math.round(averageRankChange * 10) / 10,
       stabilityRate: Math.round(stabilityRate * 100),
       competition,
+      momentumScore,
+      dataSufficiency,
+      evidenceLevel,
       opportunityScore: score,
+      scoreRange,
+      sampleWarning,
+      formulaVersion: "fanqie-opportunity-v2",
       confidence,
       recommendation,
     };
-  }).sort((a, b) => b.opportunityScore - a.opportunityScore);
+  }).sort((a, b) => (b.opportunityScore ?? -1) - (a.opportunityScore ?? -1));
   return {
     snapshotCount: successful.length, sampleSize: entries.length, timeRange: range,
     confidence: successful.length >= 7 && entries.length >= 100 ? "高" : successful.length >= 2 && entries.length >= 20 ? "中" : "低",

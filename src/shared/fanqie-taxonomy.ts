@@ -14,6 +14,11 @@ export interface FanqieCategoryProfile {
   audience: string;
   openingFocus: string;
   taboo: string;
+  conflictEngine: string;
+  payoffPattern: string;
+  expansionAxis: string;
+  fatigueSignal: string;
+  qualityChecks: string[];
 }
 
 type CategorySeed = [string, string, Genre, string, string, string, string, string];
@@ -67,6 +72,16 @@ export const FANQIE_CATEGORY_PROFILES: FanqieCategoryProfile[] =
     items.map(([categoryId, name, genre, recommendedSubtype, coreFantasy, audience, openingFocus, taboo]) => ({
       key: `${channel}:${categoryId}`,
       channel, categoryId, name, genre, recommendedSubtype, coreFantasy, audience, openingFocus, taboo,
+      conflictEngine: `围绕“${coreFantasy}”持续制造目标、资源与代价不能同时满足的选择，且每轮冲突必须改变${name}主线状态。`,
+      payoffPattern: `先兑现“${openingFocus}”带来的首轮可见反馈，再把个人回报升级为关系、资源或身份变化。`,
+      expansionAxis: `${name}扩张沿“个人破局 → 稳定方法 → 更大规则/组织反制 → 核心幻想终局验证”推进。`,
+      fatigueSignal: `连续两轮只重复相同胜负或情绪反馈，或出现“${taboo}”时，视为分类疲劳。`,
+      qualityChecks: [
+        `本章是否推进了${name}的核心幻想：${coreFantasy}？`,
+        `本章冲突是否产生可追踪的代价或状态变化，而非只重复${recommendedSubtype}表面桥段？`,
+        `本章回报是否回应此前期待，并为${audience}建立下一轮明确期待？`,
+        `是否触发分类禁忌：${taboo}？`,
+      ],
     })),
   );
 

@@ -101,7 +101,22 @@ describe("structured Chinese web-fiction genre packages", () => {
       expect(GENRE_PLUGINS[profile.genre].subtypes.map((item) => item.name)).toContain(profile.recommendedSubtype);
       expect(profile.openingFocus.length).toBeGreaterThan(8);
       expect(profile.taboo.length).toBeGreaterThan(8);
+      expect(profile.conflictEngine.length).toBeGreaterThan(20);
+      expect(profile.payoffPattern.length).toBeGreaterThan(20);
+      expect(profile.expansionAxis.length).toBeGreaterThan(20);
+      expect(profile.fatigueSignal.length).toBeGreaterThan(20);
+      expect(profile.qualityChecks).toHaveLength(4);
     }
+  });
+
+  it("gives distinct executable rules to categories inside the same broad genre", () => {
+    const daily = compileCommercialGuidance("都市脑洞", 5, { fanqieCategoryKey: "男频:261" });
+    const suspense = compileCommercialGuidance("都市脑洞", 5, { fanqieCategoryKey: "男频:539" });
+    expect(daily).toContain("现实身份改善与可见生活反馈");
+    expect(suspense).toContain("异常规则与案件真相互相验证");
+    expect(daily).toContain("分类专属质检");
+    expect(suspense).toContain("可复核异常证据");
+    expect(daily).not.toBe(suspense);
   });
 
   it("injects selected Fanqie category rules into writing guidance", () => {
