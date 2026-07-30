@@ -454,7 +454,7 @@ function ProjectDashboard({
               <p>{plugin.subtypes.map((item) => item.name).join(" · ")}</p>
             </div>
             <div>
-              <span>核心幻想</span>
+              <span>可选题材母题</span>
               <p>{plugin.coreFantasies.join("；")}</p>
             </div>
             <div>

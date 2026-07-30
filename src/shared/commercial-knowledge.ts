@@ -115,7 +115,7 @@ export function compileCommercialGuidance(
       ...fanqieCategory.qualityChecks.map((item) => `- ${item}`),
     ] : []),
     `目标读者：${plugin.targetAudience.join("；")}`,
-    `核心幻想：${plugin.coreFantasies.join("；")}`,
+    `基础题材母题（按需选用，不是固定套路）：${plugin.coreFantasies.join("；")}`,
     `禁忌边界：${plugin.tabooBoundaries.join("；")}`,
     `本阶段目标：${phaseRule.objective}`,
     `本阶段冲突：${phaseRule.conflict}`,

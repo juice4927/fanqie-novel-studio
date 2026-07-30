@@ -184,6 +184,8 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await page.getByRole("button", { name: "新建作品" }).first().click();
   await expect(page.getByRole("dialog", { name: "从 0 开始创建一本书" })).toBeVisible();
   await expect(page.getByText("AI 从零开书", { exact: true })).toBeVisible();
+  await expect(page.getByText("平台商业基线", { exact: true })).toBeVisible();
+  await expect(page.getByText(/三套方案会分别选择不同叙事主轴/)).toBeVisible();
   await page.getByRole("button", { name: "生成三套方案" }).click();
   await expect(page.getByRole("heading", { name: "她把烂账改成了金饭碗" })).toBeVisible();
   await expect(page.locator(".book-concept-grid > button")).toHaveCount(3);

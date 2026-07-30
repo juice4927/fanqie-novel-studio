@@ -26,6 +26,7 @@ import { PROMPT_VERSION } from "../src/shared/prompt-version";
 import { contextForModel } from "../src/shared/context-diagnostics";
 import { parseStoryNumber } from "../src/shared/story-constraints";
 import { compileAestheticGuidance } from "../src/shared/aesthetic-profile";
+import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 
 export function abortableDelay(milliseconds: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -602,8 +603,8 @@ export class AiService {
       projectId: null,
       taskType: "generate-book-concepts",
       inputSummary: `${input.genre} 从零开书三案`,
-      system: "你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案必须在主角身份、核心矛盾、关系结构和长篇发动机上显著不同；书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。",
-      user: `平台主题材：${input.genre}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || "未指定，由方案自行选择"}\n题材元素：${input.genreElements?.join("、") || "未指定"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（genreSubtype 可从中选择，也可提出更贴合作品的原创概括）：${plugin.subtypes.map((item) => item.name).join("、")}\n核心幻想：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n输出 candidates，严格三项。三案应对复合类型和元素采用不同组合或侧重点，不要把所有元素机械塞入每套方案。每项包含 title、premise、genreSubtype、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`,
+      system: "你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案不得共享同一套升级换皮结构：主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机至少有四项实质不同。genreSubtype 必须分别概括三条不同路线，不得使用近义词伪装差异。书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。",
+      user: `平台主题材：${input.genre}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。三个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n输出 candidates，严格三项。先在内部为三案分别确定叙事主轴、开局机制、成长载体和主要回报，确认至少三项互不相同后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，三案也必须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`,
       schema: BookConceptSchema,
       longTask: true,
       stream: true,

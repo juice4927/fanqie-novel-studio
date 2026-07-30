@@ -57,6 +57,7 @@ describe("structured Chinese web-fiction genre packages", () => {
       expect(outputs[index]).toContain(uniqueMechanisms[genre]);
       expect(outputs[index]).toContain("回报阶梯（由小到大）");
       expect(outputs[index]).toContain("重复疲劳识别");
+      expect(outputs[index]).toContain("基础题材母题（按需选用，不是固定套路）");
       expect(outputs[index]).toContain("不作为机械硬门禁");
     });
     expect(new Set(outputs).size).toBe(GENRES.length);
