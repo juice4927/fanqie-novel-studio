@@ -2,26 +2,19 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import Papa from "papaparse";
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import type {
-  AppApi,
   BatchGenerationPreview,
   Chapter,
   ChapterDraftStreamEvent,
   ChapterFactsExtractionEvent,
   ConceptCandidate,
   ContextPackage,
-  ImportPreview,
-  InsightPack,
   MetricSnapshot,
   PlanningGenerationResult,
   PlanningRepairInput,
   ProjectDetail,
   QualityIssue,
-  RankingSnapshot,
-  RankingCaptureSchedule,
-  ResearchBook,
   HealthCheckTask,
   SystemHealthReport,
 } from "../src/shared/types";
@@ -29,7 +22,7 @@ import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
 import { AiService, type AiCachePolicy } from "./ai-service";
 import { autoBackupFileName, createEncryptedBackup, nextAutoBackupAt, pruneAutoBackups, restoreEncryptedBackup } from "./backup";
-import { analyzeRankings, captureFanqieOpeningSample, capturePublicRankingPage } from "./ranking-service";
+import { analyzeRankings } from "./ranking-service";
 import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
 import { deleteAutoBackupCredential, readApiCredential, readAutoBackupCredential, writeApiCredential, writeAutoBackupCredential } from "./credential-store";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
@@ -41,10 +34,14 @@ import {
   serializeChapterAiRetryContext,
   validateChapterAiRetrySource,
 } from "./ai-retry";
-import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
 import { validateIpcArgs } from "./ipc-validation";
 import { StructuredLogger } from "./structured-log";
 import { configureAutoUpdates } from "./update-service";
+import {
+  registerResearchHandlers,
+  type ResearchHandlerRuntime,
+} from "./handlers/research-handlers";
+import type { RegisterHandler } from "./handlers/types";
 import JSZip from "jszip";
 
 let mainWindow: BrowserWindow | null = null;
@@ -54,6 +51,7 @@ let ai: AiService;
 let apiCredential = "";
 const activeGenerationProjects = new Set<string>();
 let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
+let researchHandlers: ResearchHandlerRuntime;
 let autoBackupTimer: ReturnType<typeof setInterval> | null = null;
 let autoBackupRunning = false;
 const healthTasks = new Map<string, HealthCheckTask>();
@@ -71,25 +69,6 @@ else if (!singleInstanceLockDisabled) app.on("second-instance", () => {
   mainWindow.show();
   mainWindow.focus();
 });
-
-async function runRankingSchedule(id: string) {
-  const schedule = database.listRankingSchedules().find((item) => item.id === id);
-  if (!schedule) throw new Error("定时采榜任务不存在");
-  const snapshot = await capturePublicRankingPage(schedule.url, schedule.listName);
-  database.saveRanking(snapshot);
-  database.saveRankingSchedule(completeRankingSchedule(schedule, snapshot));
-  return snapshot;
-}
-
-async function runDueRankingSchedules() {
-  const current = Date.now();
-  for (const schedule of database.listRankingSchedules()) {
-    if (!schedule.enabled || Date.parse(schedule.nextRunAt) > current) continue;
-    try { await runRankingSchedule(schedule.id); } catch (error) {
-      database.saveRankingSchedule(failRankingSchedule(schedule, error));
-    }
-  }
-}
 
 async function runAutomaticBackup(force = false) {
   const settings = database.getAutoBackupSettings();
@@ -279,52 +258,6 @@ function getDashboard() {
   };
 }
 
-function value(row: Record<string, string>, keys: string[], fallback = "") {
-  for (const key of keys)
-    if (row[key] !== undefined && row[key] !== "") return row[key];
-  return fallback;
-}
-
-function parseNumber(raw: string) {
-  const numeric = Number(String(raw).replace(/[,，万]/g, ""));
-  if (String(raw).includes("万")) return Math.round(numeric * 10000);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
-
-function parseRankingCsv(csvText: string, listName: string): RankingSnapshot {
-  const parsed = Papa.parse<Record<string, string>>(csvText, {
-    header: true,
-    skipEmptyLines: true,
-  });
-  if (parsed.errors.length && !parsed.data.length)
-    throw new Error(parsed.errors[0].message);
-  const id = randomUUID();
-  return {
-    id,
-    source: "CSV 手动导入",
-    listName,
-    capturedAt: now(),
-    status: parsed.errors.length ? "部分成功" : "成功",
-    error: parsed.errors.length
-      ? parsed.errors.map((error) => error.message).join("；")
-      : null,
-    entries: parsed.data.map((row, index) => ({
-      id: randomUUID(),
-      snapshotId: id,
-      rank: parseNumber(value(row, ["排名", "rank"], String(index + 1))),
-      title: value(row, ["书名", "title"], "未命名"),
-      author: value(row, ["作者", "author"], "未知"),
-      genre: value(row, ["题材", "分类", "genre"], "未分类"),
-      words: parseNumber(value(row, ["字数", "words"])),
-      status: value(row, ["状态", "status"], "未知"),
-      tags: value(row, ["标签", "tags"])
-        .split(/[、,，]/)
-        .filter(Boolean),
-      sourceUrl: value(row, ["链接", "url", "sourceUrl"]),
-    })),
-  };
-}
-
 async function exportProject(projectId: string, format: "txt" | "md" | "docx") {
   if (!mainWindow) return null;
   const project = database.getProject(projectId);
@@ -421,10 +354,7 @@ function registerHandlers() {
     const completed = [...healthTaskFinishedAt.entries()].sort((left, right) => right[1] - left[1]);
     for (const [id] of completed.slice(100)) { healthTaskFinishedAt.delete(id); healthTasks.delete(id); }
   };
-  const handle = (
-    channel: Exclude<keyof AppApi, "onChapterFactsExtracted">,
-    callback: (...args: any[]) => unknown,
-  ) =>
+  const handle: RegisterHandler = (channel, callback) =>
     ipcMain.handle(`studio:${channel}`, async (event, ...args) => {
       if (!mainWindow || event.sender.id !== mainWindow.webContents.id)
         throw new Error("拒绝来自非主窗口的调用");
@@ -438,6 +368,20 @@ function registerHandlers() {
         throw error;
       }
     });
+  researchHandlers = registerResearchHandlers({
+    register: handle,
+    database,
+    ai,
+    worker,
+    chooseResearchFile: async () => {
+      if (!mainWindow) return null;
+      const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ["openFile"],
+        filters: [{ name: "小说文档", extensions: ["txt", "epub", "docx"] }],
+      });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+  });
   handle("getDashboard", () => getDashboard());
   handle("listProjects", () => database.listProjects());
   handle("createProject", (input) => database.createProject(input));
@@ -755,116 +699,6 @@ function registerHandlers() {
     database.decideChangeRequest(id, changeId, decision),
   );
   handle("saveSchedule", (id, item) => database.saveSchedule(id, item));
-  handle("listRankings", () => database.listRankings());
-  handle("importRankingCsv", (csvText, listName) => {
-    const snapshot = parseRankingCsv(csvText, listName);
-    database.saveRanking(snapshot);
-    return snapshot;
-  });
-  handle("capturePublicRanking", async (url, listName) => {
-    const snapshot = await capturePublicRankingPage(url, listName);
-    database.saveRanking(snapshot);
-    return snapshot;
-  });
-  handle("listRankingSchedules", () => database.listRankingSchedules());
-  handle("saveRankingSchedule", (input: Parameters<AppApi["saveRankingSchedule"]>[0]) => {
-    const existing = input.id ? database.listRankingSchedules().find((item) => item.id === input.id) : undefined;
-    const restartCycle = !existing || existing.frequency !== input.frequency || (!existing.enabled && input.enabled);
-    return database.saveRankingSchedule({
-      id: input.id || randomUUID(),
-      url: input.url,
-      listName: input.listName,
-      frequency: input.frequency,
-      enabled: input.enabled,
-      lastRunAt: existing?.lastRunAt ?? null,
-      nextRunAt: restartCycle ? nextRankingRun(input.frequency) : existing.nextRunAt,
-      lastStatus: existing?.lastStatus ?? "未运行",
-      lastError: existing?.lastError ?? null,
-    });
-  });
-  handle("runRankingSchedule", (id) => runRankingSchedule(id));
-  handle("deleteRankingSchedule", (id) => database.deleteRankingSchedule(id));
-  handle("getRankingAnalytics", () => analyzeRankings(database.listRankings()));
-  handle("listResearchBooks", () => database.listResearchBooks());
-  handle("previewResearchFile", async () => {
-    if (!mainWindow) return null;
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ["openFile"],
-      filters: [{ name: "小说文档", extensions: ["txt", "epub", "docx"] }],
-    });
-    if (result.canceled || !result.filePaths[0]) return null;
-    return worker.run<ImportPreview>("parse-document", {
-      filePath: result.filePaths[0],
-    });
-  });
-  handle(
-    "importResearchBook",
-    (preview, genre, rightsConfirmed, cloudConsent) => {
-      if (!rightsConfirmed) throw new Error("必须确认拥有材料的合法使用权");
-      const book: ResearchBook = {
-        id: randomUUID(),
-        title: path.basename(preview.fileName, path.extname(preview.fileName)),
-        author: "未标注",
-        genre,
-        sourceType: preview.sourceType,
-        chapterCount: preview.chapters.length,
-        wordCount: preview.totalWords,
-        rightsConfirmed,
-        cloudConsent,
-        importedAt: now(),
-        status: "待拆解",
-      };
-      database.saveResearchBook(book, preview.chapters);
-      return book;
-    },
-  );
-  handle("importPublicResearchSample", async (sourceUrl, genre, cloudConsent) => {
-    const sample = await captureFanqieOpeningSample(sourceUrl);
-    const book: ResearchBook = {
-      id: randomUUID(),
-      title: sample.title,
-      author: sample.author,
-      genre,
-      sourceType: "公开试读",
-      sourceUrl: sample.sourceUrl,
-      sampleScope: `官方公开前 ${sample.chapters.length} 章，仅代表开篇样本`,
-      chapterCount: sample.chapters.length,
-      wordCount: sample.chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0),
-      rightsConfirmed: false,
-      cloudConsent,
-      importedAt: now(),
-      status: "待拆解",
-    };
-    database.saveResearchBook(book, sample.chapters);
-    return book;
-  });
-  handle("listInsights", () => database.listInsights());
-  handle("createInsight", (input) => {
-    const insight: InsightPack = {
-      ...input,
-      id: randomUUID(),
-      createdAt: now(),
-    };
-    database.saveInsight(insight);
-    return insight;
-  });
-  handle("deconstructResearchBook", async (bookId) => {
-    const source = database.getResearchBook(bookId);
-    database.updateResearchBook({ ...source.book, status: "拆解中" });
-    try {
-      const result = await ai.deconstruct(source.book, source.chapters);
-      database.saveInsight(result.insight);
-      database.saveResearchAnalyses(result.analyses);
-      database.updateResearchBook({ ...source.book, status: "已拆解" });
-      return result.insight;
-    } catch (error) {
-      database.updateResearchBook({ ...source.book, status: "失败" });
-      throw error;
-    }
-  });
-  handle("listResearchAnalyses", (bookId) =>
-    database.listResearchAnalyses(bookId),
-  );
   handle("attachInsights", (id, insightIds) =>
     database.attachInsights(id, insightIds),
   );
@@ -1108,9 +942,12 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   worker = new BackgroundWorker();
   ai = new AiService(database, getApiKey, 120_000, 0, (level, event, data) => logger.write(level, event, data));
   registerHandlers();
-  void runDueRankingSchedules();
+  void researchHandlers.runDueRankingSchedules();
   void runAutomaticBackup();
-  rankingScheduleTimer = setInterval(() => void runDueRankingSchedules(), 15 * 60 * 1000);
+  rankingScheduleTimer = setInterval(
+    () => void researchHandlers.runDueRankingSchedules(),
+    15 * 60 * 1000,
+  );
   autoBackupTimer = setInterval(() => void runAutomaticBackup(), 15 * 60 * 1000);
   createWindow();
   configureAutoUpdates(logger, async () => {
