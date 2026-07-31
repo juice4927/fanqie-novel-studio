@@ -14,6 +14,7 @@ import type {
   LedgerFact,
   PlanNode,
   ProjectDetail,
+  QualityIssue,
   RankingSnapshot,
 } from "../src/shared/types";
 
@@ -93,6 +94,28 @@ const existingFact = {
   updatedAt: "2026-07-31T00:00:00.000Z",
 } satisfies LedgerFact;
 
+const qualityChapter = {
+  ...chapter,
+  content: "林舟沿着新线索返回旧城。",
+  status: "草稿",
+  chapterPromise: "确认旧城异常",
+  expectedPayoff: "找到第一份证据",
+  crisis: "证据即将被销毁",
+  endingExpectation: "幕后人留下新的坐标",
+} satisfies Chapter;
+
+const localQualityIssue = {
+  id: "issue-local",
+  projectId: "project-1",
+  chapterId: chapter.id,
+  severity: "警告",
+  category: "连续性",
+  message: "行动缺少过渡",
+  evidence: "返回旧城",
+  status: "待处理",
+  createdAt: "2026-07-31T00:00:00.000Z",
+} satisfies QualityIssue;
+
 const planningProject = {
   summary: {
     id: "project-1",
@@ -105,6 +128,21 @@ const planningProject = {
   facts: [existingFact],
   insightIds: ["insight-1"],
 } as unknown as ProjectDetail;
+
+const qualityProject = {
+  ...planningProject,
+  chapters: [
+    {
+      ...chapter,
+      id: "chapter-1",
+      number: 1,
+      status: "已定稿",
+    },
+    qualityChapter,
+  ],
+  issues: [localQualityIssue],
+  expectations: [],
+} as ProjectDetail;
 
 const insight = {
   id: "insight-1",
@@ -169,6 +207,7 @@ function createDependencies(
   const sourceJob = job("source");
   const retryJob = job("retry");
   const database = {
+    findOriginalityMatches: vi.fn(() => []),
     getAiJob: vi.fn((id: string) =>
       id === sourceJob.id ? sourceJob : id === retryJob.id ? retryJob : undefined,
     ),
@@ -184,6 +223,8 @@ function createDependencies(
     listRankings: vi.fn(() => rankings),
     saveChapter: vi.fn((_id, next: Chapter) => next),
     saveFact: vi.fn((_id, fact: LedgerFact) => fact),
+    saveGeneratedChapter: vi.fn((_id, next: Chapter) => next),
+    saveIssues: vi.fn(),
     saveAiSettings: vi.fn((next) => ({ ...next, hasApiKey: false })),
     savePlan: vi.fn((_id, next: PlanNode) => next),
     searchRelevantFacts: vi.fn(() => [existingFact]),
@@ -223,6 +264,20 @@ function createDependencies(
   };
   const previewChapterBatch = vi.fn(() => batchPreview);
   const generateChapterBatch = vi.fn(async () => [chapter]);
+  const runLocalQualityCheck = vi.fn(async () => [localQualityIssue]);
+  let idSequence = 0;
+  const createId = vi.fn(() => `generated-${++idSequence}`);
+  const currentTimestamp = vi.fn(() => "2026-07-31T01:00:00.000Z");
+  const activeProjects = new Set<string>();
+  const isGenerationActive = vi.fn((projectId: string) =>
+    activeProjects.has(projectId),
+  );
+  const markGenerationActive = vi.fn((projectId: string) => {
+    activeProjects.add(projectId);
+  });
+  const markGenerationIdle = vi.fn((projectId: string) => {
+    activeProjects.delete(projectId);
+  });
   const dependencies = {
     register,
     database,
@@ -231,7 +286,9 @@ function createDependencies(
       extractChapterFacts: vi.fn(),
       generateConcepts: vi.fn(async () => []),
       generatePlanning: vi.fn(),
+      reviewChapter: vi.fn(),
       reviewPlanning: vi.fn(),
+      reviseChapter: vi.fn(),
     },
     compileContext: vi.fn(
       () => ({ estimatedTokens: 123 }) as ContextPackage,
@@ -240,6 +297,12 @@ function createDependencies(
     sendChapterDraftStream,
     previewChapterBatch,
     generateChapterBatch,
+    runLocalQualityCheck,
+    createId,
+    currentTimestamp,
+    isGenerationActive,
+    markGenerationActive,
+    markGenerationIdle,
     getApiKey: () => apiKey,
     saveApiKey,
     queueFinalizedFactExtraction,
@@ -257,6 +320,12 @@ function createDependencies(
     previewChapterBatch,
     generateChapterBatch,
     batchPreview,
+    runLocalQualityCheck,
+    createId,
+    currentTimestamp,
+    isGenerationActive,
+    markGenerationActive,
+    markGenerationIdle,
     saveApiKey,
     startChapterRetry,
     logRetryFailure,
@@ -284,9 +353,91 @@ describe("AI handlers", () => {
       "previewChapterBatch",
       "retryAiJob",
       "reviewPlanning",
+      "reviseChapterFromQuality",
+      "runQualityCheck",
       "saveAiSettings",
       "transitionChapter",
     ]);
+  });
+
+  it("merges local quality results with semantic fallback and advances drafts", async () => {
+    const {
+      dependencies,
+      handlers,
+      database,
+      ai,
+      saveApiKey,
+      runLocalQualityCheck,
+    } = createDependencies();
+    database.getProject.mockReturnValue(qualityProject);
+    ai.reviewChapter.mockRejectedValue(new Error("cloud unavailable"));
+    await saveApiKey("secret");
+    registerAiHandlers(dependencies);
+
+    const issues = await handlers.get("runQualityCheck")!(
+      "project-1",
+      qualityChapter.id,
+    );
+
+    expect(runLocalQualityCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "project-1",
+        chapter: qualityChapter,
+        previousChapter: expect.objectContaining({ number: 1 }),
+        recentChapters: [expect.objectContaining({ number: 1 })],
+        originalityMatches: [],
+      }),
+    );
+    expect(issues).toEqual([
+      localQualityIssue,
+      expect.objectContaining({
+        category: "语义质检",
+        severity: "警告",
+        evidence: "cloud unavailable",
+      }),
+    ]);
+    expect(database.saveIssues).toHaveBeenCalledWith(
+      "project-1",
+      qualityChapter.id,
+      issues,
+    );
+    expect(database.transitionChapter).toHaveBeenCalledWith(
+      "project-1",
+      qualityChapter.id,
+      "待质检",
+    );
+  });
+
+  it("holds and releases the project generation lock while revising quality issues", async () => {
+    const {
+      dependencies,
+      handlers,
+      database,
+      ai,
+      markGenerationActive,
+      markGenerationIdle,
+    } = createDependencies();
+    database.getProject.mockReturnValue(qualityProject);
+    const revised = { ...qualityChapter, content: "修订后的正文" };
+    ai.reviseChapter.mockResolvedValue(revised);
+    registerAiHandlers(dependencies);
+
+    await expect(
+      handlers.get("reviseChapterFromQuality")!(
+        "project-1",
+        qualityChapter.id,
+      ),
+    ).resolves.toEqual(revised);
+
+    expect(markGenerationActive).toHaveBeenCalledWith("project-1");
+    expect(database.saveGeneratedChapter).toHaveBeenCalledWith(
+      "project-1",
+      revised,
+    );
+    expect(markGenerationIdle).toHaveBeenCalledWith("project-1");
+    expect(markGenerationActive.mock.invocationCallOrder[0]).toBeLessThan(
+      markGenerationIdle.mock.invocationCallOrder[0],
+    );
   });
 
   it("routes chapter generation streams and batch operations through runtime adapters", async () => {

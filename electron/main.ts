@@ -11,7 +11,6 @@ import type {
   ContextPackage,
   MetricSnapshot,
   ProjectDetail,
-  QualityIssue,
 } from "../src/shared/types";
 import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
@@ -388,6 +387,16 @@ function registerHandlers() {
     },
     previewChapterBatch,
     generateChapterBatch: generateChapterBatchFrom,
+    runLocalQualityCheck: (input) =>
+      worker.run("quality-check", input),
+    createId: randomUUID,
+    currentTimestamp: now,
+    isGenerationActive: (projectId) =>
+      activeGenerationProjects.has(projectId),
+    markGenerationActive: (projectId) =>
+      activeGenerationProjects.add(projectId),
+    markGenerationIdle: (projectId) =>
+      activeGenerationProjects.delete(projectId),
     getApiKey,
     saveApiKey: async (apiKey) => {
       await writeApiCredential(apiKey);
@@ -409,140 +418,6 @@ function registerHandlers() {
       startOneChapter(projectId, chapterId, undefined, "bypass"),
     logRetryFailure: (details) =>
       logger.write("error", "ai.retry.failed", { ...details }),
-  });
-  handle("runQualityCheck", async (id, chapterId) => {
-    const project = database.getProject(id);
-    const chapter = project.chapters.find((item) => item.id === chapterId);
-    if (!chapter) throw new Error("章节不存在");
-    const facts = database.searchRelevantFacts(
-      id,
-      `${chapter.title} ${chapter.outline} ${chapter.content.slice(0, 500)}`,
-      chapter.number,
-    );
-    const localIssues = await worker.run<QualityIssue[]>("quality-check", {
-      projectId: id,
-      chapter,
-      previousChapter: project.chapters.find(
-        (item) => item.number === chapter.number - 1,
-      ),
-      recentChapters: project.chapters
-        .filter((item) => item.number < chapter.number)
-        .slice(-12),
-      facts: project.facts,
-      contract: project.contract,
-      genre: project.summary.genre,
-      originalityMatches: database.findOriginalityMatches(chapter.content),
-    });
-    const intentIssues: QualityIssue[] = [
-      ["本章承诺", chapter.chapterPromise],
-      ["预期回报", chapter.expectedPayoff],
-      ["当前危机", chapter.crisis],
-      ["结尾期待", chapter.endingExpectation],
-    ]
-      .filter(([, value]) => !String(value ?? "").trim())
-      .map(([label]) => ({
-        id: randomUUID(),
-        projectId: id,
-        chapterId,
-        severity: "建议" as const,
-        category: "章节商业意图",
-        message: `${label}尚未规划，建议在写作台补充后再判断本章闭环。`,
-        evidence: "",
-        status: "待处理" as const,
-        createdAt: now(),
-      }));
-    const dueExpectationIssues: QualityIssue[] = project.expectations
-      .filter(
-        (item) =>
-          (item.status === "待兑现" || item.status === "部分兑现") &&
-          item.expectedPayoffChapter !== null &&
-          item.expectedPayoffChapter <= chapter.number &&
-          !chapter.linkedExpectationIds?.includes(item.id),
-      )
-      .map((item) => ({
-        id: randomUUID(),
-        projectId: id,
-        chapterId,
-        severity: "建议" as const,
-        category: "期待兑现",
-        message: `“${item.title}”已到预计兑现章，但本章未标记承接；请确认延期、部分兑现或调整目标章。`,
-        evidence: `第${item.sourceChapter}章提出`,
-        status: "待处理" as const,
-        createdAt: now(),
-      }));
-    let semanticIssues: QualityIssue[] = [];
-    if (getApiKey()) {
-      try {
-        semanticIssues = await ai.reviewChapter(
-          { ...project, facts },
-          chapter,
-          compileContext(project, chapter, facts),
-        );
-      } catch (error) {
-        semanticIssues = [
-          {
-            id: randomUUID(),
-            projectId: id,
-            chapterId,
-            severity: "警告",
-            category: "语义质检",
-            message: "云端语义质检未完成，本次结果仅包含本地规则检查。",
-            evidence:
-              error instanceof Error
-                ? error.message.slice(0, 300)
-                : String(error).slice(0, 300),
-            status: "待处理",
-            createdAt: now(),
-          },
-        ];
-      }
-    }
-    const seen = new Set<string>();
-    const issues = [
-      ...localIssues,
-      ...intentIssues,
-      ...dueExpectationIssues,
-      ...semanticIssues,
-    ].filter((issue) => {
-      const key = `${issue.category}\n${issue.message}\n${issue.evidence}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    database.saveIssues(id, chapterId, issues);
-    if (chapter.status === "草稿")
-      database.transitionChapter(id, chapterId, "待质检");
-    return issues;
-  });
-  handle("reviseChapterFromQuality", async (id, chapterId) => {
-    if (activeGenerationProjects.has(id))
-      throw new Error("该作品已有正文生成或修订任务正在运行");
-    const project = database.getProject(id);
-    const chapter = project.chapters.find((item) => item.id === chapterId);
-    if (!chapter) throw new Error("章节不存在");
-    if (["已定稿", "待发布", "已发布"].includes(chapter.status))
-      throw new Error("已定稿或进入发布流程的章节不能直接由 AI 修改");
-    const issues = project.issues.filter(
-      (issue) => issue.chapterId === chapterId && issue.status === "待处理",
-    );
-    if (!issues.length) throw new Error("本章没有可供 AI 修订的待处理问题");
-    const facts = database.searchRelevantFacts(
-      id,
-      `${chapter.title} ${chapter.outline} ${chapter.content.slice(0, 500)}`,
-      chapter.number,
-    );
-    activeGenerationProjects.add(id);
-    try {
-      const revised = await ai.reviseChapter(
-        { ...project, facts },
-        chapter,
-        compileContext(project, chapter, facts),
-        issues,
-      );
-      return database.saveGeneratedChapter(id, revised);
-    } finally {
-      activeGenerationProjects.delete(id);
-    }
   });
   handle("exportProject", (id, format) => exportProject(id, format));
 }

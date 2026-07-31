@@ -6,6 +6,7 @@ import type {
   PlanningGenerationResult,
   PlanningRepairInput,
   ProjectDetail,
+  QualityIssue,
 } from "../../src/shared/types";
 import {
   assertChapterRetrySnapshot,
@@ -22,6 +23,7 @@ type AiDatabase = Pick<
   | "getAiJobRetryContext"
   | "getAiSettings"
   | "getChapter"
+  | "findOriginalityMatches"
   | "getInsights"
   | "getProject"
   | "getProjectOverview"
@@ -31,6 +33,8 @@ type AiDatabase = Pick<
   | "saveAiSettings"
   | "savePlan"
   | "saveFact"
+  | "saveGeneratedChapter"
+  | "saveIssues"
   | "searchRelevantFacts"
   | "transitionChapter"
 >;
@@ -52,7 +56,9 @@ export interface AiHandlerDependencies {
     | "extractChapterFacts"
     | "generateConcepts"
     | "generatePlanning"
+    | "reviewChapter"
     | "reviewPlanning"
+    | "reviseChapter"
   >;
   compileContext: (
     project: ProjectDetail,
@@ -77,6 +83,21 @@ export interface AiHandlerDependencies {
     projectId: string,
     chapterId: string,
   ) => Promise<Chapter[]>;
+  runLocalQualityCheck: (input: {
+    projectId: string;
+    chapter: Chapter;
+    previousChapter: Chapter | undefined;
+    recentChapters: Chapter[];
+    facts: ProjectDetail["facts"];
+    contract: ProjectDetail["contract"];
+    genre: ProjectDetail["summary"]["genre"];
+    originalityMatches: ReturnType<WorkspaceDatabase["findOriginalityMatches"]>;
+  }) => Promise<QualityIssue[]>;
+  createId: () => string;
+  currentTimestamp: () => string;
+  isGenerationActive: (projectId: string) => boolean;
+  markGenerationActive: (projectId: string) => void;
+  markGenerationIdle: (projectId: string) => void;
   getApiKey: () => string;
   saveApiKey: (apiKey: string) => Promise<void>;
   queueFinalizedFactExtraction: (
@@ -99,12 +120,155 @@ export function registerAiHandlers({
   sendChapterDraftStream,
   previewChapterBatch,
   generateChapterBatch,
+  runLocalQualityCheck,
+  createId,
+  currentTimestamp,
+  isGenerationActive,
+  markGenerationActive,
+  markGenerationIdle,
   getApiKey,
   saveApiKey,
   queueFinalizedFactExtraction,
   startChapterRetry,
   logRetryFailure,
 }: AiHandlerDependencies): void {
+  register("runQualityCheck", async (id, chapterId) => {
+    const project = database.getProject(id);
+    const chapter = project.chapters.find((item) => item.id === chapterId);
+    if (!chapter) throw new Error("章节不存在");
+    const facts = database.searchRelevantFacts(
+      id,
+      `${chapter.title} ${chapter.outline} ${chapter.content.slice(0, 500)}`,
+      chapter.number,
+    );
+    const localIssues = await runLocalQualityCheck({
+      projectId: id,
+      chapter,
+      previousChapter: project.chapters.find(
+        (item) => item.number === chapter.number - 1,
+      ),
+      recentChapters: project.chapters
+        .filter((item) => item.number < chapter.number)
+        .slice(-12),
+      facts: project.facts,
+      contract: project.contract,
+      genre: project.summary.genre,
+      originalityMatches: database.findOriginalityMatches(chapter.content),
+    });
+    const intentIssues: QualityIssue[] = [
+      ["本章承诺", chapter.chapterPromise],
+      ["预期回报", chapter.expectedPayoff],
+      ["当前危机", chapter.crisis],
+      ["结尾期待", chapter.endingExpectation],
+    ]
+      .filter(([, value]) => !String(value ?? "").trim())
+      .map(([label]) => ({
+        id: createId(),
+        projectId: id,
+        chapterId,
+        severity: "建议" as const,
+        category: "章节商业意图",
+        message: `${label}尚未规划，建议在写作台补充后再判断本章闭环。`,
+        evidence: "",
+        status: "待处理" as const,
+        createdAt: currentTimestamp(),
+      }));
+    const dueExpectationIssues: QualityIssue[] = project.expectations
+      .filter(
+        (item) =>
+          (item.status === "待兑现" || item.status === "部分兑现") &&
+          item.expectedPayoffChapter !== null &&
+          item.expectedPayoffChapter <= chapter.number &&
+          !chapter.linkedExpectationIds?.includes(item.id),
+      )
+      .map((item) => ({
+        id: createId(),
+        projectId: id,
+        chapterId,
+        severity: "建议" as const,
+        category: "期待兑现",
+        message: `“${item.title}”已到预计兑现章，但本章未标记承接；请确认延期、部分兑现或调整目标章。`,
+        evidence: `第${item.sourceChapter}章提出`,
+        status: "待处理" as const,
+        createdAt: currentTimestamp(),
+      }));
+    let semanticIssues: QualityIssue[] = [];
+    if (getApiKey()) {
+      try {
+        semanticIssues = await ai.reviewChapter(
+          { ...project, facts },
+          chapter,
+          compileContext(project, chapter, facts),
+        );
+      } catch (error) {
+        semanticIssues = [
+          {
+            id: createId(),
+            projectId: id,
+            chapterId,
+            severity: "警告",
+            category: "语义质检",
+            message: "云端语义质检未完成，本次结果仅包含本地规则检查。",
+            evidence:
+              error instanceof Error
+                ? error.message.slice(0, 300)
+                : String(error).slice(0, 300),
+            status: "待处理",
+            createdAt: currentTimestamp(),
+          },
+        ];
+      }
+    }
+    const seen = new Set<string>();
+    const issues = [
+      ...localIssues,
+      ...intentIssues,
+      ...dueExpectationIssues,
+      ...semanticIssues,
+    ].filter((issue) => {
+      const key = `${issue.category}\n${issue.message}\n${issue.evidence}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    database.saveIssues(id, chapterId, issues);
+    if (chapter.status === "草稿") {
+      database.transitionChapter(id, chapterId, "待质检");
+    }
+    return issues;
+  });
+  register("reviseChapterFromQuality", async (id, chapterId) => {
+    if (isGenerationActive(id)) {
+      throw new Error("该作品已有正文生成或修订任务正在运行");
+    }
+    const project = database.getProject(id);
+    const chapter = project.chapters.find((item) => item.id === chapterId);
+    if (!chapter) throw new Error("章节不存在");
+    if (["已定稿", "待发布", "已发布"].includes(chapter.status)) {
+      throw new Error("已定稿或进入发布流程的章节不能直接由 AI 修改");
+    }
+    const issues = project.issues.filter(
+      (issue) => issue.chapterId === chapterId && issue.status === "待处理",
+    );
+    if (!issues.length) throw new Error("本章没有可供 AI 修订的待处理问题");
+    const facts = database.searchRelevantFacts(
+      id,
+      `${chapter.title} ${chapter.outline} ${chapter.content.slice(0, 500)}`,
+      chapter.number,
+    );
+    markGenerationActive(id);
+    try {
+      const revised = await ai.reviseChapter(
+        { ...project, facts },
+        chapter,
+        compileContext(project, chapter, facts),
+        issues,
+      );
+      return database.saveGeneratedChapter(id, revised);
+    } finally {
+      markGenerationIdle(id);
+    }
+  });
   register("generateChapterDraft", (id, chapterId, streamId) =>
     generateChapterDraft(
       id,
