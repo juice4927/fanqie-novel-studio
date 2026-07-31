@@ -27,14 +27,13 @@ import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/sh
 import { compileChapterContext } from "../src/shared/context-compiler";
 import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
 import {
-  assertChapterRetrySnapshot,
   createChapterGenerationGuard,
   serializeChapterAiRetryContext,
-  validateChapterAiRetrySource,
 } from "./ai-retry";
 import { validateIpcArgs } from "./ipc-validation";
 import { StructuredLogger } from "./structured-log";
 import { configureAutoUpdates } from "./update-service";
+import { registerAiHandlers } from "./handlers/ai-handlers";
 import {
   registerProjectHandlers,
 } from "./handlers/project-handlers";
@@ -380,6 +379,20 @@ function registerHandlers() {
       activeGenerationProjects.has(projectId),
     currentDate: () => new Date(),
   });
+  registerAiHandlers({
+    register: handle,
+    database,
+    ai,
+    getApiKey,
+    saveApiKey: async (apiKey) => {
+      await writeApiCredential(apiKey);
+      apiCredential = apiKey;
+    },
+    startChapterRetry: (projectId, chapterId) =>
+      startOneChapter(projectId, chapterId, undefined, "bypass"),
+    logRetryFailure: (details) =>
+      logger.write("error", "ai.retry.failed", { ...details }),
+  });
   handle("generatePlanningDraft", async (id, input) => {
     const project = database.getProject(id);
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
@@ -670,45 +683,6 @@ function registerHandlers() {
     ),
   );
   handle("generateChapterBatch", generateChapterBatchFrom);
-  handle("getAiSettings", () => ({
-    ...database.getAiSettings(),
-    hasApiKey: Boolean(getApiKey()),
-  }));
-  handle("saveAiSettings", async (settings, apiKey) => {
-    if (apiKey) {
-      await writeApiCredential(apiKey);
-      apiCredential = apiKey;
-    }
-    return {
-      ...database.saveAiSettings(settings),
-      hasApiKey: Boolean(getApiKey()),
-    };
-  });
-  handle("listAiJobs", (projectId) => database.listAiJobs(projectId));
-  handle("cancelAiJob", (id) => ai.cancelJob(id));
-  handle("retryAiJob", async (id) => {
-    const sourceJob = database.getAiJob(id);
-    if (!sourceJob) throw new Error("AI 任务不存在");
-    const context = validateChapterAiRetrySource(sourceJob, database.getAiJobRetryContext(id));
-    assertChapterRetrySnapshot(context, database.getChapter(context.projectId, context.chapterId));
-    const task = startOneChapter(context.projectId, context.chapterId, undefined, "bypass");
-    if (!task.jobId || task.source !== "network") {
-      await task.completion;
-      throw new Error("重试没有创建新的 AI 任务，请返回章节工作区重新生成");
-    }
-    void task.completion
-      .catch((error) => logger.write("error", "ai.retry.failed", {
-        sourceJobId: id,
-        retryJobId: task.jobId,
-        projectId: context.projectId,
-        chapterId: context.chapterId,
-        error: error instanceof Error ? error.message : String(error),
-      }))
-      .catch(() => {});
-    const retryJob = database.getAiJob(task.jobId);
-    if (!retryJob) throw new Error("AI 重试任务已启动，但审计记录不可用");
-    return retryJob;
-  });
   handle("exportProject", (id, format) => exportProject(id, format));
   handle("importMetricsCsv", (id, csvText) => {
     const metrics = parseMetricsCsv(csvText);
