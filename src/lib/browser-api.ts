@@ -44,6 +44,14 @@ import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
 import { assertLocalResearchImportRights } from "../shared/research-import-service";
 import { parseRankingCsv } from "../shared/ranking-csv";
+import {
+  assembleDashboard,
+  assertSchedulePublishAt,
+  collectDashboardActivity,
+  deriveProjectRisk,
+  localDayEndExclusive,
+  visibleProjectSummaries,
+} from "../shared/dashboard-policy";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { compileChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
@@ -87,13 +95,14 @@ function summary(detail: ProjectDetail): ProjectSummary {
     stockChapters,
     safeStockLine,
     nextPublishAt: next?.publishAt ?? null,
-    riskLevel: detail.issues.some(
-      (issue) => issue.status === "待处理" && issue.severity === "硬性",
-    )
-      ? "告警"
-      : stockChapters < safeStockLine
-        ? "注意"
-        : "正常",
+    riskLevel: deriveProjectRisk({
+      status: detail.summary.status,
+      stockChapters,
+      safeStockLine,
+      pendingHardIssues: detail.issues.filter(
+        (issue) => issue.status === "待处理" && issue.severity === "硬性",
+      ).length,
+    }),
   };
 }
 
@@ -494,32 +503,16 @@ export function createBrowserApi(): AppApi {
   };
   return {
     async getDashboard(): Promise<DashboardData> {
-      const projects = state.projects.map((item) => summary(item));
-      const issues = state.projects
-        .flatMap((item) => item.issues)
-        .filter((item) => item.status === "待处理");
-      return {
-        projects,
-        dueToday: state.projects
-          .flatMap((item) => item.schedule)
-          .filter((item) => item.status !== "已发布"),
-        activeAlerts: issues,
-        totals: {
-          activeBooks: projects.length,
-          totalWords: projects.reduce(
-            (sum, item) => sum + item.currentWords,
-            0,
-          ),
-          stockChapters: projects.reduce(
-            (sum, item) => sum + item.stockChapters,
-            0,
-          ),
-          pendingIssues: issues.length,
-        },
-      };
+      return assembleDashboard(
+        state.projects.map((item) => summary(item)),
+        collectDashboardActivity(
+          state.projects,
+          localDayEndExclusive(new Date()),
+        ),
+      );
     },
     async listProjects() {
-      return state.projects.map(summary);
+      return visibleProjectSummaries(state.projects.map(summary));
     },
     async createProject(input: CreateProjectInput) {
       return createProject(input);
@@ -923,6 +916,7 @@ export function createBrowserApi(): AppApi {
       persist();
     },
     async saveSchedule(projectId, item: ScheduleItem) {
+      assertSchedulePublishAt(item.publishAt);
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((entry) => entry.id === item.chapterId);
       if (!chapter) throw new Error("排期章节不存在");

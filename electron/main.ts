@@ -27,6 +27,10 @@ import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/sh
 import { compileChapterContext } from "../src/shared/context-compiler";
 import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
 import {
+  assembleDashboard,
+  localDayEndExclusive,
+} from "../src/shared/dashboard-policy";
+import {
   assertChapterRetrySnapshot,
   createChapterGenerationGuard,
   serializeChapterAiRetryContext,
@@ -214,26 +218,10 @@ function compileContext(
 
 function getDashboard() {
   const projects = database.listProjects();
-  const { dueToday, activeAlerts, pendingIssues } = database.getDashboardActivity(now().slice(0, 10));
-  return {
+  return assembleDashboard(
     projects,
-    dueToday,
-    activeAlerts,
-    totals: {
-      activeBooks: projects.filter(
-        (project) => !["暂停", "完结", "归档"].includes(project.status),
-      ).length,
-      totalWords: projects.reduce(
-        (sum, project) => sum + project.currentWords,
-        0,
-      ),
-      stockChapters: projects.reduce(
-        (sum, project) => sum + project.stockChapters,
-        0,
-      ),
-      pendingIssues,
-    },
-  };
+    database.getDashboardActivity(localDayEndExclusive(new Date())),
+  );
 }
 
 async function exportProject(projectId: string, format: "txt" | "md" | "docx") {

@@ -330,17 +330,27 @@ describe("per-book isolation and gates", () => {
     migrated.close();
   });
 
-  it("loads dashboard activity without loading chapter bodies", () => {
+  it("loads visible dashboard activity through an exclusive cutoff without chapter bodies", () => {
     const database = createDatabase();
     const project = database.createProject({ title: "轻量总览", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
     let chapter = database.saveChapter(project.id, createChapter(1, "不应进入仪表盘的正文".repeat(1000)));
     chapter = database.transitionChapter(project.id, chapter.id, "待质检");
     chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
     chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    expect(() => database.saveSchedule(project.id, {
+      id: "", projectId: project.id, projectTitle: project.title,
+      chapterId: chapter.id, chapterNumber: chapter.number, chapterTitle: chapter.title,
+      publishAt: "2026-07-31T20:00:00", status: "待发布",
+    })).toThrow("带时区");
     database.saveSchedule(project.id, {
       id: "", projectId: project.id, projectTitle: project.title,
       chapterId: chapter.id, chapterNumber: chapter.number, chapterTitle: chapter.title,
       publishAt: "2026-07-31T08:00:00.000Z", status: "待发布",
+    });
+    database.saveSchedule(project.id, {
+      id: "", projectId: project.id, projectTitle: project.title,
+      chapterId: chapter.id, chapterNumber: chapter.number, chapterTitle: chapter.title,
+      publishAt: "2026-08-01T00:00:00.000Z", status: "待发布",
     });
     database.saveIssues(project.id, chapter.id, Array.from({ length: 15 }, (_, index) => ({
       id: crypto.randomUUID(), projectId: project.id, chapterId: chapter.id,
@@ -348,11 +358,44 @@ describe("per-book isolation and gates", () => {
       evidence: "摘要", status: "待处理" as const, createdAt: new Date(Date.now() + index).toISOString(),
     })));
 
-    const activity = database.getDashboardActivity("2026-07-31");
+    const secondVisible = database.createProject({ title: "第二本可见作品", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    database.saveIssues(secondVisible.id, "cross-project", [
+      {
+        id: crypto.randomUUID(), projectId: secondVisible.id, chapterId: null,
+        severity: "警告", category: "测试", message: "跨项目最新告警",
+        evidence: "摘要", status: "待处理", createdAt: "2099-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    const archived = database.createProject({ title: "归档总览", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    let archivedChapter = database.saveChapter(archived.id, createChapter(1));
+    archivedChapter = database.transitionChapter(archived.id, archivedChapter.id, "待质检");
+    archivedChapter = database.transitionChapter(archived.id, archivedChapter.id, "待定稿");
+    archivedChapter = database.transitionChapter(archived.id, archivedChapter.id, "已定稿");
+    database.saveSchedule(archived.id, {
+      id: "", projectId: archived.id, projectTitle: archived.title,
+      chapterId: archivedChapter.id, chapterNumber: archivedChapter.number, chapterTitle: archivedChapter.title,
+      publishAt: "2026-07-31T09:00:00.000Z", status: "待发布",
+    });
+    database.saveIssues(archived.id, archivedChapter.id, [
+      {
+        id: crypto.randomUUID(), projectId: archived.id, chapterId: archivedChapter.id,
+        severity: "警告", category: "测试", message: "归档告警",
+        evidence: "摘要", status: "待处理", createdAt: now(),
+      },
+    ]);
+    database.updateProject(archived.id, { status: "归档" });
+
+    const activity = database.getDashboardActivity("2026-08-01T00:00:00.000Z");
     expect(activity.dueToday).toHaveLength(1);
+    expect(activity.dueToday[0].publishAt).toBe("2026-07-31T08:00:00.000Z");
     expect(activity.activeAlerts).toHaveLength(12);
-    expect(activity.pendingIssues).toBe(15);
+    expect(activity.activeAlerts[0].message).toBe("跨项目最新告警");
+    expect(activity.pendingIssues).toBe(16);
+    expect(JSON.stringify(activity)).not.toContain("归档告警");
     expect(JSON.stringify(activity)).not.toContain("不应进入仪表盘的正文");
+    expect(() => database.getDashboardActivity("invalid"))
+      .toThrow("仪表盘截止时间无效");
   });
 
   it("keeps same-name entities inside their own project databases", () => {

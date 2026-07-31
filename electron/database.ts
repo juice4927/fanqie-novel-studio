@@ -47,6 +47,13 @@ import { prepareFactSave } from "../src/shared/fact-service";
 import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
 import { prepareReviewExperiment } from "../src/shared/review-experiment-service";
 import {
+  assertDashboardCutoff,
+  assertSchedulePublishAt,
+  compareActiveAlerts,
+  compareDueSchedules,
+  deriveProjectRisk,
+} from "../src/shared/dashboard-policy";
+import {
   cosineSimilarity,
   HASH_BIGRAM_PROVIDER_ID,
   HashBigramEmbeddingProvider,
@@ -410,7 +417,7 @@ export class WorkspaceDatabase {
   listProjects(): ProjectSummary[] {
     const rows = this.catalog
       .prepare(
-        "SELECT * FROM projects WHERE status != '归档' ORDER BY updated_at DESC",
+        "SELECT * FROM projects WHERE status != '归档' ORDER BY updated_at DESC, id",
       )
       .all() as unknown as CatalogRow[];
     return rows.map((row) => this.hydrateSummary(row));
@@ -469,20 +476,23 @@ export class WorkspaceDatabase {
     return this.hydrateSummary(row);
   }
 
-  getDashboardActivity(throughDate: string) {
+  getDashboardActivity(throughExclusive: string) {
+    assertDashboardCutoff(throughExclusive);
     const dueToday: ScheduleItem[] = [];
     const activeAlerts: QualityIssue[] = [];
     let pendingIssues = 0;
-    const projects = this.catalog.prepare("SELECT id FROM projects").all() as Array<{ id: string }>;
+    const projects = this.catalog
+      .prepare("SELECT id FROM projects WHERE status != '归档'")
+      .all() as Array<{ id: string }>;
     for (const project of projects) {
       const db = this.projectDb(project.id);
       dueToday.push(...(db.prepare(`
         SELECT payload FROM records
         WHERE collection = 'schedule'
           AND json_extract(payload, '$.status') != '已发布'
-          AND substr(json_extract(payload, '$.publishAt'), 1, 10) <= ?
-        ORDER BY json_extract(payload, '$.publishAt')
-      `).all(throughDate) as Array<{ payload: string }>).map((row) => parseJson<ScheduleItem>(row.payload)));
+          AND julianday(json_extract(payload, '$.publishAt')) < julianday(?)
+        ORDER BY julianday(json_extract(payload, '$.publishAt')), id
+      `).all(throughExclusive) as Array<{ payload: string }>).map((row) => parseJson<ScheduleItem>(row.payload)));
       const issueCount = db.prepare(`
         SELECT COUNT(*) AS count FROM records
         WHERE collection = 'issues' AND json_extract(payload, '$.status') = '待处理'
@@ -491,12 +501,12 @@ export class WorkspaceDatabase {
       activeAlerts.push(...(db.prepare(`
         SELECT payload FROM records
         WHERE collection = 'issues' AND json_extract(payload, '$.status') = '待处理'
-        ORDER BY json_extract(payload, '$.createdAt') DESC LIMIT 12
+        ORDER BY julianday(json_extract(payload, '$.createdAt')) DESC, id LIMIT 12
       `).all() as Array<{ payload: string }>).map((row) => parseJson<QualityIssue>(row.payload)));
     }
     return {
-      dueToday: dueToday.sort((a, b) => a.publishAt.localeCompare(b.publishAt)),
-      activeAlerts: activeAlerts.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12),
+      dueToday: dueToday.sort(compareDueSchedules),
+      activeAlerts: activeAlerts.sort(compareActiveAlerts).slice(0, 12),
       pendingIssues,
     };
   }
@@ -532,12 +542,12 @@ export class WorkspaceDatabase {
       safeStockLine: row.safe_stock_line,
       updateCadence: row.update_cadence,
       nextPublishAt: next?.publish_at ?? null,
-      riskLevel:
-        pendingHardIssues > 0
-          ? "告警"
-          : Number(chapterStats.stock_chapters) < row.safe_stock_line && row.status === "连载中"
-            ? "注意"
-            : "正常",
+      riskLevel: deriveProjectRisk({
+        status: row.status,
+        stockChapters: Number(chapterStats.stock_chapters),
+        safeStockLine: row.safe_stock_line,
+        pendingHardIssues,
+      }),
       updatedAt: row.updated_at,
     };
   }
@@ -1039,6 +1049,7 @@ export class WorkspaceDatabase {
   }
 
   saveSchedule(id: string, item: ScheduleItem) {
+    assertSchedulePublishAt(item.publishAt);
     const db = this.projectDb(id);
     const project = this.getProjectSummary(id);
     db.exec("BEGIN IMMEDIATE");
