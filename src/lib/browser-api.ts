@@ -40,6 +40,7 @@ import {
   resolveChangeTargetVersion,
 } from "../shared/change-request-service";
 import { prepareFactSave } from "../shared/fact-service";
+import { prepareExpectationSave } from "../shared/expectation-service";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
 import { assertLocalResearchImportRights } from "../shared/research-import-service";
@@ -699,23 +700,14 @@ export function createBrowserApi(): AppApi {
     },
     async saveExpectation(projectId, expectation: ExpectationEntry) {
       const project = getProject(state, projectId);
-      if (!expectation.title.trim()) throw new Error("期待标题不能为空");
-      if (
-        expectation.expectedPayoffChapter !== null &&
-        expectation.expectedPayoffChapter < expectation.sourceChapter
-      )
-        throw new Error("预计兑现章不能早于提出章");
-      if (expectation.status === "已兑现" && !expectation.actualPayoffChapter)
-        throw new Error("已兑现期待必须填写实际兑现章");
       const previous = project.expectations.find(
         (item) => item.id === expectation.id,
       );
-      const next = {
-        ...expectation,
-        id: expectation.id || id(),
-        createdAt: previous?.createdAt ?? expectation.createdAt ?? now(),
+      const next = prepareExpectationSave(previous, expectation, {
+        expectationId: expectation.id || id(),
+        createdAt: now(),
         updatedAt: now(),
-      };
+      });
       const index = project.expectations.findIndex(
         (item) => item.id === next.id,
       );

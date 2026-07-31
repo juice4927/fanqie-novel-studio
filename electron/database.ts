@@ -44,6 +44,7 @@ import {
   resolveChangeTargetVersion,
 } from "../src/shared/change-request-service";
 import { prepareFactSave } from "../src/shared/fact-service";
+import { prepareExpectationSave } from "../src/shared/expectation-service";
 import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
 import { prepareReviewExperiment } from "../src/shared/review-experiment-service";
 import {
@@ -840,23 +841,11 @@ export class WorkspaceDatabase {
     const previous = expectation.id
       ? this.getRecord<ExpectationEntry>(db, "expectations", expectation.id)
       : undefined;
-    const next: ExpectationEntry = {
-      ...expectation,
-      id: expectation.id || randomUUID(),
-      title: expectation.title.trim(),
-      description: expectation.description.trim(),
-      createdAt: previous?.createdAt ?? expectation.createdAt ?? now(),
+    const next = prepareExpectationSave(previous, expectation, {
+      expectationId: expectation.id || randomUUID(),
+      createdAt: now(),
       updatedAt: now(),
-    };
-    if (!next.title) throw new Error("期待标题不能为空");
-    if (
-      next.expectedPayoffChapter !== null &&
-      next.expectedPayoffChapter < next.sourceChapter
-    ) {
-      throw new Error("预计兑现章不能早于提出章");
-    }
-    if (next.status === "已兑现" && !next.actualPayoffChapter)
-      throw new Error("已兑现期待必须填写实际兑现章");
+    });
     this.saveRecord(db, "expectations", next.id, next, undefined, createRevision);
     return next;
   }
