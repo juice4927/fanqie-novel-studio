@@ -35,14 +35,14 @@ import {
   prepareContractUpdate,
 } from "../shared/contract-service";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
-import { hasMajorStateChange } from "../shared/major-state-change";
 import { compileChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
 import {
   assertChapterTransition,
-  deriveChapterStatus,
+  deriveChapterBatchMode,
   findMatchingApproval,
   isProtectedChapterEdit,
+  prepareChapterSave,
 } from "../shared/chapter-lifecycle";
 
 interface DemoState {
@@ -56,7 +56,6 @@ interface DemoState {
 const key = "fanqie-novel-studio.demo.v1";
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
-const countWords = (text: string) => text.replace(/\s/g, "").length;
 
 function summary(detail: ProjectDetail): ProjectSummary {
   const currentWords = detail.chapters.reduce(
@@ -670,7 +669,6 @@ export function createBrowserApi(): AppApi {
           throw new Error("已定稿或进入发布流程的章节只能通过匹配的已批准变更单修改");
         approval.status = "已应用";
       }
-      const status = deriveChapterStatus(previous, chapter, { protectedEdit });
       let endingExpectationId = chapter.endingExpectationId ?? null;
       if (chapter.endingExpectation?.trim()) {
         const old = project.expectations.find(
@@ -695,20 +693,25 @@ export function createBrowserApi(): AppApi {
         else project.expectations.push(expectation);
         endingExpectationId = expectation.id;
       }
-      const next = {
-        ...chapter,
-        id: chapter.id || id(),
+      const updatedAt = now();
+      const next = prepareChapterSave(chapter, {
+        previous,
+        protectedEdit,
+        createRevision: mode === "version",
+        chapterId: chapter.id || id(),
         endingExpectationId,
-        linkedExpectationIds: chapter.linkedExpectationIds ?? [],
-        status,
-        wordCount: countWords(chapter.content),
-        revision: previous ? previous.revision + (mode === "version" ? 1 : 0) : 1,
-        updatedAt: now(),
-      } as Chapter;
-      if (hasMajorStateChange(next.outline, project.summary.genre, project.contract.majorStateChanges))
-        next.batchMode = "逐章";
+        batchMode: deriveChapterBatchMode(chapter, {
+          facts: project.facts,
+          issues: project.issues,
+          plans: project.plans,
+          genre: project.summary.genre,
+          majorStateChanges: project.contract.majorStateChanges,
+        }),
+        updatedAt,
+      });
       if (existing >= 0) project.chapters[existing] = next;
       else project.chapters.push(next);
+      project.summary.updatedAt = updatedAt;
       persist();
       return next;
     },
@@ -744,11 +747,28 @@ export function createBrowserApi(): AppApi {
       const chapter = project.chapters.find((item) => item.id === chapterId);
       if (!chapter) throw new Error("章节不存在");
       assertChapterTransition(chapter.status, status, chapterId, project.issues);
-      chapter.status = status;
-      chapter.updatedAt = now();
+      const updatedAt = now();
+      const next = prepareChapterSave(chapter, {
+        previous: chapter,
+        forcedStatus: status,
+        protectedEdit: false,
+        createRevision: true,
+        chapterId: chapter.id,
+        endingExpectationId: chapter.endingExpectationId ?? null,
+        batchMode: deriveChapterBatchMode(chapter, {
+          facts: project.facts,
+          issues: project.issues,
+          plans: project.plans,
+          genre: project.summary.genre,
+          majorStateChanges: project.contract.majorStateChanges,
+        }),
+        updatedAt,
+      });
+      project.chapters[project.chapters.indexOf(chapter)] = next;
+      project.summary.updatedAt = updatedAt;
       persist();
       return {
-        chapter,
+        chapter: next,
         ledgerExtraction: {
           status: status === "已定稿" ? "未配置" as const : "不适用" as const,
           candidateCount: 0,

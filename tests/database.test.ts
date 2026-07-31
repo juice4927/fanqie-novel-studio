@@ -509,6 +509,7 @@ describe("approval gates", () => {
     chapter = database.transitionChapter(project.id, chapter.id, "待质检");
     chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
     chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    expect(chapter.revision).toBe(4);
     const scheduled = database.saveSchedule(project.id, {
       id: "", projectId: "forged", projectTitle: "forged", chapterId: chapter.id,
       chapterNumber: 999, chapterTitle: "forged", publishAt: "2026-08-01T08:00:00.000Z", status: "待发布",

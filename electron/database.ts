@@ -38,7 +38,6 @@ import {
   approveContractDraft,
   prepareContractUpdate,
 } from "../src/shared/contract-service";
-import { hasMajorStateChange } from "../src/shared/major-state-change";
 import {
   cosineSimilarity,
   HASH_BIGRAM_PROVIDER_ID,
@@ -50,11 +49,11 @@ import {
   aggregateStorySummaries,
   buildChapterSummary,
 } from "../src/shared/summaries";
-import { volumeBoundaryChapters } from "../src/shared/planning";
 import {
   assertChapterTransition,
-  deriveChapterStatus,
+  deriveChapterBatchMode,
   isProtectedChapterEdit,
+  prepareChapterSave,
 } from "../src/shared/chapter-lifecycle";
 import { hasColumn, runMigrations } from "./migration-runner";
 import { AiAuditRepository } from "./repositories/ai-audit-repository";
@@ -751,19 +750,9 @@ export class WorkspaceDatabase {
         "已定稿或进入发布流程的章节只能通过匹配的已批准变更单修改",
       );
     }
-    const hasFactConflict = this.listRecords<LedgerFact>(db, "facts").some(
-      (fact) => fact.confidence === "有冲突",
-    );
-    const hasHardIssue = this.listRecords<QualityIssue>(db, "issues").some(
-      (issue) =>
-        issue.chapterId === chapter.id &&
-        issue.severity === "硬性" &&
-        issue.status === "待处理",
-    );
-    const isVolumeBoundary = volumeBoundaryChapters(
-      this.listRecords<PlanNode>(db, "plans"),
-    ).has(chapter.number);
-    const status = deriveChapterStatus(previous, chapter, { forcedStatus, protectedEdit });
+    const facts = this.listRecords<LedgerFact>(db, "facts");
+    const issues = this.listRecords<QualityIssue>(db, "issues");
+    const plans = this.listRecords<PlanNode>(db, "plans");
     let endingExpectationId = chapter.endingExpectationId ?? null;
     if (chapter.endingExpectation?.trim()) {
       const existingExpectation = endingExpectationId
@@ -789,24 +778,22 @@ export class WorkspaceDatabase {
     }
     const genre = (this.catalog.prepare("SELECT genre FROM projects WHERE id = ?").get(id) as { genre: ProjectSummary["genre"] }).genre;
     const contract = this.getState<StoryContract>(db, "contract");
-    const next: Chapter = {
-      ...chapter,
+    const next = prepareChapterSave(chapter, {
+      previous,
+      forcedStatus,
+      protectedEdit,
+      createRevision,
+      chapterId: chapter.id || randomUUID(),
       endingExpectationId,
-      linkedExpectationIds: chapter.linkedExpectationIds ?? [],
-      id: chapter.id || randomUUID(),
-      status,
-      wordCount: [...chapter.content].filter((char) => !/\s/.test(char)).length,
-      revision: previous ? previous.revision + (createRevision ? 1 : 0) : 1,
-      batchMode:
-        chapter.isKeyChapter ||
-        hasFactConflict ||
-        hasHardIssue ||
-        isVolumeBoundary ||
-        hasMajorStateChange(chapter.outline, genre, contract.majorStateChanges)
-          ? "逐章"
-          : chapter.batchMode,
+      batchMode: deriveChapterBatchMode(chapter, {
+        facts,
+        issues,
+        plans,
+        genre,
+        majorStateChanges: contract.majorStateChanges,
+      }),
       updatedAt: now(),
-    };
+    });
     this.projects.saveChapter(db, next, previous?.revision, createRevision);
     db.prepare("DELETE FROM chapter_fts WHERE id = ?").run(next.id);
     db.prepare(

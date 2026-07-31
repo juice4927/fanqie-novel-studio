@@ -1,4 +1,15 @@
-import type { Chapter, ChapterStatus, ChangeRequest, QualityIssue } from "./types";
+import { hasMajorStateChange } from "./major-state-change";
+import { volumeBoundaryChapters } from "./planning";
+import type {
+  Chapter,
+  ChapterStatus,
+  ChangeRequest,
+  Genre,
+  LedgerFact,
+  MajorStateChangeRules,
+  PlanNode,
+  QualityIssue,
+} from "./types";
 
 const TRANSITIONS: Readonly<Partial<Record<ChapterStatus, readonly ChapterStatus[]>>> = {
   草稿: ["待质检"],
@@ -45,6 +56,76 @@ export function deriveChapterStatus(
   return previous.status;
 }
 
+interface ChapterBatchModeContext {
+  facts: readonly LedgerFact[];
+  issues: readonly QualityIssue[];
+  plans: readonly PlanNode[];
+  genre: Genre;
+  majorStateChanges?: MajorStateChangeRules;
+}
+
+export function deriveChapterBatchMode(
+  chapter: Chapter,
+  context: ChapterBatchModeContext,
+): Chapter["batchMode"] {
+  const hasFactConflict = context.facts.some(
+    (fact) => fact.confidence === "有冲突",
+  );
+  const hasHardIssue = context.issues.some(
+    (issue) =>
+      issue.chapterId === chapter.id &&
+      issue.severity === "硬性" &&
+      issue.status === "待处理",
+  );
+  const isVolumeBoundary = volumeBoundaryChapters([...context.plans]).has(
+    chapter.number,
+  );
+  return chapter.isKeyChapter ||
+    hasFactConflict ||
+    hasHardIssue ||
+    isVolumeBoundary ||
+    hasMajorStateChange(
+      chapter.outline,
+      context.genre,
+      context.majorStateChanges,
+    )
+    ? "逐章"
+    : chapter.batchMode;
+}
+
+interface PrepareChapterSaveOptions {
+  previous: Chapter | undefined;
+  forcedStatus?: ChapterStatus;
+  protectedEdit: boolean;
+  createRevision: boolean;
+  chapterId: string;
+  endingExpectationId: string | null;
+  batchMode: Chapter["batchMode"];
+  updatedAt: string;
+}
+
+export function prepareChapterSave(
+  chapter: Chapter,
+  options: PrepareChapterSaveOptions,
+): Chapter {
+  return {
+    ...chapter,
+    id: options.chapterId,
+    endingExpectationId: options.endingExpectationId,
+    linkedExpectationIds: chapter.linkedExpectationIds ?? [],
+    status: deriveChapterStatus(options.previous, chapter, {
+      forcedStatus: options.forcedStatus,
+      protectedEdit: options.protectedEdit,
+    }),
+    wordCount: [...chapter.content].filter((char) => !/\s/.test(char)).length,
+    revision: options.previous
+      ? options.previous.revision + (options.createRevision ? 1 : 0)
+      : 1,
+    batchMode: options.batchMode,
+    updatedAt: options.updatedAt,
+  };
+}
+
 export function assertChapterTransition(
   from: ChapterStatus,
   to: ChapterStatus,
@@ -64,8 +145,13 @@ export function findMatchingApproval(
   targetId: string,
   baseVersion: number,
 ) {
-  return changes.find((change) =>
-    change.status === "已批准" && change.targetKind === targetKind &&
-    change.targetId === targetId && change.baseVersion === baseVersion,
-  );
+  return changes
+    .filter(
+      (change) =>
+        change.status === "已批准" &&
+        change.targetKind === targetKind &&
+        change.targetId === targetId &&
+        change.baseVersion === baseVersion,
+    )
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
 }
