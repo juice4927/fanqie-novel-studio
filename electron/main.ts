@@ -27,10 +27,6 @@ import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/sh
 import { compileChapterContext } from "../src/shared/context-compiler";
 import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
 import {
-  assembleDashboard,
-  localDayEndExclusive,
-} from "../src/shared/dashboard-policy";
-import {
   assertChapterRetrySnapshot,
   createChapterGenerationGuard,
   serializeChapterAiRetryContext,
@@ -39,6 +35,9 @@ import {
 import { validateIpcArgs } from "./ipc-validation";
 import { StructuredLogger } from "./structured-log";
 import { configureAutoUpdates } from "./update-service";
+import {
+  registerProjectHandlers,
+} from "./handlers/project-handlers";
 import {
   registerResearchHandlers,
   type ResearchHandlerRuntime,
@@ -216,14 +215,6 @@ function compileContext(
   });
 }
 
-function getDashboard() {
-  const projects = database.listProjects();
-  return assembleDashboard(
-    projects,
-    database.getDashboardActivity(localDayEndExclusive(new Date())),
-  );
-}
-
 async function exportProject(projectId: string, format: "txt" | "md" | "docx") {
   if (!mainWindow) return null;
   const project = database.getProject(projectId);
@@ -381,59 +372,14 @@ function registerHandlers() {
       return result.canceled ? null : result.filePath ?? null;
     },
   });
-  handle("getDashboard", () => getDashboard());
-  handle("listProjects", () => database.listProjects());
-  handle("createProject", (input) => database.createProject(input));
-  handle("generateBookConcepts", (input) => ai.generateBookConcepts(input));
-  handle("createProjectFromConcept", async (input, concept) => {
-    const skeleton = await ai.expandBookConcept(input, concept);
-    return database.createProjectFromConcept({
-      title: concept.title,
-      genre: input.genre,
-      targetWords: input.targetWords,
-      updateCadence: input.updateCadence,
-    }, {
-      premise: concept.premise,
-      genreSubtype: concept.genreSubtype,
-      fanqieCategoryKey: "",
-      secondaryGenres: concept.secondaryGenres,
-      genreElements: concept.genreElements,
-      customGenreDirection: input.customGenreDirection ?? "",
-      audience: concept.audience,
-      commercialHook: concept.commercialHook,
-      openingMechanism: concept.openingMechanism,
-      growthCarrier: concept.growthCarrier,
-      primaryPayoff: concept.primaryPayoff,
-      longFormEngine: concept.longFormEngine,
-      protagonistDesire: concept.protagonistDesire,
-      protagonistArc: skeleton.protagonistArc,
-      keyRelationships: skeleton.keyRelationships,
-      worldRules: skeleton.worldRules,
-      majorForces: skeleton.majorForces,
-      timelineAnchors: skeleton.timelineAnchors,
-      readerPromise: concept.readerPromise,
-      coreEmotion: concept.coreEmotion,
-      ending: concept.ending,
-      immutableRules: concept.immutableRules,
-      prohibitedPatterns: concept.prohibitedPatterns,
-    });
+  registerProjectHandlers({
+    register: handle,
+    database,
+    ai,
+    isGenerationActive: (projectId) =>
+      activeGenerationProjects.has(projectId),
+    currentDate: () => new Date(),
   });
-  handle("deleteProject", (id, confirmationTitle) => {
-    if (activeGenerationProjects.has(id))
-      throw new Error("该作品仍有正文生成任务运行，暂时不能删除");
-    return database.deleteProject(id, confirmationTitle);
-  });
-  handle("getProject", (id) => database.getProjectOverview(id));
-  handle("getChapter", (id, chapterId) => database.getChapter(id, chapterId));
-  handle("updateProject", (id, patch) => database.updateProject(id, patch));
-  handle("saveContract", (id, contract) => database.saveContract(id, contract));
-  handle("suggestAestheticProfile", (id, contract) => {
-    const project = database.getProject(id);
-    return ai.suggestAestheticProfile({ ...project, contract });
-  });
-  handle("approveContract", (id) => database.approveContract(id));
-  handle("savePlan", (id, plan) => database.savePlan(id, plan));
-  handle("approvePlan", (id, planId) => database.approvePlan(id, planId));
   handle("generatePlanningDraft", async (id, input) => {
     const project = database.getProject(id);
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
