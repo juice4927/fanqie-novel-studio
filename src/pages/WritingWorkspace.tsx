@@ -14,6 +14,7 @@ import {
   GitPullRequestArrow,
   Layers3,
   LoaderCircle,
+  MessageSquareText,
   History,
   LockKeyhole,
   NotebookTabs,
@@ -38,6 +39,9 @@ import type {
   ExpectationEntry,
   LedgerFact,
   LedgerKind,
+  NovelRevisionAuthority,
+  NovelRevisionProposal,
+  NovelRevisionScope,
   PlanNode,
   PlanningGenerationInput,
   ProjectDetail,
@@ -116,12 +120,21 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   const [recoveryAvailable, setRecoveryAvailable] = useState(true);
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
   const draftRef = useRef(draft);
+  const manuscriptRef = useRef<HTMLTextAreaElement>(null);
   const chapterRequestRef = useRef(0);
   const autosaveRef = useRef<AutosaveCoordinator | null>(null);
   const reloadRef = useRef(reload);
   const notifyRef = useRef(notify);
   const [batchPreview, setBatchPreview] =
     useState<BatchGenerationPreview | null>(null);
+  const [revisionOpen, setRevisionOpen] = useState(false);
+  const [revisionBusy, setRevisionBusy] = useState(false);
+  const [revisionProposal, setRevisionProposal] = useState<NovelRevisionProposal | null>(null);
+  const [selectedRepairIds, setSelectedRepairIds] = useState<string[]>([]);
+  const [revisionSelection, setRevisionSelection] = useState({ start: 0, end: 0, text: "" });
+  const [revisionInput, setRevisionInput] = useState<{ instruction: string; authority: NovelRevisionAuthority; scope: NovelRevisionScope }>({
+    instruction: "", authority: "设定为准", scope: "当前章节",
+  });
   useEffect(() => { draftRef.current = draft; reloadRef.current = reload; notifyRef.current = notify; }, [draft, reload, notify]);
   useEffect(() => api.onChapterFactsExtracted((event) => {
     if (event.projectId !== project.summary.id) return;
@@ -305,6 +318,12 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
     setContext(null);
   };
   const editorBusy = busy || chapterLoading;
+  const revisionRepairItems = revisionProposal ? [
+    ...revisionProposal.contractRepairs.map((item) => ({ id: item.id, kind: "创作设定", label: item.label, reason: item.reason, risk: item.risk, before: item.before, after: item.after })),
+    ...revisionProposal.planRepairs.map((item) => ({ id: item.id, kind: "规划", label: item.location, reason: item.reason, risk: item.risk, before: JSON.stringify(item.before, null, 2), after: JSON.stringify(item.after, null, 2) })),
+    ...revisionProposal.chapterRepairs.map((item) => ({ id: item.id, kind: "章纲", label: item.location, reason: item.reason, risk: item.risk, before: JSON.stringify(item.before, null, 2), after: JSON.stringify(item.after, null, 2) })),
+    ...(revisionProposal.textRepair ? [{ id: revisionProposal.textRepair.id, kind: "正文", label: `第${draft.number}章正文`, reason: revisionProposal.textRepair.reason, risk: revisionProposal.textRepair.risk, before: revisionProposal.textRepair.before, after: revisionProposal.textRepair.after }] : []),
+  ] : [];
   return (
     <div className="writing-layout">
       <aside className="chapter-list">
@@ -429,6 +448,24 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           </div>
         </header>
         <div className="writing-actions">
+          <Button
+            variant="secondary"
+            disabled={!draft.id || editorBusy}
+            icon={<MessageSquareText size={16} />}
+            onClick={() => {
+              const editor = manuscriptRef.current;
+              const start = editor?.selectionStart ?? 0;
+              const end = editor?.selectionEnd ?? 0;
+              const text = end > start ? draft.content.slice(start, end) : "";
+              setRevisionSelection({ start, end, text });
+              setRevisionInput((current) => ({ ...current, scope: text ? "仅选区" : "当前章节" }));
+              setRevisionProposal(null);
+              setSelectedRepairIds([]);
+              setRevisionOpen(true);
+            }}
+          >
+            修改意见
+          </Button>
           <Button
             variant="secondary"
             disabled={!draft.id || editorBusy}
@@ -721,7 +758,8 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               />
             </Field>
           </div>
-          <Textarea
+          <textarea
+            ref={manuscriptRef}
             className="manuscript"
             value={draft.content}
             disabled={editorBusy}
@@ -818,6 +856,96 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               </details>
             ))}
         </aside>
+      )}
+      {revisionOpen && (
+        <Modal title="AI 修改意见" onClose={() => !revisionBusy && setRevisionOpen(false)} width={920}>
+          <div className="form-stack novel-revision-modal">
+            {!revisionProposal ? (
+              <>
+                <Field label="修改意见" hint="直接说明哪里不满意、希望怎么改，以及必须保留什么">
+                  <Textarea autoFocus rows={5} disabled={revisionBusy} value={revisionInput.instruction} onChange={(event) => setRevisionInput({ ...revisionInput, instruction: event.target.value })} placeholder="例如：第五章和解太快，把冲突延长到第七章；保留结尾的拥抱，但改成利益合作。" />
+                </Field>
+                <div className="form-grid two">
+                  <div className="field" role="group" aria-label="修改依据">
+                    <span className="field-label">修改依据</span>
+                    <Segmented options={["设定为准", "当前正文为准"] as const} value={revisionInput.authority} disabled={revisionBusy} onChange={(authority) => setRevisionInput({ ...revisionInput, authority })} />
+                    <span className="field-hint">选择发生冲突时以哪一侧为准</span>
+                  </div>
+                  <div className="field" role="group" aria-label="检查范围">
+                    <span className="field-label">检查范围</span>
+                    <Segmented options={["仅选区", "当前章节", "全书联动"] as const} value={revisionInput.scope} disabled={revisionBusy} onChange={(scope) => setRevisionInput({ ...revisionInput, scope })} />
+                  </div>
+                </div>
+                {revisionInput.scope === "仅选区" && (
+                  <div className="revision-selection-preview">
+                    <strong>{revisionSelection.text ? `已选 ${revisionSelection.text.length} 字` : "尚未选择正文"}</strong>
+                    <p>{revisionSelection.text || "关闭对话框，在正文中选中文字后重新点击“修改意见”。"}</p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="revision-proposal-summary">
+                  <div><Badge tone="accent">{revisionProposal.authority}</Badge><Badge tone="neutral">{revisionProposal.scope}</Badge><strong>{revisionRepairItems.length} 项可应用修改</strong></div>
+                  <p>{revisionProposal.summary}</p>
+                </div>
+                {revisionProposal.warnings.length > 0 && <div className="revision-warnings" role="alert"><AlertTriangle size={16} /><span>{revisionProposal.warnings.join("；")}</span></div>}
+                {revisionProposal.impacts.length > 0 && (
+                  <div className="revision-impact-list">
+                    <strong>影响检查</strong>
+                    {revisionProposal.impacts.map((impact, index) => <div key={`${impact.location}-${index}`}><Badge tone={impact.risk === "高" ? "danger" : impact.risk === "中" ? "warning" : "neutral"}>{impact.targetType}</Badge><span><b>{impact.location}</b>{impact.reason}</span></div>)}
+                  </div>
+                )}
+                <div className="revision-repair-list">
+                  {revisionRepairItems.map((item) => (
+                    <article key={item.id} className={selectedRepairIds.includes(item.id) ? "selected" : ""}>
+                      <label><input type="checkbox" checked={selectedRepairIds.includes(item.id)} onChange={(event) => setSelectedRepairIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.kind} · {item.label}</strong><small>{item.reason}</small></span><Badge tone={item.risk === "高" ? "danger" : item.risk === "中" ? "warning" : "neutral"}>{item.risk}风险</Badge></label>
+                      <details><summary>查看修改前后</summary><div className="revision-before-after"><section><span>修改前</span><pre>{item.before || "无"}</pre></section><section><span>修改后</span><pre>{item.after || "无"}</pre></section></div></details>
+                    </article>
+                  ))}
+                  {!revisionRepairItems.length && <p className="muted-line">没有生成可应用修改。可以调整意见后重新分析。</p>}
+                </div>
+              </>
+            )}
+            <div className="modal-actions">
+              <Button variant="secondary" disabled={revisionBusy} onClick={() => revisionProposal ? setRevisionProposal(null) : setRevisionOpen(false)}>{revisionProposal ? "返回修改意见" : "取消"}</Button>
+              {!revisionProposal ? (
+                <Button disabled={revisionBusy || !revisionInput.instruction.trim() || (revisionInput.scope === "仅选区" && !revisionSelection.text)} icon={revisionBusy ? <LoaderCircle className="spin" size={16} /> : <SearchCheck size={16} />} onClick={async () => {
+                  setRevisionBusy(true);
+                  try {
+                    const saved = await saveLatestForAction();
+                    const proposal = await api.analyzeNovelRevision(project.summary.id, {
+                      chapterId: saved.id, ...revisionInput,
+                      selectionStart: revisionInput.scope === "仅选区" ? revisionSelection.start : undefined,
+                      selectionEnd: revisionInput.scope === "仅选区" ? revisionSelection.end : undefined,
+                      selectedText: revisionInput.scope === "仅选区" ? revisionSelection.text : undefined,
+                    });
+                    setRevisionProposal(proposal);
+                    setSelectedRepairIds([
+                      ...proposal.contractRepairs.map((item) => item.id), ...proposal.planRepairs.map((item) => item.id),
+                      ...proposal.chapterRepairs.map((item) => item.id), ...(proposal.textRepair ? [proposal.textRepair.id] : []),
+                    ]);
+                  } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
+                  finally { setRevisionBusy(false); }
+                }}>{revisionBusy ? "分析中" : "分析修改意见"}</Button>
+              ) : (
+                <Button disabled={revisionBusy || !selectedRepairIds.length} icon={revisionBusy ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />} onClick={async () => {
+                  setRevisionBusy(true);
+                  try {
+                    const result = await api.applyNovelRevision(project.summary.id, revisionProposal, selectedRepairIds);
+                    await reload();
+                    const loaded = await api.getChapter(project.summary.id, revisionProposal.sourceChapterId);
+                    draftRef.current = loaded; setDraft(loaded); lastSavedSignature.current = chapterDraftSignature(loaded); setSaveStatus("saved");
+                    setRevisionOpen(false);
+                    const contractNote = result.appliedTargets.includes("创作设定") ? "；创作设定需要重新审批" : "";
+                    notify(`已应用 ${result.appliedTargets.length} 个目标${result.changeRequestIds.length ? `，建立 ${result.changeRequestIds.length} 条受保护变更记录` : ""}${contractNote}`);
+                  } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
+                  finally { setRevisionBusy(false); }
+                }}>{revisionBusy ? "应用中" : `应用所选 ${selectedRepairIds.length} 项`}</Button>
+              )}
+            </div>
+          </div>
+        </Modal>
       )}
       {historyOpen && (
         <Modal

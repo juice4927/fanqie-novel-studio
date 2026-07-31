@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHAPTER_FUNCTIONS, GENRES } from "../src/shared/types";
+import { CHAPTER_FUNCTIONS, GENRES, NOVEL_CONTRACT_FIELDS } from "../src/shared/types";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import type { AppApi } from "../src/shared/types";
 
@@ -162,6 +162,28 @@ const changeRequest = z.object({
   status: z.enum(["待审批", "已批准", "已拒绝", "已应用"]), createdAt: timestamp,
 }).strict();
 
+const novelRisk = z.enum(["低", "中", "高"]);
+const novelPlanSnapshot = z.object({
+  title: shortText, goal: mediumText, conflict: mediumText, outcome: mediumText,
+  targetWords: z.number().int().min(0).max(20_000_000),
+}).strict();
+const novelChapterSnapshot = z.object({
+  title: shortText, outline: mediumText, chapterFunction: z.enum(CHAPTER_FUNCTIONS).optional(),
+  targetWords: z.number().int().min(800).max(5000).optional(), chapterPromise: mediumText.optional(),
+  expectedPayoff: mediumText.optional(), crisis: mediumText.optional(), endingExpectation: mediumText.optional(),
+  expectationTargetChapter: positiveInt.nullable().optional(),
+}).strict();
+const novelRevisionProposal = z.object({
+  sourceChapterId: id, baseContractVersion: z.number().int().min(0).max(1_000_000), instruction: z.string().trim().min(1).max(5000),
+  authority: z.enum(["设定为准", "当前正文为准"]), scope: z.enum(["仅选区", "当前章节", "全书联动"]),
+  summary: mediumText, warnings: z.array(shortText).max(100),
+  impacts: z.array(z.object({ targetType: z.enum(["创作契约", "规划", "章节", "事实账本", "期待账本"]), location: shortText, reason: mediumText, risk: novelRisk }).strict()).max(200),
+  contractRepairs: z.array(z.object({ id, field: z.enum(NOVEL_CONTRACT_FIELDS), label: shortText, before: mediumText, after: mediumText, reason: mediumText, risk: novelRisk }).strict()).max(100),
+  planRepairs: z.array(z.object({ id, targetId: id, location: shortText, before: novelPlanSnapshot, after: novelPlanSnapshot, reason: mediumText, risk: novelRisk }).strict()).max(200),
+  chapterRepairs: z.array(z.object({ id, targetId: id, baseRevision: z.number().int().min(0).max(1_000_000), location: shortText, before: novelChapterSnapshot, after: novelChapterSnapshot, reason: mediumText, risk: novelRisk }).strict()).max(200),
+  textRepair: z.object({ id, targetId: id, baseRevision: z.number().int().min(0).max(1_000_000), start: z.number().int().min(0).max(20_000_000), end: z.number().int().min(0).max(20_000_000), before: longText, after: longText, reason: mediumText, risk: novelRisk }).strict().nullable(),
+}).strict();
+
 const reviewExperiment = z.object({
   id: z.string().max(200), title: shortText, hypothesis: mediumText, changeSummary: mediumText,
   fromChapter: positiveInt, toChapter: positiveInt,
@@ -224,6 +246,12 @@ const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
       expectationTargetChapter: positiveInt.nullable().optional(),
     }).strict() }).strict()).max(100),
   }).strict()]),
+  analyzeNovelRevision: z.tuple([id, z.object({
+    chapterId: id, instruction: z.string().trim().min(1).max(5000), authority: z.enum(["设定为准", "当前正文为准"]),
+    scope: z.enum(["仅选区", "当前章节", "全书联动"]), selectionStart: z.number().int().min(0).max(20_000_000).optional(),
+    selectionEnd: z.number().int().min(0).max(20_000_000).optional(), selectedText: longText.optional(),
+  }).strict()]),
+  applyNovelRevision: z.tuple([id, novelRevisionProposal, z.array(id).min(1).max(500)]),
   saveChapter: z.tuple([id, chapter, z.enum(["version", "autosave"]).optional()]),
   saveExpectation: z.tuple([id, expectation]),
   transitionChapter: z.tuple([id, id, z.enum(["章纲", "草稿", "待质检", "待定稿", "已定稿", "待发布", "已发布"])]),

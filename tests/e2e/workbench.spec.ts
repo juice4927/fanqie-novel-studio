@@ -95,6 +95,14 @@ test("navigates through research and the complete project workflow", async ({
   await page.getByRole("button", { name: /写作台/ }).click();
   await page.locator(".chapter-scroll button").filter({ hasText: "回声的代价" }).click();
   await expect(page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。")).toHaveValue("自动保存回归文本：雨落在旧城的玻璃窗上。");
+  await manuscript.evaluate((element: HTMLTextAreaElement) => { element.focus(); element.setSelectionRange(0, 6); });
+  await page.getByRole("button", { name: "修改意见" }).click();
+  const revisionDialog = page.getByRole("dialog", { name: "AI 修改意见" });
+  await expect(revisionDialog).toBeVisible();
+  await expect(revisionDialog.getByText("已选 6 字")).toBeVisible();
+  await revisionDialog.getByPlaceholder(/第五章和解太快/).fill("让开头更紧张，但保留事件结果。");
+  await expect(revisionDialog.getByRole("button", { name: "仅选区" })).toHaveClass(/active/);
+  await revisionDialog.locator(".modal-actions").getByRole("button", { name: "取消" }).click();
   await page.getByPlaceholder("检索正文").fill("红伞");
   await expect(page.getByText("停电后的第七分钟").first()).toBeVisible();
   const layout = await page.evaluate(() => {

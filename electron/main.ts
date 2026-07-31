@@ -5,6 +5,7 @@ import type {
   Chapter,
   ChapterFactsExtractionEvent,
   MetricSnapshot,
+  NovelRevisionProposal,
 } from "../src/shared/types";
 import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
@@ -12,6 +13,7 @@ import { AiService } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
 import { readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
 import { compileProjectChapterContext } from "../src/shared/context-compiler";
+import { applyContractRepairs, applyTextRepair, chapterRevisionSnapshot, planRevisionSnapshot, sameRevisionSnapshot } from "../src/shared/novel-revision";
 import {
   createChapterGenerationCoordinator,
   type ChapterGenerationCoordinator,
@@ -219,6 +221,87 @@ function registerHandlers() {
       chapterGeneration.startOne(projectId, chapterId, undefined, "bypass"),
     logRetryFailure: (details) =>
       logger.write("error", "ai.retry.failed", { ...details }),
+  });
+  handle("analyzeNovelRevision", (id, input) => ai.analyzeNovelRevision(database.getProject(id), input));
+  handle("applyNovelRevision", (id, proposal: NovelRevisionProposal, selectedRepairIds: string[]) => {
+    const selected = new Set(selectedRepairIds);
+    if (!selected.size) throw new Error("请至少选择一项修改");
+    if (selected.size !== selectedRepairIds.length) throw new Error("修改提案包含重复项目");
+    const allRepairIds = new Set([
+      ...proposal.contractRepairs.map((item) => item.id),
+      ...proposal.planRepairs.map((item) => item.id),
+      ...proposal.chapterRepairs.map((item) => item.id),
+      ...(proposal.textRepair ? [proposal.textRepair.id] : []),
+    ]);
+    if ([...selected].some((repairId) => !allRepairIds.has(repairId))) throw new Error("修改提案包含未知项目");
+
+    const project = database.getProject(id);
+    const contractRepairs = proposal.contractRepairs.filter((item) => selected.has(item.id));
+    if (contractRepairs.length && project.contract.version !== proposal.baseContractVersion)
+      throw new Error("创作设定版本已变化，请重新分析修改意见");
+    const nextContract = contractRepairs.length ? applyContractRepairs(project.contract, contractRepairs) : null;
+    const plansById = new Map(project.plans.map((item) => [item.id, item]));
+    const planRepairs = proposal.planRepairs.filter((item) => selected.has(item.id));
+    for (const repair of planRepairs) {
+      const current = plansById.get(repair.targetId);
+      if (!current || !sameRevisionSnapshot(planRevisionSnapshot(current), repair.before))
+        throw new Error(`规划“${repair.location}”已变化，请重新分析修改意见`);
+    }
+    const chaptersById = new Map(project.chapters.map((item) => [item.id, item]));
+    const chapterRepairs = proposal.chapterRepairs.filter((item) => selected.has(item.id));
+    for (const repair of chapterRepairs) {
+      const current = chaptersById.get(repair.targetId);
+      if (!current || current.revision !== repair.baseRevision || !sameRevisionSnapshot(chapterRevisionSnapshot(current), repair.before))
+        throw new Error(`${repair.location}已变化，请重新分析修改意见`);
+    }
+    if (proposal.textRepair && selected.has(proposal.textRepair.id)) {
+      const current = chaptersById.get(proposal.textRepair.targetId);
+      if (!current) throw new Error("正文修改目标不存在");
+      applyTextRepair(current, proposal.textRepair);
+    }
+
+    const changeRequestIds: string[] = [];
+    const approveProtectedChange = (targetKind: "创作契约" | "规划" | "章节", targetId: string, title: string, before: unknown, after: unknown) => {
+      const change = database.saveChangeRequest(id, {
+        id: "", targetKind, targetId, baseVersion: 0, title,
+        reason: proposal.instruction, beforeValue: JSON.stringify(before), afterValue: JSON.stringify(after),
+        impact: proposal.summary, rollback: "从目标历史版本恢复本次修改前内容",
+        status: "待审批", createdAt: "",
+      });
+      database.decideChangeRequest(id, change.id, "批准");
+      changeRequestIds.push(change.id);
+    };
+    const appliedTargets: string[] = [];
+    if (nextContract) {
+      if (project.contract.approved) approveProtectedChange("创作契约", "contract", "AI 修改意见联动创作设定", project.contract, nextContract);
+      database.saveContract(id, nextContract);
+      appliedTargets.push("创作设定");
+    }
+    for (const repair of planRepairs) {
+      const current = plansById.get(repair.targetId)!;
+      if (current.status === "已批准") approveProtectedChange("规划", current.id, `AI 修改意见联动：${current.title}`, repair.before, repair.after);
+      database.savePlan(id, { ...current, ...repair.after });
+      appliedTargets.push(repair.location);
+    }
+    const affectedChapterIds = new Set([
+      ...chapterRepairs.map((item) => item.targetId),
+      ...(proposal.textRepair && selected.has(proposal.textRepair.id) ? [proposal.textRepair.targetId] : []),
+    ]);
+    for (const chapterId of affectedChapterIds) {
+      const current = chaptersById.get(chapterId)!;
+      const metadata = chapterRepairs.find((item) => item.targetId === chapterId);
+      const text = proposal.textRepair?.targetId === chapterId && selected.has(proposal.textRepair.id) ? proposal.textRepair : null;
+      const next = {
+        ...current,
+        ...(metadata?.after ?? {}),
+        content: text ? applyTextRepair(current, text) : current.content,
+      };
+      if (["已定稿", "待发布", "已发布"].includes(current.status))
+        approveProtectedChange("章节", current.id, `AI 修改意见联动：第${current.number}章`, current, next);
+      database.saveChapter(id, next);
+      appliedTargets.push(`第${current.number}章`);
+    }
+    return { appliedTargets, changeRequestIds };
   });
 }
 

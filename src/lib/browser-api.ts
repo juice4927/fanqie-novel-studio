@@ -52,7 +52,7 @@ import {
 } from "../shared/project-service";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
-import { assertLocalResearchImportRights } from "../shared/research-import-service";
+import { prepareLocalResearchBook } from "../shared/research-import-service";
 import { parseRankingCsv } from "../shared/ranking-csv";
 import {
   assembleDashboard,
@@ -1012,20 +1012,13 @@ export function createBrowserApi(): AppApi {
       rightsConfirmed,
       cloudConsent,
     ) {
-      assertLocalResearchImportRights(rightsConfirmed);
-      const book: ResearchBook = {
-        id: id(),
-        title: preview.fileName,
-        author: "未标注",
+      const book = prepareLocalResearchBook(
+        preview,
         genre,
-        sourceType: preview.sourceType,
-        chapterCount: preview.chapters.length,
-        wordCount: preview.totalWords,
         rightsConfirmed,
         cloudConsent,
-        importedAt: now(),
-        status: "待拆解",
-      };
+        { createId: id, currentTimestamp: now },
+      );
       state.books.unshift(book);
       persist();
       return book;

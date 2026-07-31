@@ -50,6 +50,7 @@ describe("browser research import workflow", () => {
     );
 
     expect(imported).toMatchObject({
+      title: "sample",
       rightsConfirmed: true,
       cloudConsent: false,
       status: "待拆解",

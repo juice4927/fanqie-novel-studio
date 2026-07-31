@@ -13,6 +13,8 @@ import type {
   InsightPack,
   LedgerFact,
   MarketOpportunity,
+  NovelRevisionInput,
+  NovelRevisionProposal,
   PlanningGenerationInput,
   PlanningGenerationResult,
   PlanningReviewInput,
@@ -32,6 +34,7 @@ import { parseStoryNumber } from "../src/shared/story-constraints";
 import { compileAestheticGuidance } from "../src/shared/aesthetic-profile";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import { CHAPTER_FUNCTIONS } from "../src/shared/types";
+import { chapterRevisionSnapshot, contractFieldText, planRevisionSnapshot } from "../src/shared/novel-revision";
 
 export function abortableDelay(milliseconds: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -327,6 +330,39 @@ const PlanningReviewSchema = z.object({
   })).max(100),
 });
 
+const NovelRevisionSchema = z.object({
+  summary: z.string().min(4).max(1200),
+  warnings: z.array(z.string().min(2).max(500)).max(20),
+  impacts: z.array(z.object({
+    targetType: z.enum(["创作契约", "规划", "章节", "事实账本", "期待账本"]),
+    location: z.string().min(1).max(160), reason: z.string().min(2).max(500),
+    risk: z.enum(["低", "中", "高"]),
+  })).max(100),
+  contractRepairs: z.array(z.object({
+    field: z.enum(["premise", "protagonistDesire", "protagonistArc", "readerPromise", "coreEmotion", "ending", "worldRules", "keyRelationships", "majorForces", "timelineAnchors", "immutableRules", "prohibitedPatterns"]),
+    label: z.string().min(1).max(80), after: z.string().max(10_000),
+    reason: z.string().min(2).max(500), risk: z.enum(["低", "中", "高"]),
+  })).max(30),
+  planRepairs: z.array(z.object({
+    targetId: z.string(), after: z.object({
+      title: z.string().min(1).max(500), goal: z.string().max(10_000), conflict: z.string().max(10_000),
+      outcome: z.string().max(10_000), targetWords: z.number().int().min(0).max(20_000_000),
+    }), reason: z.string().min(2).max(500), risk: z.enum(["低", "中", "高"]),
+  })).max(100),
+  chapterRepairs: z.array(z.object({
+    targetId: z.string(), after: z.object({
+      title: z.string().min(1).max(500), outline: z.string().max(10_000),
+      chapterFunction: z.enum(CHAPTER_FUNCTIONS).optional(), targetWords: z.number().int().min(800).max(5000).optional(),
+      chapterPromise: z.string().max(10_000).optional(), expectedPayoff: z.string().max(10_000).optional(),
+      crisis: z.string().max(10_000).optional(), endingExpectation: z.string().max(10_000).optional(),
+      expectationTargetChapter: z.number().int().positive().nullable().optional(),
+    }), reason: z.string().min(2).max(500), risk: z.enum(["低", "中", "高"]),
+  })).max(100),
+  replacementText: z.string().max(200_000).nullable(),
+  replacementReason: z.string().max(500).nullable(),
+  replacementRisk: z.enum(["低", "中", "高"]).nullable(),
+});
+
 type InsightResult = z.infer<typeof InsightSchema>;
 const DECONSTRUCT_BATCH_SIZE = 5;
 const CHAPTER_PLANNING_BATCH_SIZE = 10;
@@ -379,6 +415,10 @@ export function sanitizeResearchBatch<T extends { content: string }>(chapters: T
 
 function hashInput(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function sameJson(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export type AiCachePolicy = "use" | "bypass";
@@ -449,9 +489,9 @@ export class AiService {
       options.projectId, options.taskType, inputHash, PROMPT_VERSION, provider, settings.model, options.inputSummary,
       options.retryContext,
     );
+    options.onJobStarted?.(jobId);
     const startedAt = Date.now();
     let lastError = "模型输出不符合结构要求";
-    options.onJobStarted?.(jobId);
     let repairInstruction = "";
     const useResponses = usesResponsesApi(settings.model);
     let useJsonMode = !useResponses && inferProviderCapabilities(settings.baseUrl).jsonMode;
@@ -972,6 +1012,80 @@ export class AiService {
       chapterRepairs,
       reviewedPlanCount: reviewedPlans.length,
       reviewedChapterCount: reviewedChapters.length,
+    };
+  }
+
+  async analyzeNovelRevision(
+    project: ProjectDetail,
+    input: NovelRevisionInput,
+  ): Promise<NovelRevisionProposal> {
+    const chapter = project.chapters.find((item) => item.id === input.chapterId);
+    if (!chapter) throw new Error("章节不存在");
+    if (!input.instruction.trim()) throw new Error("请先填写修改意见");
+    const selected = input.scope === "仅选区";
+    const start = selected ? input.selectionStart ?? -1 : 0;
+    const end = selected ? input.selectionEnd ?? -1 : chapter.content.length;
+    if (selected && (start < 0 || end <= start || end > chapter.content.length))
+      throw new Error("请先在正文中选中要修改的文字");
+    const sourceText = chapter.content.slice(start, end);
+    if (selected && input.selectedText !== sourceText)
+      throw new Error("正文选区已经变化，请重新选择");
+
+    const structuralPlans = project.plans.filter((plan) => plan.kind === "宏观阶段" || plan.kind === "分卷");
+    const nearbyPlans = project.plans.filter((plan) => Math.abs(plan.ordinal - chapter.number) <= (input.scope === "全书联动" ? 60 : 5));
+    const plans = [...new Map([...structuralPlans, ...nearbyPlans].map((plan) => [plan.id, plan])).values()].slice(0, 160);
+    const nearbyChapters = project.chapters
+      .filter((item) => Math.abs(item.number - chapter.number) <= (input.scope === "全书联动" ? 60 : 5))
+      .slice(0, 121);
+    const sourceTextTruncated = sourceText.length > 16_000;
+    const result = await this.runJson({
+      projectId: project.summary.id,
+      taskType: "analyze-novel-revision",
+      inputSummary: `第${chapter.number}章修改意见：${input.instruction.trim().slice(0, 80)}`,
+      system: [
+        "你是中文长篇小说的联动修订编辑。先理解作者的自然语言意见，再提出最小、可审查的结构化修改，不得直接执行。",
+        `本次权威依据是“${input.authority}”。设定为准时不得修改创作契约或已确定的故事事实，只修复正文或与正文直接相关的未锁定章纲；当前正文为准时才可提出反向同步设定与规划的提案。`,
+        `本次范围是“${input.scope}”。仅选区时只返回 replacementText，不得提出其他修复；当前章节时不得修改其他章节；全书联动也只能修改输入中真实存在的目标 ID。`,
+        "保留作者未要求改变的情节结果、人物动机、视角和文风。不要为了完整而扩大修改面。",
+        "事实账本和期待账本只做 impact 提醒，本次不直接生成写入补丁。没有必要修改的类别必须返回空数组。",
+        sourceTextTruncated
+          ? "目标正文超过本次安全替换上限，只分析联动影响和结构修复，replacementText 必须返回 null。"
+          : "replacementText 只输出目标范围的替换文字，不输出完整章节或修改说明。若正文无需修改则返回 null。",
+      ].join("\n"),
+      user: `作品：${project.summary.title}\n题材：${project.summary.genre}\n作者意见：${input.instruction.trim()}\n创作契约：${JSON.stringify(project.contract)}\n可修改规划：${JSON.stringify(plans)}\n相关章节章纲：${JSON.stringify(nearbyChapters.map((item) => ({ ...chapterRevisionSnapshot(item), id: item.id, number: item.number, status: item.status })))}\n已确认事实：${JSON.stringify(project.facts.filter((fact) => fact.confidence === "已确认").slice(-150))}\n期待账本：${JSON.stringify(project.expectations.slice(-100))}\n目标章节：第${chapter.number}章 ${chapter.title}\n目标正文：\n${sourceText.slice(0, 16000)}\n输出 summary、warnings、impacts、contractRepairs、planRepairs、chapterRepairs、replacementText、replacementReason、replacementRisk。`,
+      schema: NovelRevisionSchema,
+      longTask: true,
+      stream: true,
+      reasoningEffort: "medium",
+    });
+    const plansById = new Map(plans.map((item) => [item.id, item]));
+    const chaptersById = new Map(nearbyChapters.map((item) => [item.id, item]));
+    const contractRepairs = [...new Map(result.contractRepairs
+      .filter((repair) => input.authority === "当前正文为准")
+      .map((repair) => [repair.field, repair])).values()]
+      .map((repair) => ({ ...repair, id: `contract:${repair.field}`, before: contractFieldText(project.contract, repair.field) }))
+      .filter((repair) => repair.before !== repair.after);
+    const planRepairs = [...new Map(result.planRepairs.filter((repair) => plansById.has(repair.targetId)).map((repair) => [repair.targetId, repair])).values()]
+      .map((repair) => ({ ...repair, id: `plan:${repair.targetId}`, location: plansById.get(repair.targetId)!.title, before: planRevisionSnapshot(plansById.get(repair.targetId)!) }))
+      .filter((repair) => !sameJson(repair.before, repair.after));
+    const chapterRepairs = [...new Map(result.chapterRepairs.filter((repair) => chaptersById.has(repair.targetId) && (input.scope === "全书联动" || repair.targetId === chapter.id)).map((repair) => [repair.targetId, repair])).values()]
+      .map((repair) => ({ ...repair, id: `chapter:${repair.targetId}`, baseRevision: chaptersById.get(repair.targetId)!.revision, location: `第${chaptersById.get(repair.targetId)!.number}章`, before: chapterRevisionSnapshot(chaptersById.get(repair.targetId)!) }))
+      .filter((repair) => !sameJson(repair.before, repair.after));
+    const textRepair = !sourceTextTruncated && sourceText.length > 0 && result.replacementText !== null && result.replacementText !== sourceText
+      ? { id: `text:${chapter.id}`, targetId: chapter.id, baseRevision: chapter.revision, start, end, before: sourceText, after: result.replacementText, reason: result.replacementReason || "按作者意见修改正文", risk: result.replacementRisk ?? "低" as const }
+      : null;
+    const omitted = input.scope === "全书联动" && project.chapters.length > nearbyChapters.length;
+    const safetyWarnings = [
+      ...(omitted ? ["长篇作品本次检查了目标章前后各 60 章；更远章节需分段继续检查。"] : []),
+      ...(sourceTextTruncated ? ["目标正文超过 16000 字符，本次不会生成整段替换；请选中具体段落后再次提交正文修改。"] : []),
+    ];
+    return {
+      sourceChapterId: chapter.id,
+      baseContractVersion: project.contract.version,
+      instruction: input.instruction.trim(), authority: input.authority, scope: input.scope,
+      summary: result.summary,
+      warnings: [...result.warnings, ...safetyWarnings],
+      impacts: result.impacts, contractRepairs, planRepairs, chapterRepairs, textRepair,
     };
   }
 

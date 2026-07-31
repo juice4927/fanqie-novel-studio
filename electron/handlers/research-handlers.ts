@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import type {
   AppApi,
   ImportPreview,
@@ -13,7 +12,7 @@ import {
   nextRankingRun,
 } from "../../src/shared/ranking-schedule";
 import { parseRankingCsv } from "../../src/shared/ranking-csv";
-import { assertLocalResearchImportRights } from "../../src/shared/research-import-service";
+import { prepareLocalResearchBook } from "../../src/shared/research-import-service";
 import type { AiService } from "../ai-service";
 import { now, type WorkspaceDatabase } from "../database";
 import {
@@ -145,20 +144,13 @@ export function registerResearchHandlers({
   register(
     "importResearchBook",
     (preview, genre, rightsConfirmed, cloudConsent) => {
-      assertLocalResearchImportRights(rightsConfirmed);
-      const book: ResearchBook = {
-        id: randomUUID(),
-        title: path.basename(preview.fileName, path.extname(preview.fileName)),
-        author: "未标注",
+      const book = prepareLocalResearchBook(
+        preview,
         genre,
-        sourceType: preview.sourceType,
-        chapterCount: preview.chapters.length,
-        wordCount: preview.totalWords,
         rightsConfirmed,
         cloudConsent,
-        importedAt: now(),
-        status: "待拆解",
-      };
+        { createId: randomUUID, currentTimestamp: now },
+      );
       database.saveResearchBook(book, preview.chapters);
       return book;
     },

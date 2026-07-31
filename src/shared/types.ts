@@ -654,6 +654,99 @@ export interface PlanningRepairResult {
   appliedChapterIds: string[];
 }
 
+export const NOVEL_CONTRACT_FIELDS = [
+  "premise", "protagonistDesire", "protagonistArc", "readerPromise", "coreEmotion", "ending",
+  "worldRules", "keyRelationships", "majorForces", "timelineAnchors", "immutableRules", "prohibitedPatterns",
+] as const;
+
+export type NovelContractField = (typeof NOVEL_CONTRACT_FIELDS)[number];
+export type NovelRevisionAuthority = "设定为准" | "当前正文为准";
+export type NovelRevisionScope = "仅选区" | "当前章节" | "全书联动";
+export type NovelRevisionRisk = "低" | "中" | "高";
+
+export interface NovelRevisionInput {
+  chapterId: string;
+  instruction: string;
+  authority: NovelRevisionAuthority;
+  scope: NovelRevisionScope;
+  selectionStart?: number;
+  selectionEnd?: number;
+  selectedText?: string;
+}
+
+export interface NovelRevisionImpact {
+  targetType: "创作契约" | "规划" | "章节" | "事实账本" | "期待账本";
+  location: string;
+  reason: string;
+  risk: NovelRevisionRisk;
+}
+
+export interface NovelContractRepair {
+  id: string;
+  field: NovelContractField;
+  label: string;
+  before: string;
+  after: string;
+  reason: string;
+  risk: NovelRevisionRisk;
+}
+
+export type NovelPlanSnapshot = Pick<PlanNode, "title" | "goal" | "conflict" | "outcome" | "targetWords">;
+export type NovelChapterSnapshot = Pick<Chapter, "title" | "outline" | "chapterFunction" | "targetWords" | "chapterPromise" | "expectedPayoff" | "crisis" | "endingExpectation" | "expectationTargetChapter">;
+
+export interface NovelPlanRepair {
+  id: string;
+  targetId: string;
+  location: string;
+  before: NovelPlanSnapshot;
+  after: NovelPlanSnapshot;
+  reason: string;
+  risk: NovelRevisionRisk;
+}
+
+export interface NovelChapterRepair {
+  id: string;
+  targetId: string;
+  baseRevision: number;
+  location: string;
+  before: NovelChapterSnapshot;
+  after: NovelChapterSnapshot;
+  reason: string;
+  risk: NovelRevisionRisk;
+}
+
+export interface NovelTextRepair {
+  id: string;
+  targetId: string;
+  baseRevision: number;
+  start: number;
+  end: number;
+  before: string;
+  after: string;
+  reason: string;
+  risk: NovelRevisionRisk;
+}
+
+export interface NovelRevisionProposal {
+  sourceChapterId: string;
+  baseContractVersion: number;
+  instruction: string;
+  authority: NovelRevisionAuthority;
+  scope: NovelRevisionScope;
+  summary: string;
+  warnings: string[];
+  impacts: NovelRevisionImpact[];
+  contractRepairs: NovelContractRepair[];
+  planRepairs: NovelPlanRepair[];
+  chapterRepairs: NovelChapterRepair[];
+  textRepair: NovelTextRepair | null;
+}
+
+export interface NovelRevisionApplyResult {
+  appliedTargets: string[];
+  changeRequestIds: string[];
+}
+
 export interface SearchHit {
   id: string;
   type: "章节" | "规划" | "事实";
@@ -740,6 +833,8 @@ export interface AppApi {
   generatePlanningDraft(id: string, input: PlanningGenerationInput): Promise<PlanningGenerationResult>;
   reviewPlanning(id: string, input: PlanningReviewInput): Promise<PlanningReviewResult>;
   applyPlanningRepairs(id: string, input: PlanningRepairInput): Promise<PlanningRepairResult>;
+  analyzeNovelRevision(id: string, input: NovelRevisionInput): Promise<NovelRevisionProposal>;
+  applyNovelRevision(id: string, proposal: NovelRevisionProposal, selectedRepairIds: string[]): Promise<NovelRevisionApplyResult>;
   saveChapter(id: string, chapter: Chapter, mode?: ChapterSaveMode): Promise<Chapter>;
   saveExpectation(
     id: string,
