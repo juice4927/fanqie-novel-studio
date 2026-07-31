@@ -33,7 +33,6 @@ import type {
   StorySummary,
   SystemHealthReport,
 } from "../src/shared/types";
-import { normalizeAestheticProfile } from "../src/shared/aesthetic-profile";
 import {
   approveContractDraft,
   prepareContractUpdate,
@@ -50,6 +49,10 @@ import {
   resolveQualityIssue,
 } from "../src/shared/quality-issue-service";
 import { prepareScheduleSave } from "../src/shared/schedule-service";
+import {
+  prepareProjectCreation,
+  prepareProjectUpdate,
+} from "../src/shared/project-service";
 import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
 import { prepareReviewExperiment } from "../src/shared/review-experiment-service";
 import {
@@ -358,6 +361,10 @@ export class WorkspaceDatabase {
   createProject(input: CreateProjectInput): ProjectSummary {
     const id = randomUUID();
     const timestamp = now();
+    const prepared = prepareProjectCreation(input, {
+      projectId: id,
+      updatedAt: timestamp,
+    });
     this.catalog
       .prepare(
         `
@@ -367,46 +374,16 @@ export class WorkspaceDatabase {
       )
       .run(
         id,
-        input.title.trim(),
-        input.genre,
-        input.targetWords,
-        input.updateCadence,
-        input.safeStockLine ?? 10,
+        prepared.summary.title,
+        prepared.summary.genre,
+        prepared.summary.targetWords,
+        prepared.summary.updateCadence,
+        prepared.summary.safeStockLine,
         timestamp,
         timestamp,
       );
     const db = this.projectDb(id);
-    const contract: StoryContract = {
-      premise: "",
-      genreSubtype: "",
-      fanqieCategoryKey: "",
-      secondaryGenres: input.secondaryGenres ?? [],
-      genreElements: input.genreElements ?? [],
-      customGenreDirection: input.customGenreDirection ?? "",
-      audience: "",
-      commercialHook: "",
-      openingMechanism: "",
-      growthCarrier: "",
-      primaryPayoff: "",
-      longFormEngine: "",
-      protagonistDesire: "",
-      protagonistArc: "",
-      keyRelationships: [],
-      worldRules: [],
-      majorForces: [],
-      timelineAnchors: [],
-      readerPromise: "",
-      coreEmotion: "",
-      ending: "",
-      immutableRules: [],
-      prohibitedPatterns: [],
-      majorStateChanges: { include: [], exclude: [] },
-      aestheticProfile: normalizeAestheticProfile(),
-      version: 1,
-      approved: false,
-      updatedAt: timestamp,
-    };
-    this.setState(db, "contract", contract);
+    this.setState(db, "contract", prepared.contract);
     this.setState(db, "insightIds", []);
     return this.getProjectSummary(id);
   }
@@ -558,6 +535,8 @@ export class WorkspaceDatabase {
 
   updateProject(id: string, patch: ProjectPatch): ProjectSummary {
     const current = this.getProjectSummary(id);
+    const updatedAt = now();
+    const next = prepareProjectUpdate(current, patch, updatedAt);
     this.catalog
       .prepare(
         `
@@ -565,12 +544,12 @@ export class WorkspaceDatabase {
     `,
       )
       .run(
-        patch.title?.trim() || current.title,
-        patch.status ?? current.status,
-        patch.targetWords ?? current.targetWords,
-        patch.updateCadence ?? current.updateCadence,
-        patch.safeStockLine ?? current.safeStockLine,
-        now(),
+        next.title,
+        next.status,
+        next.targetWords,
+        next.updateCadence,
+        next.safeStockLine,
+        updatedAt,
         id,
       );
     return this.getProjectSummary(id);

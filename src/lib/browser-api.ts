@@ -46,6 +46,10 @@ import {
   resolveQualityIssue,
 } from "../shared/quality-issue-service";
 import { prepareScheduleSave } from "../shared/schedule-service";
+import {
+  prepareProjectCreation,
+  prepareProjectUpdate,
+} from "../shared/project-service";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
 import { assertLocalResearchImportRights } from "../shared/research-import-service";
@@ -457,22 +461,13 @@ export function createBrowserApi(): AppApi {
   const persist = () => save(state);
   const createProject = (input: CreateProjectInput) => {
     const projectId = id();
+    const prepared = prepareProjectCreation(input, {
+      projectId,
+      updatedAt: now(),
+    });
     const project: ProjectDetail = {
-      summary: {
-        id: projectId, title: input.title, genre: input.genre, status: "候选立项",
-        targetWords: input.targetWords, currentWords: 0, chapterCount: 0, stockChapters: 0,
-        safeStockLine: input.safeStockLine ?? 10, updateCadence: input.updateCadence,
-        nextPublishAt: null, riskLevel: "正常", updatedAt: now(),
-      },
-      contract: {
-        premise: "", genreSubtype: "", fanqieCategoryKey: "",
-        secondaryGenres: input.secondaryGenres ?? [], genreElements: input.genreElements ?? [],
-        customGenreDirection: input.customGenreDirection ?? "", protagonistDesire: "",
-        readerPromise: "", coreEmotion: "", ending: "", immutableRules: [],
-        prohibitedPatterns: [], majorStateChanges: { include: [], exclude: [] },
-        version: 1, approved: false, updatedAt: now(),
-        aestheticProfile: normalizeAestheticProfile(),
-      },
+      summary: prepared.summary,
+      contract: prepared.contract,
       plans: [], chapters: [], facts: [], issues: [], changes: [], schedule: [], metrics: [], experiments: [],
       insightIds: [], summaries: [], expectations: [],
     };
@@ -565,7 +560,7 @@ export function createBrowserApi(): AppApi {
     },
     async updateProject(projectId, patch: ProjectPatch) {
       const project = getProject(state, projectId);
-      project.summary = { ...project.summary, ...patch, updatedAt: now() };
+      project.summary = prepareProjectUpdate(project.summary, patch, now());
       persist();
       return summary(project);
     },

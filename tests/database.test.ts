@@ -219,15 +219,16 @@ describe("per-book isolation and gates", () => {
   it("persists composable genre settings for a manually created project", () => {
     const database = createDatabase();
     const created = database.createProject({
-      title: "白夜急诊室",
+      title: "  白夜急诊室  ",
       genre: "都市脑洞",
       targetWords: 1000000,
-      updateCadence: "每日 2 章",
+      updateCadence: "  每日 2 章  ",
       secondaryGenres: ["悬疑", "群像"],
       genreElements: ["现代都市", "探案", "无CP"],
       customGenreDirection: "用真实职业困境推进案件，不使用系统。",
     });
     const contract = database.getProject(created.id).contract;
+    expect(created).toMatchObject({ title: "白夜急诊室", updateCadence: "每日 2 章" });
     expect(contract.secondaryGenres).toEqual(["悬疑", "群像"]);
     expect(contract.genreElements).toEqual(["现代都市", "探案", "无CP"]);
     expect(contract.customGenreDirection).toContain("不使用系统");
