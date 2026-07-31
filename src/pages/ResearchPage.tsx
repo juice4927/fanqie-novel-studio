@@ -3,11 +3,7 @@ import {
   ClipboardPaste,
   FileInput,
   Link2,
-  LoaderCircle,
-  ScanText,
   Clock3,
-  Play,
-  Trash2,
   Upload,
 } from "lucide-react";
 import type {
@@ -24,80 +20,21 @@ import type {
   ResearchBook,
 } from "../shared/types";
 import { GENRES } from "../shared/types";
-import {
-  Badge,
-  Button,
-  Field,
-  Input,
-  Modal,
-  Segmented,
-  Select,
-  Textarea,
-} from "../components/UI";
-import { formatCount, formatDate } from "../lib/format";
+import { Button, Segmented } from "../components/UI";
 import { FANQIE_CATEGORY_PROFILES } from "../shared/fanqie-taxonomy";
-import {
-  estimateCjkTextTokens,
-  TOKEN_ESTIMATE_WARNING,
-} from "../shared/token-estimator";
 import { ResearchBooksView } from "./ResearchBooksView";
 import { ResearchInsightsView } from "./ResearchInsightsView";
 import { ResearchKnowledgeView } from "./ResearchKnowledgeView";
+import {
+  FANQIE_CATEGORIES,
+  ResearchRankingModals,
+  type FanqieGender,
+  type FanqieRankKind,
+} from "./ResearchRankingModals";
 import { ResearchRankingView } from "./ResearchRankingView";
+import { ResearchSampleModals } from "./ResearchSampleModals";
 
 type ResearchTab = "榜单快照" | "样本拆书" | "脱敏洞察" | "商业知识";
-
-const FANQIE_CATEGORIES = {
-  男频: [
-    ["1141", "西方奇幻"], ["1140", "东方仙侠"], ["8", "科幻末世"],
-    ["261", "都市日常"], ["124", "都市修真"], ["1014", "都市高武"],
-    ["273", "历史古代"], ["27", "战神赘婿"], ["263", "都市种田"],
-    ["258", "传统玄幻"], ["272", "历史脑洞"], ["539", "悬疑脑洞"],
-    ["262", "都市脑洞"], ["257", "玄幻脑洞"], ["751", "悬疑灵异"],
-    ["504", "抗战谍战"], ["746", "游戏体育"], ["718", "动漫衍生"],
-    ["1016", "男频衍生"],
-  ],
-  女频: [
-    ["1139", "古风世情"], ["8", "科幻末世"], ["746", "游戏体育"],
-    ["1015", "女频衍生"], ["248", "玄幻言情"], ["23", "种田"],
-    ["79", "年代"], ["267", "现言脑洞"], ["246", "宫斗宅斗"],
-    ["539", "悬疑脑洞"], ["253", "古言脑洞"], ["24", "快穿"],
-    ["749", "青春甜宠"], ["745", "星光璀璨"], ["747", "女频悬疑"],
-    ["750", "职场婚恋"], ["748", "豪门总裁"], ["1017", "民国言情"],
-  ],
-} as const;
-
-type FanqieGender = keyof typeof FANQIE_CATEGORIES;
-type FanqieRankKind = "阅读榜" | "新书榜";
-
-function splitPastedText(text: string): ImportPreview["chapters"] {
-  const pattern =
-    /^\s*(第[0-9零〇一二三四五六七八九十百千万两]+[章节回]\s*[^\n]{0,40})\s*$/gm;
-  const matches = [...text.matchAll(pattern)];
-  if (!matches.length)
-    return [
-      {
-        title: "正文",
-        content: text.trim(),
-        wordCount: text.replace(/\s/g, "").length,
-      },
-    ];
-  return matches
-    .map((match, index) => {
-      const content = text
-        .slice(
-          (match.index ?? 0) + match[0].length,
-          matches[index + 1]?.index ?? text.length,
-        )
-        .trim();
-      return {
-        title: match[1],
-        content,
-        wordCount: content.replace(/\s/g, "").length,
-      };
-    })
-    .filter((chapter) => chapter.content);
-}
 
 export function ResearchPage({
   api,
@@ -247,6 +184,86 @@ export function ResearchPage({
     }
   };
 
+  const importRankingSnapshot = async () => {
+    try {
+      await api.importRankingCsv(rankingCsv, rankingName);
+      setRankingModal(false);
+      setRankingCsv("");
+      await reload();
+      notify("榜单快照已保存");
+    } catch (error) {
+      notify(String(error), "error");
+    }
+  };
+
+  const capturePublicRanking = async () => {
+    try {
+      const snapshot = await api.capturePublicRanking(publicUrl, rankingName);
+      setPublicModal(false);
+      await reload();
+      notify(
+        snapshot.status !== "失败"
+          ? `已采集 ${snapshot.entries.length} 条公开书目`
+          : `采集失败已记录：${snapshot.error}`,
+        snapshot.status !== "失败" ? "success" : "error",
+      );
+    } catch (error) {
+      notify(String(error), "error");
+    }
+  };
+
+  const addRankingSchedule = async () => {
+    try {
+      await api.saveRankingSchedule({
+        url: publicUrl,
+        listName: rankingName,
+        frequency: scheduleFrequency,
+        enabled: true,
+      });
+      await reload();
+      notify("定时采榜任务已保存");
+    } catch (error) {
+      notify(String(error), "error");
+    }
+  };
+
+  const toggleRankingSchedule = async (
+    schedule: RankingCaptureSchedule,
+    enabled: boolean,
+  ) => {
+    try {
+      await api.saveRankingSchedule({
+        id: schedule.id,
+        url: schedule.url,
+        listName: schedule.listName,
+        frequency: schedule.frequency,
+        enabled,
+      });
+      await reload();
+    } catch (error) {
+      notify(String(error), "error");
+    }
+  };
+
+  const runRankingSchedule = async (schedule: RankingCaptureSchedule) => {
+    try {
+      await api.runRankingSchedule(schedule.id);
+      await reload();
+      notify("榜单任务已运行");
+    } catch (error) {
+      notify(String(error), "error");
+    }
+  };
+
+  const deleteRankingSchedule = async (schedule: RankingCaptureSchedule) => {
+    try {
+      await api.deleteRankingSchedule(schedule.id);
+      await reload();
+    } catch (error) {
+      notify(String(error), "error");
+    }
+  };
+
   return (
     <div className="page">
       <header className="page-header">
@@ -328,436 +345,91 @@ export function ResearchPage({
       {tab === "商业知识" && <ResearchKnowledgeView />}
 
 
-      {rankingModal && (
-        <Modal title="导入榜单 CSV" onClose={() => setRankingModal(false)}>
-          <div className="form-stack">
-            <Field label="榜单名称">
-              <Input
-                value={rankingName}
-                onChange={(event) => setRankingName(event.target.value)}
-              />
-            </Field>
-            <Field
-              label="CSV 内容"
-              hint="支持字段：排名、书名、作者、题材、字数、状态、标签、链接"
-            >
-              <Textarea
-                rows={12}
-                value={rankingCsv}
-                onChange={(event) => setRankingCsv(event.target.value)}
-                placeholder="排名,书名,作者,题材,字数,状态\n1,示例书名,作者,都市脑洞,100万,连载"
-              />
-            </Field>
-            <div className="modal-actions">
-              <Button
-                variant="secondary"
-                onClick={() => setRankingModal(false)}
-              >
-                取消
-              </Button>
-              <Button
-                disabled={!rankingCsv.trim()}
-                onClick={async () => {
-                  try {
-                    await api.importRankingCsv(rankingCsv, rankingName);
-                    setRankingModal(false);
-                    setRankingCsv("");
-                    await reload();
-                    notify("榜单快照已保存");
-                  } catch (error) {
-                    notify(String(error), "error");
-                  }
-                }}
-              >
-                保存快照
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {publicSampleEntry && (
-        <Modal title="读取公开前10章并拆书" onClose={() => !readingPublicSample && setPublicSampleEntry(null)}>
-          <div className="form-stack">
-            <div className="source-preview">
-              <ScanText size={20} />
-              <span>
-                <strong>{publicSampleEntry.title}</strong>
-                <small>{publicSampleEntry.author} · 番茄小说官方公开试读</small>
-              </span>
-            </div>
-            <p className="inline-warning">
-              只读取官方详情页公开的第1至第10章。遇到登录、付费、验证或正文无法可靠识别时立即停止；结论仅代表开篇样本。
-            </p>
-            <label className="checkbox-line">
-              <input
-                type="checkbox"
-                checked={publicSampleCloud}
-                onChange={(event) => setPublicSampleCloud(event.target.checked)}
-              />
-              <span>允许将这10章正文发送到已配置的 AI 进行语义拆书</span>
-            </label>
-            <div className="modal-actions">
-              <Button variant="secondary" disabled={readingPublicSample} onClick={() => setPublicSampleEntry(null)}>取消</Button>
-              <Button disabled={readingPublicSample} icon={readingPublicSample ? <LoaderCircle className="spin" size={16} /> : <ScanText size={16} />} onClick={() => void importAndDeconstructPublicSample()}>
-                {readingPublicSample ? "正在读取" : "读取并拆书"}
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {publicModal && (
-        <Modal title="采集番茄公开榜单" onClose={() => setPublicModal(false)}>
-          <div className="form-stack">
-            <div className="form-grid fanqie-ranking-filters">
-            <Field label="频道">
-              <Select
-                value={fanqieGender}
-                onChange={(event) => selectFanqieRanking(event.target.value as FanqieGender, fanqieRankKind, "")}
-              >
-                <option>男频</option>
-                <option>女频</option>
-              </Select>
-            </Field>
-            <Field label="榜型">
-              <Select
-                value={fanqieRankKind}
-                onChange={(event) => selectFanqieRanking(fanqieGender, event.target.value as FanqieRankKind, fanqieCategoryId)}
-              >
-                <option>阅读榜</option>
-                <option>新书榜</option>
-              </Select>
-            </Field>
-            <Field label="题材">
-              <Select
-                value={fanqieCategoryId}
-                onChange={(event) => selectFanqieRanking(fanqieGender, fanqieRankKind, event.target.value)}
-              >
-                {fanqieCategories.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-              </Select>
-            </Field>
-            </div>
-            <Field label="榜单名称">
-              <Input
-                value={rankingName}
-                onChange={(event) => setRankingName(event.target.value)}
-              />
-            </Field>
-            <p className="inline-warning">
-              每次最多读取前 20 本的公开元数据与官方链接。系统不下载正文，不携带 Cookie，也不绕过登录、验证或访问限制。
-            </p>
-            <div className="modal-actions">
-              <Button variant="secondary" onClick={() => setPublicModal(false)}>
-                取消
-              </Button>
-              <Button
-                disabled={!/^https?:\/\//.test(publicUrl)}
-                onClick={async () => {
-                  try {
-                    const snapshot = await api.capturePublicRanking(
-                      publicUrl,
-                      rankingName,
-                    );
-                    setPublicModal(false);
-                    await reload();
-                    notify(
-                      snapshot.status !== "失败"
-                        ? `已采集 ${snapshot.entries.length} 条公开书目`
-                        : `采集失败已记录：${snapshot.error}`,
-                      snapshot.status !== "失败" ? "success" : "error",
-                    );
-                  } catch (error) {
-                    notify(String(error), "error");
-                  }
-                }}
-              >
-                开始采集
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {scheduleModal && (
-        <Modal title="定时采集番茄榜单" onClose={() => setScheduleModal(false)} width={720}>
-          <div className="form-stack">
-            <div className="schedule-create-row">
-              <span><strong>{rankingName}</strong><small>{publicUrl}</small></span>
-              <Select value={scheduleFrequency} onChange={(event) => setScheduleFrequency(event.target.value as RankingCaptureSchedule["frequency"])}>
-                <option>每日</option><option>每周</option>
-              </Select>
-              <Button onClick={async () => {
-                try {
-                  await api.saveRankingSchedule({ url: publicUrl, listName: rankingName, frequency: scheduleFrequency, enabled: true });
-                  await reload();
-                  notify("定时采榜任务已保存");
-                } catch (error) { notify(String(error), "error"); }
-              }}>添加任务</Button>
-            </div>
-            <p className="inline-warning">仅在桌面应用运行时检查任务；失败会记录并顺延到下一周期，不会绕过验证或访问限制。</p>
-            <div className="ranking-schedule-list">
-              {rankingSchedules.length ? rankingSchedules.map((schedule) => (
-                <article key={schedule.id}>
-                  <div><strong>{schedule.listName}</strong><small>{schedule.frequency} · 下次 {formatDate(schedule.nextRunAt, true)}</small>{schedule.lastError && <small className="error-text">{schedule.lastError}</small>}</div>
-                  <Badge tone={schedule.lastStatus === "成功" ? "success" : schedule.lastStatus === "失败" ? "danger" : "neutral"}>{schedule.lastStatus}</Badge>
-                  <label className="schedule-toggle" title={schedule.enabled ? "暂停任务" : "启用任务"}>
-                    <input type="checkbox" checked={schedule.enabled} onChange={async (event) => {
-                      try {
-                        await api.saveRankingSchedule({ id: schedule.id, url: schedule.url, listName: schedule.listName, frequency: schedule.frequency, enabled: event.target.checked });
-                        await reload();
-                      } catch (error) { notify(String(error), "error"); }
-                    }} />
-                    <span>{schedule.enabled ? "运行中" : "已暂停"}</span>
-                  </label>
-                  <button className="icon-button" title="立即运行" aria-label="立即运行" onClick={async () => {
-                    try { await api.runRankingSchedule(schedule.id); await reload(); notify("榜单任务已运行"); }
-                    catch (error) { notify(String(error), "error"); }
-                  }}><Play size={15} /></button>
-                  <button className="icon-button" title="删除任务" aria-label="删除任务" onClick={async () => {
-                    try { await api.deleteRankingSchedule(schedule.id); await reload(); }
-                    catch (error) { notify(String(error), "error"); }
-                  }}><Trash2 size={15} /></button>
-                </article>
-              )) : <p className="muted-line">还没有定时任务。上方会按当前频道、榜型和题材创建任务。</p>}
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {pasteModal && (
-        <Modal title="粘贴样本文本" onClose={() => setPasteModal(false)}>
-          <div className="form-stack">
-            <Field label="样本文本">
-              <Textarea
-                rows={16}
-                value={pastedText}
-                onChange={(event) => setPastedText(event.target.value)}
-              />
-            </Field>
-            <div className="modal-actions">
-              <Button variant="secondary" onClick={() => setPasteModal(false)}>
-                取消
-              </Button>
-              <Button
-                disabled={pastedText.trim().length < 20}
-                onClick={() => {
-                  const chapters = splitPastedText(pastedText);
-                  setPreview({
-                    fileName: "粘贴样本",
-                    sourceType: "粘贴",
-                    detectedEncoding: "浏览器文本",
-                    chapters,
-                    totalWords: chapters.reduce(
-                      (sum, item) => sum + item.wordCount,
-                      0,
-                    ),
-                    warnings:
-                      chapters.length === 1 ? ["未识别到标准章节标题"] : [],
-                  });
-                  setPasteModal(false);
-                }}
-              >
-                预览切章
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {preview && (
-        <Modal
-          title="确认样本导入"
-          onClose={() => setPreview(null)}
-          width={760}
-        >
-          <div className="import-preview">
-            <div className="preview-summary">
-              <span>
-                <strong>{preview.fileName}</strong>
-                <small>
-                  {preview.sourceType} · {preview.detectedEncoding}
-                </small>
-              </span>
-              <span>
-                <strong>{preview.chapters.length} 章</strong>
-                <small>{formatCount(preview.totalWords)} 字</small>
-              </span>
-            </div>
-            {preview.warnings.map((warning) => (
-              <p className="inline-warning" key={warning}>
-                {warning}
-              </p>
-            ))}
-            <div className="chapter-preview">
-              {preview.chapters.slice(0, 8).map((chapter, index) => (
-                <div key={`${chapter.title}-${index}`}>
-                  <span>{index + 1}</span>
-                  <strong>{chapter.title}</strong>
-                  <small>{chapter.wordCount} 字</small>
-                </div>
-              ))}
-            </div>
-            <div className="form-grid">
-              <Field label="题材">
-                <Select
-                  value={genre}
-                  onChange={(event) => setGenre(event.target.value as Genre)}
-                >
-                  {GENRES.map((item) => (
-                    <option key={item}>{item}</option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={rights}
-                onChange={(event) => setRights(event.target.checked)}
-              />
-              <span>我确认拥有该材料的合法使用权</span>
-            </label>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={cloud}
-                onChange={(event) => setCloud(event.target.checked)}
-              />
-              <span>允许本地脱敏后按章发送给已配置的云模型</span>
-            </label>
-            <div className="modal-actions">
-              <Button variant="secondary" onClick={() => setPreview(null)}>
-                取消
-              </Button>
-              <Button disabled={!rights} onClick={commitImport}>
-                导入研究隔离区
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {analysisBook && (
-        <Modal
-          title={`${analysisBook.title} · 四层拆解证据`}
-          onClose={() => setAnalysisBook(null)}
-          width={820}
-        >
-          <div className="analysis-counts">
-            {(["章节", "十章阶段", "分卷", "全书"] as const).map((layer) => (
-              <div key={layer}>
-                <strong>
-                  {analyses.filter((item) => item.layer === layer).length}
-                </strong>
-                <span>{layer}</span>
-              </div>
-            ))}
-          </div>
-          <div className="analysis-list">
-            {analyses.length ? (
-              analyses
-                .filter(
-                  (item) => item.layer !== "章节" || item.fromChapter <= 20,
-                )
-                .map((item) => (
-                  <details key={item.id} open={item.layer === "全书"}>
-                    <summary>
-                      <Badge
-                        tone={
-                          item.layer === "全书"
-                            ? "accent"
-                            : item.layer === "分卷"
-                              ? "success"
-                              : "neutral"
-                        }
-                      >
-                        {item.layer}
-                      </Badge>
-                      <strong>
-                        第{item.fromChapter}–{item.toChapter}章
-                      </strong>
-                      <span>
-                        {item.confidence}可信度 · {item.evidenceChapters.length}
-                        条证据
-                      </span>
-                    </summary>
-                    <p>{item.findings}</p>
-                  </details>
-                ))
-            ) : (
-              <p className="muted-line">
-                浏览器预览不包含原始研究记录；桌面版拆解后会显示完整证据层。
-              </p>
-            )}
-          </div>
-        </Modal>
-      )}
-      {pendingDeconstruct &&
-        aiSettings &&
-        (() => {
-          const inputTokens = estimateCjkTextTokens(
-            pendingDeconstruct.wordCount,
-          );
-          const outputTokens =
-            pendingDeconstruct.chapterCount * 500 +
-            Math.ceil(pendingDeconstruct.chapterCount / 10) * 900 +
-            Math.ceil(pendingDeconstruct.chapterCount / 100) * 1200;
-          const cost =
-            (inputTokens / 1_000_000) * aiSettings.inputPricePerMillion +
-            (outputTokens / 1_000_000) * aiSettings.outputPricePerMillion;
-          return (
-            <Modal
-              title="确认云端拆书任务"
-              onClose={() => setPendingDeconstruct(null)}
-            >
-              <div className="cost-preview">
-                <div>
-                  <span>样本规模</span>
-                  <strong>
-                    {pendingDeconstruct.chapterCount}章 ·{" "}
-                    {formatCount(pendingDeconstruct.wordCount)}字
-                  </strong>
-                </div>
-                <div>
-                  <span>预计输入</span>
-                  <strong>{formatCount(inputTokens)} tokens</strong>
-                </div>
-                <div>
-                  <span>预计输出</span>
-                  <strong>{formatCount(outputTokens)} tokens</strong>
-                </div>
-                <div>
-                  <span>估算费用</span>
-                  <strong>
-                    {aiSettings.inputPricePerMillion ||
-                    aiSettings.outputPricePerMillion
-                      ? `¥${cost.toFixed(2)}`
-                      : "未填写模型单价"}
-                  </strong>
-                </div>
-              </div>
-              <p className="inline-warning">
-                {TOKEN_ESTIMATE_WARNING}。任务按章脱敏，分十章阶段、分卷和全书逐层汇总。实际用量由模型分词与输出长度决定，不设强制费用上限。
-              </p>
-              <div className="modal-actions">
-                <Button
-                  variant="secondary"
-                  onClick={() => setPendingDeconstruct(null)}
-                >
-                  取消
-                </Button>
-                <Button
-                  onClick={() => {
-                    const book = pendingDeconstruct;
-                    setPendingDeconstruct(null);
-                    void deconstruct(book);
-                  }}
-                >
-                  确认执行
-                </Button>
-              </div>
-            </Modal>
-          );
-        })()}
+      <ResearchRankingModals
+        importModal={{
+          open: rankingModal,
+          rankingName,
+          rankingCsv,
+          onRankingNameChange: setRankingName,
+          onRankingCsvChange: setRankingCsv,
+          onClose: () => setRankingModal(false),
+          onSave: () => void importRankingSnapshot(),
+        }}
+        publicModal={{
+          open: publicModal,
+          gender: fanqieGender,
+          rankKind: fanqieRankKind,
+          categoryId: fanqieCategoryId,
+          rankingName,
+          publicUrl,
+          onSelectRanking: selectFanqieRanking,
+          onRankingNameChange: setRankingName,
+          onClose: () => setPublicModal(false),
+          onCapture: () => void capturePublicRanking(),
+        }}
+        scheduleModal={{
+          open: scheduleModal,
+          rankingName,
+          publicUrl,
+          frequency: scheduleFrequency,
+          schedules: rankingSchedules,
+          onFrequencyChange: setScheduleFrequency,
+          onClose: () => setScheduleModal(false),
+          onAdd: () => void addRankingSchedule(),
+          onToggle: (schedule, enabled) =>
+            void toggleRankingSchedule(schedule, enabled),
+          onRun: (schedule) => void runRankingSchedule(schedule),
+          onDelete: (schedule) => void deleteRankingSchedule(schedule),
+        }}
+      />
+      <ResearchSampleModals
+        publicSampleModal={{
+          entry: publicSampleEntry,
+          cloudConsent: publicSampleCloud,
+          reading: readingPublicSample,
+          onCloudConsentChange: setPublicSampleCloud,
+          onClose: () => setPublicSampleEntry(null),
+          onImportAndDeconstruct: () =>
+            void importAndDeconstructPublicSample(),
+        }}
+        pasteModal={{
+          open: pasteModal,
+          text: pastedText,
+          onTextChange: setPastedText,
+          onClose: () => setPasteModal(false),
+          onPreview: (nextPreview) => {
+            setPreview(nextPreview);
+            setPasteModal(false);
+          },
+        }}
+        importPreviewModal={{
+          preview,
+          genre,
+          rightsConfirmed: rights,
+          cloudConsent: cloud,
+          onGenreChange: setGenre,
+          onRightsConfirmedChange: setRights,
+          onCloudConsentChange: setCloud,
+          onClose: () => setPreview(null),
+          onCommit: () => void commitImport(),
+        }}
+        analysisModal={{
+          book: analysisBook,
+          analyses,
+          onClose: () => setAnalysisBook(null),
+        }}
+        cloudDeconstructModal={{
+          book: pendingDeconstruct,
+          aiSettings,
+          onClose: () => setPendingDeconstruct(null),
+          onConfirm: () => {
+            if (!pendingDeconstruct) return;
+            const book = pendingDeconstruct;
+            setPendingDeconstruct(null);
+            void deconstruct(book);
+          },
+        }}
+      />
     </div>
   );
 }
