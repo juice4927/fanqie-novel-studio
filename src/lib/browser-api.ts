@@ -41,6 +41,10 @@ import {
 } from "../shared/change-request-service";
 import { prepareFactSave } from "../shared/fact-service";
 import { prepareExpectationSave } from "../shared/expectation-service";
+import {
+  prepareQualityIssueSave,
+  resolveQualityIssue,
+} from "../shared/quality-issue-service";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
 import { assertLocalResearchImportRights } from "../shared/research-import-service";
@@ -805,8 +809,19 @@ export function createBrowserApi(): AppApi {
           status: "待处理",
           createdAt: now(),
         });
-      project.issues.push(...issues);
+      const plan = prepareQualityIssueSave(
+        project.issues,
+        chapterId,
+        issues,
+      );
+      for (const issue of plan.upserts) {
+        const index = project.issues.findIndex((item) => item.id === issue.id);
+        if (index >= 0) project.issues[index] = issue;
+        else project.issues.push(issue);
+      }
+      if (plan.forceSequentialReview) chapter.batchMode = "逐章";
       if (chapter.status === "草稿") chapter.status = "待质检";
+      project.summary.updatedAt = now();
       persist();
       return issues;
     },
@@ -838,12 +853,15 @@ export function createBrowserApi(): AppApi {
       return next;
     },
     async resolveIssue(projectId, issueId, status) {
-      const issue = getProject(state, projectId).issues.find(
+      const project = getProject(state, projectId);
+      const issueIndex = project.issues.findIndex(
         (item) => item.id === issueId,
       );
-      if (issue?.severity === "硬性" && status === "已忽略")
-        throw new Error("硬性质检项不能忽略");
-      if (issue) issue.status = status;
+      project.issues[issueIndex] = resolveQualityIssue(
+        project.issues[issueIndex],
+        status,
+      );
+      project.summary.updatedAt = now();
       persist();
     },
     async saveChangeRequest(projectId, change: ChangeRequest) {

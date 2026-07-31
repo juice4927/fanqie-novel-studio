@@ -45,6 +45,10 @@ import {
 } from "../src/shared/change-request-service";
 import { prepareFactSave } from "../src/shared/fact-service";
 import { prepareExpectationSave } from "../src/shared/expectation-service";
+import {
+  prepareQualityIssueSave,
+  resolveQualityIssue,
+} from "../src/shared/quality-issue-service";
 import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
 import { prepareReviewExperiment } from "../src/shared/review-experiment-service";
 import {
@@ -975,16 +979,14 @@ export class WorkspaceDatabase {
 
   saveIssues(id: string, chapterId: string, issues: QualityIssue[]) {
     const db = this.projectDb(id);
-    for (const current of this.listRecords<QualityIssue>(db, "issues")) {
-      if (current.chapterId === chapterId && current.status === "待处理") {
-        this.saveRecord(db, "issues", current.id, {
-          ...current,
-          status: "已解决",
-        });
-      }
-    }
-    for (const issue of issues) this.saveRecord(db, "issues", issue.id, issue);
-    if (issues.some((issue) => issue.severity === "硬性")) {
+    const plan = prepareQualityIssueSave(
+      this.listRecords<QualityIssue>(db, "issues"),
+      chapterId,
+      issues,
+    );
+    for (const issue of plan.upserts)
+      this.saveRecord(db, "issues", issue.id, issue);
+    if (plan.forceSequentialReview) {
       const chapter = this.projects.getChapter(db, chapterId);
       if (chapter && chapter.batchMode !== "逐章")
         this.saveChapter(id, { ...chapter, batchMode: "逐章" });
@@ -995,10 +997,7 @@ export class WorkspaceDatabase {
   resolveIssue(id: string, issueId: string, status: QualityIssue["status"]) {
     const db = this.projectDb(id);
     const issue = this.getRecord<QualityIssue>(db, "issues", issueId);
-    if (!issue) throw new Error("质检项不存在");
-    if (issue.severity === "硬性" && status === "已忽略")
-      throw new Error("硬性质检项不能忽略，必须解决后才能继续");
-    this.saveRecord(db, "issues", issueId, { ...issue, status });
+    this.saveRecord(db, "issues", issueId, resolveQualityIssue(issue, status));
     this.touchProject(id);
   }
 
