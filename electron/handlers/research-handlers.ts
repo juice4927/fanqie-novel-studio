@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import Papa from "papaparse";
 import type {
   AppApi,
   ImportPreview,
@@ -13,6 +12,7 @@ import {
   failRankingSchedule,
   nextRankingRun,
 } from "../../src/shared/ranking-schedule";
+import { parseRankingCsv } from "../../src/shared/ranking-csv";
 import { assertLocalResearchImportRights } from "../../src/shared/research-import-service";
 import type { AiService } from "../ai-service";
 import { now, type WorkspaceDatabase } from "../database";
@@ -53,56 +53,6 @@ export interface ResearchHandlerRuntime {
   runDueRankingSchedules: () => Promise<void>;
 }
 
-function value(row: Record<string, string>, keys: string[], fallback = "") {
-  for (const key of keys) {
-    if (row[key] !== undefined && row[key] !== "") return row[key];
-  }
-  return fallback;
-}
-
-function parseNumber(raw: string) {
-  const numeric = Number(String(raw).replace(/[,，万]/g, ""));
-  if (String(raw).includes("万")) return Math.round(numeric * 10_000);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
-
-export function parseRankingCsv(
-  csvText: string,
-  listName: string,
-): RankingSnapshot {
-  const parsed = Papa.parse<Record<string, string>>(csvText, {
-    header: true,
-    skipEmptyLines: true,
-  });
-  if (parsed.errors.length && !parsed.data.length)
-    throw new Error(parsed.errors[0].message);
-  const id = randomUUID();
-  return {
-    id,
-    source: "CSV 手动导入",
-    listName,
-    capturedAt: now(),
-    status: parsed.errors.length ? "部分成功" : "成功",
-    error: parsed.errors.length
-      ? parsed.errors.map((error) => error.message).join("；")
-      : null,
-    entries: parsed.data.map((row, index) => ({
-      id: randomUUID(),
-      snapshotId: id,
-      rank: parseNumber(value(row, ["排名", "rank"], String(index + 1))),
-      title: value(row, ["书名", "title"], "未命名"),
-      author: value(row, ["作者", "author"], "未知"),
-      genre: value(row, ["题材", "分类", "genre"], "未分类"),
-      words: parseNumber(value(row, ["字数", "words"])),
-      status: value(row, ["状态", "status"], "未知"),
-      tags: value(row, ["标签", "tags"])
-        .split(/[、,，]/)
-        .filter(Boolean),
-      sourceUrl: value(row, ["链接", "url", "sourceUrl"]),
-    })),
-  };
-}
-
 export function registerResearchHandlers({
   register,
   database,
@@ -139,7 +89,10 @@ export function registerResearchHandlers({
 
   register("listRankings", () => database.listRankings());
   register("importRankingCsv", (csvText, listName) => {
-    const snapshot = parseRankingCsv(csvText, listName);
+    const snapshot = parseRankingCsv(csvText, listName, {
+      createId: randomUUID,
+      capturedAt: now(),
+    });
     database.saveRanking(snapshot);
     return snapshot;
   });

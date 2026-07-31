@@ -43,6 +43,7 @@ import { prepareFactSave } from "../shared/fact-service";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
 import { assertLocalResearchImportRights } from "../shared/research-import-service";
+import { parseRankingCsv } from "../shared/ranking-csv";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { compileChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
@@ -946,30 +947,10 @@ export function createBrowserApi(): AppApi {
       return structuredClone(state.rankings);
     },
     async importRankingCsv(csvText, listName) {
-      const lines = csvText.trim().split(/\r?\n/);
-      const snapshot: RankingSnapshot = {
-        id: id(),
-        source: "浏览器 CSV 导入",
-        listName,
+      const snapshot = parseRankingCsv(csvText, listName, {
+        createId: id,
         capturedAt: now(),
-        status: "成功",
-        error: null,
-        entries: lines.slice(1).map((line, index) => {
-          const cells = line.split(",");
-          return {
-            id: id(),
-            snapshotId: "",
-            rank: Number(cells[0]) || index + 1,
-            title: cells[1] || "未命名",
-            author: cells[2] || "未知",
-            genre: cells[3] || "未分类",
-            words: Number((cells[4] || "0").replace("万", "0000")),
-            status: cells[5] || "未知",
-            tags: [],
-            sourceUrl: "",
-          };
-        }),
-      };
+      });
       state.rankings.unshift(snapshot);
       persist();
       return snapshot;

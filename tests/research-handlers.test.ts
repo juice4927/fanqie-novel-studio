@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  parseRankingCsv,
   registerResearchHandlers,
   type ResearchHandlerDependencies,
 } from "../electron/handlers/research-handlers";
 import type { RegisterHandler } from "../electron/handlers/types";
-import type { ImportPreview } from "../src/shared/types";
+import type { ImportPreview, RankingSnapshot } from "../src/shared/types";
 
 function createDependencies() {
   const handlers = new Map<string, (...args: any[]) => unknown>();
@@ -47,13 +46,15 @@ function createDependencies() {
 
 describe("research handlers", () => {
   it("parses quoted CSV fields, Chinese word units, tags, and source links", () => {
-    const snapshot = parseRankingCsv(
+    const { dependencies, handlers, database } = createDependencies();
+    registerResearchHandlers(dependencies);
+    const snapshot = handlers.get("importRankingCsv")!(
       [
         "排名,书名,作者,题材,字数,状态,标签,链接",
         '1,"城,市回声",林舟,都市脑洞,1.2万,连载,"悬疑,成长",https://example.com/book',
       ].join("\n"),
       "测试榜",
-    );
+    ) as RankingSnapshot;
 
     expect(snapshot).toMatchObject({
       source: "CSV 手动导入",
@@ -71,6 +72,7 @@ describe("research handlers", () => {
       }],
     });
     expect(snapshot.entries[0].snapshotId).toBe(snapshot.id);
+    expect(database.saveRanking).toHaveBeenCalledWith(snapshot);
   });
 
   it("registers the complete research surface and delegates file parsing", async () => {
