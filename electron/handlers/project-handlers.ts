@@ -8,18 +8,29 @@ import type { RegisterHandler } from "./types";
 
 type ProjectDatabase = Pick<
   WorkspaceDatabase,
+  | "attachInsights"
   | "approveContract"
   | "approvePlan"
   | "createProject"
   | "createProjectFromConcept"
+  | "decideChangeRequest"
   | "deleteProject"
   | "getChapter"
   | "getDashboardActivity"
   | "getProject"
   | "getProjectOverview"
   | "listProjects"
+  | "listRevisions"
+  | "resolveIssue"
+  | "restoreRevision"
+  | "saveChangeRequest"
+  | "saveChapter"
   | "saveContract"
+  | "saveExpectation"
+  | "saveFact"
   | "savePlan"
+  | "saveSchedule"
+  | "searchProject"
   | "updateProject"
 >;
 
@@ -100,6 +111,35 @@ export function registerProjectHandlers({
   });
   register("getProject", (id) => database.getProjectOverview(id));
   register("getChapter", (id, chapterId) => database.getChapter(id, chapterId));
+  register("saveChapter", (id, chapter, mode) =>
+    database.saveChapter(id, chapter, mode),
+  );
+  register("saveExpectation", (id, expectation) =>
+    database.saveExpectation(id, expectation),
+  );
+  register("searchProject", (id, query, offset, limit) =>
+    database.searchProject(id, query, offset, limit),
+  );
+  register("listRevisions", (id, collection, entityId) =>
+    database.listRevisions(id, collection, entityId),
+  );
+  register("restoreRevision", (id, revisionId) =>
+    database.restoreRevision(id, revisionId),
+  );
+  register("saveFact", (id, fact) => database.saveFact(id, fact));
+  register("resolveIssue", (id, issueId, status) =>
+    database.resolveIssue(id, issueId, status),
+  );
+  register("saveChangeRequest", (id, change) =>
+    database.saveChangeRequest(id, change),
+  );
+  register("decideChangeRequest", (id, changeId, decision) =>
+    database.decideChangeRequest(id, changeId, decision),
+  );
+  register("saveSchedule", (id, item) => database.saveSchedule(id, item));
+  register("attachInsights", (id, insightIds) =>
+    database.attachInsights(id, insightIds),
+  );
   register("updateProject", (id, patch) => database.updateProject(id, patch));
   register("saveContract", (id, contract) =>
     database.saveContract(id, contract),

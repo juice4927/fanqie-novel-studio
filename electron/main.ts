@@ -389,10 +389,6 @@ function registerHandlers() {
     logRetryFailure: (details) =>
       logger.write("error", "ai.retry.failed", { ...details }),
   });
-  handle("saveChapter", (id, chapter, mode) => database.saveChapter(id, chapter, mode));
-  handle("saveExpectation", (id, expectation) =>
-    database.saveExpectation(id, expectation),
-  );
   handle("transitionChapter", async (id, chapterId, status) => {
     const saved = database.transitionChapter(id, chapterId, status);
     if (status !== "已定稿") {
@@ -423,13 +419,6 @@ function registerHandlers() {
       ),
     );
   });
-  handle("searchProject", (id, query, offset, limit) => database.searchProject(id, query, offset, limit));
-  handle("listRevisions", (id, collection, entityId) =>
-    database.listRevisions(id, collection, entityId),
-  );
-  handle("restoreRevision", (id, revisionId) =>
-    database.restoreRevision(id, revisionId),
-  );
   handle("runQualityCheck", async (id, chapterId) => {
     const project = database.getProject(id);
     const chapter = project.chapters.find((item) => item.id === chapterId);
@@ -588,20 +577,6 @@ function registerHandlers() {
     }
     return saved;
   });
-  handle("saveFact", (id, fact) => database.saveFact(id, fact));
-  handle("resolveIssue", (id, issueId, status) =>
-    database.resolveIssue(id, issueId, status),
-  );
-  handle("saveChangeRequest", (id, change) =>
-    database.saveChangeRequest(id, change),
-  );
-  handle("decideChangeRequest", (id, changeId, decision) =>
-    database.decideChangeRequest(id, changeId, decision),
-  );
-  handle("saveSchedule", (id, item) => database.saveSchedule(id, item));
-  handle("attachInsights", (id, insightIds) =>
-    database.attachInsights(id, insightIds),
-  );
   handle("generateChapterDraft", (id, chapterId, streamId) => generateOneChapter(id, chapterId, streamId
     ? (event) => mainWindow?.webContents.send("studio:chapter-draft-stream", { streamId, event })
     : undefined));

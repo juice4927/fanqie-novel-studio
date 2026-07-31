@@ -75,10 +75,12 @@ function createDependencies(activeProjectId = "") {
     handlers.set(channel, callback);
   };
   const database = {
+    attachInsights: vi.fn(),
     approveContract: vi.fn(),
     approvePlan: vi.fn(),
     createProject: vi.fn(() => project),
     createProjectFromConcept: vi.fn(() => project),
+    decideChangeRequest: vi.fn(),
     deleteProject: vi.fn(() => "已删除"),
     getChapter: vi.fn(),
     getDashboardActivity: vi.fn(() => ({
@@ -89,8 +91,17 @@ function createDependencies(activeProjectId = "") {
     getProject: vi.fn(() => ({ summary: project, contract: {} })),
     getProjectOverview: vi.fn(),
     listProjects: vi.fn(() => [project]),
+    listRevisions: vi.fn(),
+    resolveIssue: vi.fn(),
+    restoreRevision: vi.fn(),
+    saveChangeRequest: vi.fn(),
+    saveChapter: vi.fn(),
     saveContract: vi.fn(),
+    saveExpectation: vi.fn(),
+    saveFact: vi.fn(),
     savePlan: vi.fn(),
+    saveSchedule: vi.fn(),
+    searchProject: vi.fn(),
     updateProject: vi.fn(),
   };
   const ai = {
@@ -117,19 +128,79 @@ describe("project handlers", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "approveContract",
       "approvePlan",
+      "attachInsights",
       "createProject",
       "createProjectFromConcept",
+      "decideChangeRequest",
       "deleteProject",
       "generateBookConcepts",
       "getChapter",
       "getDashboard",
       "getProject",
       "listProjects",
+      "listRevisions",
+      "resolveIssue",
+      "restoreRevision",
+      "saveChangeRequest",
+      "saveChapter",
       "saveContract",
+      "saveExpectation",
+      "saveFact",
       "savePlan",
+      "saveSchedule",
+      "searchProject",
       "suggestAestheticProfile",
       "updateProject",
     ]);
+  });
+
+  it("forwards project records and revision operations without reshaping arguments", () => {
+    const { dependencies, handlers, database } = createDependencies();
+    registerProjectHandlers(dependencies);
+    const expectation = { id: "expectation-1" };
+    const fact = { id: "fact-1" };
+    const change = { id: "change-1" };
+    const schedule = { id: "schedule-1" };
+
+    handlers.get("saveChapter")!(project.id, { id: "chapter-1" }, "manual");
+    handlers.get("saveExpectation")!(project.id, expectation);
+    handlers.get("searchProject")!(project.id, "线索", 10, 20);
+    handlers.get("listRevisions")!(project.id, "chapters", "chapter-1");
+    handlers.get("restoreRevision")!(project.id, "revision-1");
+    handlers.get("saveFact")!(project.id, fact);
+    handlers.get("resolveIssue")!(project.id, "issue-1", "已解决");
+    handlers.get("saveChangeRequest")!(project.id, change);
+    handlers.get("decideChangeRequest")!(project.id, "change-1", "批准");
+    handlers.get("saveSchedule")!(project.id, schedule);
+    handlers.get("attachInsights")!(project.id, ["insight-1"]);
+
+    expect(database.saveChapter).toHaveBeenCalledWith(
+      project.id,
+      { id: "chapter-1" },
+      "manual",
+    );
+    expect(database.saveExpectation).toHaveBeenCalledWith(project.id, expectation);
+    expect(database.searchProject).toHaveBeenCalledWith(project.id, "线索", 10, 20);
+    expect(database.listRevisions).toHaveBeenCalledWith(
+      project.id,
+      "chapters",
+      "chapter-1",
+    );
+    expect(database.restoreRevision).toHaveBeenCalledWith(project.id, "revision-1");
+    expect(database.saveFact).toHaveBeenCalledWith(project.id, fact);
+    expect(database.resolveIssue).toHaveBeenCalledWith(
+      project.id,
+      "issue-1",
+      "已解决",
+    );
+    expect(database.saveChangeRequest).toHaveBeenCalledWith(project.id, change);
+    expect(database.decideChangeRequest).toHaveBeenCalledWith(
+      project.id,
+      "change-1",
+      "批准",
+    );
+    expect(database.saveSchedule).toHaveBeenCalledWith(project.id, schedule);
+    expect(database.attachInsights).toHaveBeenCalledWith(project.id, ["insight-1"]);
   });
 
   it("assembles the dashboard with the injected local date", () => {
