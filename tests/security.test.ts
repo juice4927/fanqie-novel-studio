@@ -62,6 +62,8 @@ describe("IPC runtime validation", () => {
     }
     const settings = { baseUrl: "https://api.openai.com/v1", model: "gpt-5.1", embeddingModel: "local", inputPricePerMillion: 0, outputPricePerMillion: 0, longTaskTimeoutMinutes: 10 };
     expect(validateIpcArgs("saveAiSettings", [settings])).toEqual([settings]);
+    expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, baseUrl: "http://127.0.0.1:11434/v1" }])).toThrow("HTTPS");
+    expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, baseUrl: "https://user:secret@example.com/v1" }])).toThrow("用户名或密码");
     expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, longTaskTimeoutMinutes: 20 }])).toThrow("参数无效");
   });
 

@@ -100,6 +100,7 @@ export interface AiHandlerDependencies {
   markGenerationIdle: (projectId: string) => void;
   getApiKey: () => string;
   saveApiKey: (apiKey: string) => Promise<void>;
+  clearApiKey: () => Promise<void>;
   queueFinalizedFactExtraction: (
     projectId: string,
     chapter: Chapter,
@@ -128,6 +129,7 @@ export function registerAiHandlers({
   markGenerationIdle,
   getApiKey,
   saveApiKey,
+  clearApiKey,
   queueFinalizedFactExtraction,
   startChapterRetry,
   logRetryFailure,
@@ -507,7 +509,10 @@ export function registerAiHandlers({
     hasApiKey: Boolean(getApiKey()),
   }));
   register("saveAiSettings", async (settings, apiKey) => {
+    const previousOrigin = new URL(database.getAiSettings().baseUrl).origin;
+    const nextOrigin = new URL(settings.baseUrl).origin;
     if (apiKey) await saveApiKey(apiKey);
+    else if (previousOrigin !== nextOrigin && getApiKey()) await clearApiKey();
     return {
       ...database.saveAiSettings(settings),
       hasApiKey: Boolean(getApiKey()),

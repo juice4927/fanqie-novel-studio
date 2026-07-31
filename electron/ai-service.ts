@@ -28,6 +28,7 @@ import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
 import { WorkspaceDatabase, now } from "./database";
 import { compileCommercialGuidance, compileDeconstructionFramework, resolveStoryStage } from "../src/shared/commercial-knowledge";
 import { aiEndpoint, inferProviderCapabilities, JsonStringFieldExtractor, normalizeProviderUrl, parseProviderUsage, parseResponsesOutput, providerError, readChatCompletionStream, readResponsesStream, rejectsJsonMode, rejectsStreaming, usesResponsesApi } from "./ai-provider";
+import { fetchPublicHttpResponse } from "./netguard";
 import { PROMPT_VERSION } from "../src/shared/prompt-version";
 import { contextForModel } from "../src/shared/context-diagnostics";
 import { parseStoryNumber } from "../src/shared/story-constraints";
@@ -556,7 +557,7 @@ export class AiService {
           : null;
         this.log("info", "ai.request.attempt_started", { jobId, taskType: options.taskType, attempt: httpAttempt, endpoint, streaming: useStreaming });
         try {
-          const response = await fetch(endpoint, {
+          const response = await fetchPublicHttpResponse(endpoint, {
             method: "POST",
             signal: controller.signal,
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -578,7 +579,7 @@ export class AiService {
                 { role: "user", content: `${options.user}${repairInstruction}` },
               ],
             }),
-          });
+          }, { allowCrossOriginRedirect: false });
           const currentHeadersAt = new Date().toISOString();
           headersAt ??= currentHeadersAt;
           persistLiveTelemetry();

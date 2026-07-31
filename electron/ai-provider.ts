@@ -42,13 +42,12 @@ export function aiEndpoint(baseUrl: string, model: string) {
 
 export function normalizeProviderUrl(baseUrl: string) {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  try {
-    const url = new URL(trimmed);
-    url.hostname = url.hostname.toLowerCase();
-    return url.toString().replace(/\/+$/, "");
-  } catch {
-    return trimmed;
-  }
+  const url = new URL(trimmed);
+  if (url.protocol !== "https:") throw new Error("模型 API 地址必须使用 HTTPS");
+  if (url.username || url.password) throw new Error("模型 API 地址不能包含用户名或密码");
+  if (url.search || url.hash) throw new Error("模型 API 基础地址不能包含查询参数或片段");
+  url.hostname = url.hostname.toLowerCase();
+  return url.toString().replace(/\/+$/, "");
 }
 
 export function parseResponsesOutput(body: unknown) {

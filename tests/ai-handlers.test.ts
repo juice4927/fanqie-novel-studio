@@ -236,6 +236,9 @@ function createDependencies(
   const saveApiKey = vi.fn(async (next: string) => {
     apiKey = next;
   });
+  const clearApiKey = vi.fn(async () => {
+    apiKey = "";
+  });
   const startChapterRetry = vi.fn(() => ({
     jobId: retryJob.id,
     source: "network" as const,
@@ -305,6 +308,7 @@ function createDependencies(
     markGenerationIdle,
     getApiKey: () => apiKey,
     saveApiKey,
+    clearApiKey,
     queueFinalizedFactExtraction,
     startChapterRetry,
     logRetryFailure,
@@ -327,6 +331,7 @@ function createDependencies(
     markGenerationActive,
     markGenerationIdle,
     saveApiKey,
+    clearApiKey,
     startChapterRetry,
     logRetryFailure,
     queueFinalizedFactExtraction,
@@ -779,6 +784,17 @@ describe("AI handlers", () => {
     expect(saveApiKey).toHaveBeenCalledWith("secret");
     expect(database.saveAiSettings).toHaveBeenCalledWith(settings);
     expect(saved).toMatchObject({ ...settings, hasApiKey: true });
+  });
+
+  it("clears a credential when the provider origin changes without a replacement key", async () => {
+    const { dependencies, handlers, clearApiKey, saveApiKey } = createDependencies();
+    await saveApiKey("secret");
+    registerAiHandlers(dependencies);
+
+    await handlers.get("saveAiSettings")!({ ...settings, baseUrl: "https://other.example/v1" });
+
+    expect(clearApiKey).toHaveBeenCalledTimes(1);
+    expect(handlers.get("getAiSettings")!()).toMatchObject({ hasApiKey: false });
   });
 
   it("returns the new retry job immediately and logs later failure", async () => {

@@ -11,7 +11,7 @@ import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
 import { AiService } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
-import { readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
+import { deleteApiCredential, readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
 import { compileProjectChapterContext } from "../src/shared/context-compiler";
 import { applyContractRepairs, applyTextRepair, chapterRevisionSnapshot, planRevisionSnapshot, sameRevisionSnapshot } from "../src/shared/novel-revision";
 import {
@@ -204,6 +204,10 @@ function registerHandlers() {
     saveApiKey: async (apiKey) => {
       await writeApiCredential(apiKey);
       apiCredential = apiKey;
+    },
+    clearApiKey: async () => {
+      await deleteApiCredential();
+      apiCredential = "";
     },
     queueFinalizedFactExtraction: (projectId, chapter) => {
       setImmediate(() => {

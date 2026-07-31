@@ -134,6 +134,10 @@ export async function writeApiCredential(value: string) {
   await execute(API_TARGET, "write", value);
 }
 
+export async function deleteApiCredential() {
+  await execute(API_TARGET, "delete");
+}
+
 export async function readAutoBackupCredential() {
   const encoded = await execute(AUTO_BACKUP_TARGET, "read");
   return encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";

@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import { load } from "cheerio";
 import { GENRES, type MarketOpportunity, type RankingAnalytics, type RankingEntry, type RankingSnapshot } from "../src/shared/types";
 import { FANQIE_CATEGORY_PROFILES } from "../src/shared/fanqie-taxonomy";
+import { fetchPublicHttpResponse } from "./netguard";
 
 function parseCompactNumber(value: string) {
   const match = value.replace(/,/g, "").match(/([0-9]+(?:\.[0-9]+)?)\s*(万)?\s*字?/);
@@ -20,72 +19,15 @@ const FANQIE_BOOK_LIMIT = 20;
 const FANQIE_CONCURRENCY = 4;
 const FANQIE_OPENING_CHAPTER_LIMIT = 10;
 const PUBLIC_PAGE_TIMEOUT_MS = 30_000;
-const PUBLIC_PAGE_REDIRECT_LIMIT = 5;
-
-function isPublicIpAddress(address: string) {
-  if (isIP(address) === 4) {
-    const [a, b] = address.split(".").map(Number);
-    return !(
-      a === 0 || a === 10 || a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && (b === 0 || b === 168)) ||
-      (a === 198 && (b === 18 || b === 19)) ||
-      a >= 224
-    );
-  }
-  if (isIP(address) === 6) {
-    const normalized = address.toLowerCase().split("%")[0];
-    if (normalized.startsWith("::ffff:")) return isPublicIpAddress(normalized.slice(7));
-    return !(
-      normalized === "::" || normalized === "::1" ||
-      normalized.startsWith("fc") || normalized.startsWith("fd") ||
-      /^fe[89ab]/.test(normalized) || normalized.startsWith("2001:db8:")
-    );
-  }
-  return false;
-}
-
-export async function assertPublicHttpUrl(url: URL, signal?: AbortSignal) {
-  if (!/^https?:$/.test(url.protocol) || url.username || url.password)
-    throw new Error("只允许不含凭据的 HTTP 或 HTTPS 公开页面");
-  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
-  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost"))
-    throw new Error("公开页面地址不能指向本机或私有网络");
-  const resolved = isIP(hostname)
-    ? [{ address: hostname }]
-    : await Promise.race([
-        lookup(hostname, { all: true, verbatim: true }),
-        new Promise<never>((_resolve, reject) => {
-          if (signal?.aborted) reject(new DOMException("Aborted", "AbortError"));
-          else signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
-        }),
-      ]);
-  const addresses = resolved.map((item) => item.address);
-  if (!addresses.length || addresses.some((address) => !isPublicIpAddress(address)))
-    throw new Error("公开页面地址不能指向本机、私有网络或保留地址");
-}
 
 async function fetchPublicResponse(url: URL, signal: AbortSignal) {
-  let current = url;
-  for (let redirects = 0; redirects <= PUBLIC_PAGE_REDIRECT_LIMIT; redirects += 1) {
-    await assertPublicHttpUrl(current, signal);
-    const response = await fetch(current, {
-      signal,
-      redirect: "manual",
-      headers: {
-        "User-Agent": "NovelStudio/0.1 public-metadata-reader",
-        Accept: "text/html,application/xhtml+xml",
-      },
-    });
-    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
-    const location = response.headers.get("location");
-    if (!location) throw new Error("公开页面重定向缺少目标地址");
-    if (redirects === PUBLIC_PAGE_REDIRECT_LIMIT) throw new Error("公开页面重定向次数过多");
-    current = new URL(location, current);
-  }
-  throw new Error("公开页面重定向次数过多");
+  return fetchPublicHttpResponse(url, {
+    signal,
+    headers: {
+      "User-Agent": "NovelStudio/0.1 public-metadata-reader",
+      Accept: "text/html,application/xhtml+xml",
+    },
+  }, { allowCrossOriginRedirect: true });
 }
 
 // Fanqie's public reader uses a fixed Source Han Sans subset with remapped codepoints.

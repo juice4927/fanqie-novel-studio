@@ -13,7 +13,18 @@ const secondaryGenres = z.array(z.enum(NARRATIVE_GENRES)).max(3).optional();
 const genreElements = z.array(shortText).max(8).optional();
 const customGenreDirection = z.string().max(2000).optional();
 const positiveInt = z.number().int().positive().max(10_000_000);
-const httpUrl = z.url().max(2000).refine((value) => /^https?:\/\//i.test(value), "只允许 HTTP/HTTPS 地址");
+const httpUrl = z.url().max(2000)
+  .refine((value) => /^https?:\/\//i.test(value), "只允许 HTTP/HTTPS 地址")
+  .refine((value) => {
+    const url = new URL(value);
+    return !url.username && !url.password;
+  }, "地址不能包含用户名或密码");
+const modelBaseUrl = httpUrl
+  .refine((value) => new URL(value).protocol === "https:", "模型 API 地址必须使用 HTTPS")
+  .refine((value) => {
+    const url = new URL(value);
+    return !url.search && !url.hash;
+  }, "模型 API 基础地址不能包含查询参数或片段");
 
 const createProject = z.object({
   title: z.string().trim().min(1).max(100),
@@ -289,7 +300,7 @@ const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
   previewChapterBatch: projectEntity,
   generateChapterBatch: projectEntity,
   getAiSettings: noArgs,
-  saveAiSettings: z.tuple([z.object({ baseUrl: httpUrl, model: z.string().trim().min(1).max(200), embeddingModel: z.string().trim().min(1).max(200), inputPricePerMillion: z.number().min(0).max(1_000_000), outputPricePerMillion: z.number().min(0).max(1_000_000), longTaskTimeoutMinutes: z.number().int().min(5).max(15) }).strict(), z.string().max(10_000).optional()]),
+  saveAiSettings: z.tuple([z.object({ baseUrl: modelBaseUrl, model: z.string().trim().min(1).max(200), embeddingModel: z.string().trim().min(1).max(200), inputPricePerMillion: z.number().min(0).max(1_000_000), outputPricePerMillion: z.number().min(0).max(1_000_000), longTaskTimeoutMinutes: z.number().int().min(5).max(15) }).strict(), z.string().max(10_000).optional()]),
   listAiJobs: z.tuple([id.optional()]),
   cancelAiJob: z.tuple([id]),
   retryAiJob: z.tuple([id]),

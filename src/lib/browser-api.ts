@@ -16,6 +16,9 @@ import type {
   InsightPack,
   LedgerFact,
   MetricSnapshot,
+  NovelRevisionApplyResult,
+  NovelRevisionInput,
+  NovelRevisionProposal,
   PlanNode,
   ProjectDetail,
   RankingAnalytics,
@@ -66,6 +69,13 @@ import { compileProjectChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
 import { prepareFinalizedChapterSummaries } from "../shared/summaries";
 import {
+  applyContractRepairs,
+  applyTextRepair,
+  chapterRevisionSnapshot,
+  planRevisionSnapshot,
+  sameRevisionSnapshot,
+} from "../shared/novel-revision";
+import {
   assertChapterTransition,
   deriveChapterBatchMode,
   findMatchingApproval,
@@ -85,6 +95,79 @@ interface DemoState {
 const key = "fanqie-novel-studio.demo.v1";
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
+
+const QUOTED_REPLACEMENT = /(?:把|将)\s*[“「『"]([\s\S]+?)[”」』"]\s*(?:改成|改为|替换为)\s*[“「『"]([\s\S]*?)[”」』"]/;
+const SELECTION_REPLACEMENT = /^(?:改成|改为|替换为)\s*[：:]?\s*[“「『"]?([\s\S]*?)[”」』"]?$/;
+
+function demoRevisionText(sourceText: string, instruction: string, selected: boolean) {
+  const quoted = instruction.match(QUOTED_REPLACEMENT);
+  if (quoted) {
+    if (!sourceText.includes(quoted[1]))
+      return { replacement: null, warning: "修改意见中的原文与当前目标文字不一致，请重新选择或核对原文。" };
+    return { replacement: sourceText.replace(quoted[1], quoted[2]), warning: null };
+  }
+  const selection = selected ? instruction.trim().match(SELECTION_REPLACEMENT) : null;
+  if (selection)
+    return { replacement: selection[1], warning: null };
+  return {
+    replacement: null,
+    warning: "浏览器预览仅支持“把「原文」改为「新文」”，或选中文字后输入“改为：新文”。复杂联动分析请使用桌面版模型。",
+  };
+}
+
+function analyzeBrowserNovelRevision(
+  project: ProjectDetail,
+  input: NovelRevisionInput,
+): NovelRevisionProposal {
+  const chapter = project.chapters.find((item) => item.id === input.chapterId);
+  if (!chapter) throw new Error("章节不存在");
+  const instruction = input.instruction.trim();
+  if (!instruction) throw new Error("请先填写修改意见");
+  const selected = input.scope === "仅选区";
+  const start = selected ? input.selectionStart ?? -1 : 0;
+  const end = selected ? input.selectionEnd ?? -1 : chapter.content.length;
+  if (selected && (start < 0 || end <= start || end > chapter.content.length))
+    throw new Error("请先在正文中选中要修改的文字");
+  const sourceText = chapter.content.slice(start, end);
+  if (selected && input.selectedText !== sourceText)
+    throw new Error("正文选区已经变化，请重新选择");
+
+  const tooLong = !selected && sourceText.length > 16_000;
+  const demo = tooLong
+    ? { replacement: null, warning: "目标正文超过 16000 字符，请选中具体段落后再使用浏览器预览修改。" }
+    : demoRevisionText(sourceText, instruction, selected);
+  const changed = demo.replacement !== null && demo.replacement !== sourceText;
+  const textRepair = changed ? {
+    id: `text:${chapter.id}`,
+    targetId: chapter.id,
+    baseRevision: chapter.revision,
+    start,
+    end,
+    before: sourceText,
+    after: demo.replacement!,
+    reason: instruction,
+    risk: "低" as const,
+  } : null;
+  return {
+    sourceChapterId: chapter.id,
+    baseContractVersion: project.contract.version,
+    instruction,
+    authority: input.authority,
+    scope: input.scope,
+    summary: textRepair
+      ? `已生成第${chapter.number}章的确定性文字替换建议。`
+      : `未生成第${chapter.number}章的可执行修改。`,
+    warnings: [
+      "浏览器预览只执行明确文字替换，不推断创作设定、规划或跨章节联动。",
+      ...(demo.warning ? [demo.warning] : []),
+    ],
+    impacts: textRepair ? [{ targetType: "章节", location: `第${chapter.number}章`, reason: instruction, risk: "低" }] : [],
+    contractRepairs: [],
+    planRepairs: [],
+    chapterRepairs: [],
+    textRepair,
+  };
+}
 
 function summary(detail: ProjectDetail): ProjectSummary {
   const currentWords = detail.chapters.reduce(
@@ -639,6 +722,118 @@ export function createBrowserApi(): AppApi {
     async applyPlanningRepairs() {
       throw new Error("AI 规划修复需要在桌面版使用");
     },
+    async analyzeNovelRevision(projectId, input) {
+      return analyzeBrowserNovelRevision(getProject(state, projectId), input);
+    },
+    async applyNovelRevision(
+      projectId,
+      proposal,
+      selectedRepairIds,
+    ): Promise<NovelRevisionApplyResult> {
+      const selected = new Set(selectedRepairIds);
+      if (!selected.size) throw new Error("请至少选择一项修改");
+      if (selected.size !== selectedRepairIds.length)
+        throw new Error("修改提案包含重复项目");
+      const allRepairIds = new Set([
+        ...proposal.contractRepairs.map((item) => item.id),
+        ...proposal.planRepairs.map((item) => item.id),
+        ...proposal.chapterRepairs.map((item) => item.id),
+        ...(proposal.textRepair ? [proposal.textRepair.id] : []),
+      ]);
+      if ([...selected].some((repairId) => !allRepairIds.has(repairId)))
+        throw new Error("修改提案包含未知项目");
+
+      const project = getProject(state, projectId);
+      const contractRepairs = proposal.contractRepairs.filter((item) => selected.has(item.id));
+      if (contractRepairs.length && project.contract.version !== proposal.baseContractVersion)
+        throw new Error("创作设定版本已变化，请重新分析修改意见");
+      const nextContract = contractRepairs.length
+        ? applyContractRepairs(project.contract, contractRepairs)
+        : null;
+      const plansById = new Map(project.plans.map((item) => [item.id, item]));
+      const planRepairs = proposal.planRepairs.filter((item) => selected.has(item.id));
+      for (const repair of planRepairs) {
+        const current = plansById.get(repair.targetId);
+        if (!current || !sameRevisionSnapshot(planRevisionSnapshot(current), repair.before))
+          throw new Error(`规划“${repair.location}”已变化，请重新分析修改意见`);
+      }
+      const chaptersById = new Map(project.chapters.map((item) => [item.id, item]));
+      const chapterRepairs = proposal.chapterRepairs.filter((item) => selected.has(item.id));
+      for (const repair of chapterRepairs) {
+        const current = chaptersById.get(repair.targetId);
+        if (!current || current.revision !== repair.baseRevision || !sameRevisionSnapshot(chapterRevisionSnapshot(current), repair.before))
+          throw new Error(`${repair.location}已变化，请重新分析修改意见`);
+      }
+      if (proposal.textRepair && selected.has(proposal.textRepair.id)) {
+        const current = chaptersById.get(proposal.textRepair.targetId);
+        if (!current) throw new Error("正文修改目标不存在");
+        applyTextRepair(current, proposal.textRepair);
+      }
+
+      const changeRequestIds: string[] = [];
+      const approveProtectedChange = async (
+        targetKind: "创作契约" | "规划" | "章节",
+        targetId: string,
+        title: string,
+        before: unknown,
+        after: unknown,
+      ) => {
+        const change = await this.saveChangeRequest(projectId, {
+          id: "",
+          targetKind,
+          targetId,
+          baseVersion: 0,
+          title,
+          reason: proposal.instruction,
+          beforeValue: JSON.stringify(before),
+          afterValue: JSON.stringify(after),
+          impact: proposal.summary,
+          rollback: "从目标历史版本恢复本次修改前内容",
+          status: "待审批",
+          createdAt: "",
+        });
+        await this.decideChangeRequest(projectId, change.id, "批准");
+        changeRequestIds.push(change.id);
+      };
+
+      const appliedTargets: string[] = [];
+      if (nextContract) {
+        if (project.contract.approved)
+          await approveProtectedChange("创作契约", "contract", "浏览器修改意见联动创作设定", project.contract, nextContract);
+        await this.saveContract(projectId, nextContract);
+        appliedTargets.push("创作设定");
+      }
+      for (const repair of planRepairs) {
+        const current = plansById.get(repair.targetId)!;
+        if (current.status === "已批准")
+          await approveProtectedChange("规划", current.id, `浏览器修改意见联动：${current.title}`, repair.before, repair.after);
+        await this.savePlan(projectId, { ...current, ...repair.after });
+        appliedTargets.push(repair.location);
+      }
+      const affectedChapterIds = new Set([
+        ...chapterRepairs.map((item) => item.targetId),
+        ...(proposal.textRepair && selected.has(proposal.textRepair.id)
+          ? [proposal.textRepair.targetId]
+          : []),
+      ]);
+      for (const chapterId of affectedChapterIds) {
+        const current = chaptersById.get(chapterId)!;
+        const metadata = chapterRepairs.find((item) => item.targetId === chapterId);
+        const text = proposal.textRepair?.targetId === chapterId && selected.has(proposal.textRepair.id)
+          ? proposal.textRepair
+          : null;
+        const next = {
+          ...current,
+          ...(metadata?.after ?? {}),
+          content: text ? applyTextRepair(current, text) : current.content,
+        };
+        if (["已定稿", "待发布", "已发布"].includes(current.status))
+          await approveProtectedChange("章节", current.id, `浏览器修改意见联动：第${current.number}章`, current, next);
+        await this.saveChapter(projectId, next);
+        appliedTargets.push(`第${current.number}章`);
+      }
+      return { appliedTargets, changeRequestIds };
+    },
     async saveChapter(projectId, chapter: Chapter, mode = "version") {
       const project = getProject(state, projectId);
       const existing = project.chapters.findIndex(
@@ -1103,9 +1298,10 @@ export function createBrowserApi(): AppApi {
       return state.settings;
     },
     async saveAiSettings(settings, apiKey) {
+      const providerChanged = new URL(state.settings.baseUrl).origin !== new URL(settings.baseUrl).origin;
       state.settings = {
         ...settings,
-        hasApiKey: Boolean(apiKey) || state.settings.hasApiKey,
+        hasApiKey: Boolean(apiKey) || (!providerChanged && state.settings.hasApiKey),
       };
       persist();
       return state.settings;
