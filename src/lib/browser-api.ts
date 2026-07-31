@@ -28,13 +28,10 @@ import type {
   ScheduleItem,
   StoryContract,
 } from "../shared/types";
-import { compileAestheticGuidance, normalizeAestheticProfile } from "../shared/aesthetic-profile";
+import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
-import { findCurrentVolume } from "../shared/planning";
-import { compileCommercialGuidance, resolveStoryStage } from "../shared/commercial-knowledge";
-import { buildContextDiagnostics } from "../shared/context-diagnostics";
-import { buildLongTermMemory } from "../shared/summaries";
 import { hasMajorStateChange } from "../shared/major-state-change";
+import { compileChapterContext } from "../shared/context-compiler";
 import {
   assertChapterTransition,
   deriveChapterStatus,
@@ -755,67 +752,20 @@ export function createBrowserApi(): AppApi {
     async compileContext(projectId, chapterId): Promise<ContextPackage> {
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((item) => item.id === chapterId)!;
-      const result: ContextPackage = {
-        contract: `${JSON.stringify(project.contract, null, 2)}\n项目审美：\n${compileAestheticGuidance(project.contract.aestheticProfile)}`,
-        commercialGuidance: compileCommercialGuidance(
-          project.summary.genre,
-          chapter.number,
-          {
-            currentWords: project.summary.currentWords,
-            targetWords: project.summary.targetWords,
-            subtype: project.contract.genreSubtype,
-            fanqieCategoryKey: project.contract.fanqieCategoryKey,
-            secondaryGenres: project.contract.secondaryGenres,
-            genreElements: project.contract.genreElements,
-            customGenreDirection: project.contract.customGenreDirection,
-            storyStage: resolveStoryStage(project.plans, project.summary.currentWords),
-          },
-        ),
-        chapterIntent: `本章承诺：${chapter.chapterPromise || "未填写"}\n预期回报：${chapter.expectedPayoff || "未填写"}\n当前危机：${chapter.crisis || "未填写"}\n结尾期待：${chapter.endingExpectation || "未填写"}`,
-        expectationLedger:
-          project.expectations
-            .filter((item) => ["待兑现", "部分兑现"].includes(item.status))
-            .map(
-              (item) =>
-                `${chapter.linkedExpectationIds?.includes(item.id) ? "[本章承接]" : "[待处理]"} ${item.title}｜第${item.sourceChapter}章提出｜预计第${item.expectedPayoffChapter ?? "未定"}章兑现`,
-            )
-            .join("\n") || "暂无跨章节期待",
-        longTermMemory: buildLongTermMemory(project.summaries, chapter.number),
-        volumeGoal:
-          findCurrentVolume(project.plans, chapter.number)?.goal ??
-          "尚未批准当前卷纲",
-        rollingOutline:
-          project.plans
-            .filter((item) => ["粗纲", "细纲", "场景卡"].includes(item.kind))
-            .map((item) => `${item.ordinal}. ${item.title} ${item.goal}`)
-            .join("\n") || chapter.outline,
-        recentSummary: project.chapters
-          .filter((item) => item.number < chapter.number)
-          .slice(-5)
-          .map((item) => `第${item.number}章：${item.outline}`)
-          .join("\n"),
-        relevantFacts: project.facts
-          .filter((fact) => fact.confidence === "已确认")
-          .map(
-            (fact) =>
-              `[${fact.genreDimension || fact.kind}] ${fact.subject} ${fact.predicate} ${fact.value}`,
-          )
-          .join("\n"),
-        forbiddenKnowledge:
-          project.facts
-            .filter((fact) => fact.kind === "秘密" && fact.confidence === "已确认")
-            .map((fact) => `${fact.value}｜${fact.knowledgeScope}`)
-            .join("\n") || "无",
-        authorStyle:
-          "仅根据本项目已定稿正文统计；浏览器预览不加载研究样本文风。",
-        estimatedTokens: 0,
-      };
-      result.estimatedTokens = Math.ceil(JSON.stringify(result).length / 1.8);
-      result.diagnostics = buildContextDiagnostics(result, {}, [
-        !project.contract.approved ? "创作契约尚未审批" : "",
-        !project.facts.some((fact) => fact.confidence === "已确认") ? "没有可用于本章的已确认有效事实" : "",
-      ]);
-      return result;
+      return compileChapterContext({
+        summary: project.summary,
+        contract: project.contract,
+        chapter,
+        plans: project.plans,
+        relevantFacts: project.facts,
+        constraintFacts: project.facts,
+        summaries: project.summaries,
+        expectations: project.expectations,
+        recentChapters: project.chapters,
+        styleSamples: project.chapters
+          .filter((item) => item.number < chapter.number && ["已定稿", "待发布", "已发布"].includes(item.status))
+          .map((item) => item.content),
+      });
     },
     async searchProject(projectId, query, offset = 0, limit = 50) {
       return getProject(state, projectId)

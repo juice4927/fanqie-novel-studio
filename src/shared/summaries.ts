@@ -62,7 +62,7 @@ export function aggregateStorySummaries(items: StorySummary[], maxCharacters: nu
 }
 
 export function buildLongTermMemory(
-  summaries: StorySummary[],
+  summaries: readonly StorySummary[],
   chapterNumber: number,
   maxCharacters = 12000,
 ) {

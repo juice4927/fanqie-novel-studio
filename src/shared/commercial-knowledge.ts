@@ -71,7 +71,7 @@ export interface CommercialProgress extends GenreComposition {
 }
 
 export function resolveStoryStage(
-  plans: Array<{ kind: string; status: string; ordinal: number; targetWords: number; title: string; goal: string; conflict: string; outcome: string }>,
+  plans: ReadonlyArray<{ kind: string; status: string; ordinal: number; targetWords: number; title: string; goal: string; conflict: string; outcome: string }>,
   currentWords: number,
 ) {
   const stages = plans
