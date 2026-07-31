@@ -669,6 +669,7 @@
   }
 
   .scheduleCreateRow,
+  .fanqieRankingFilters,
   .genreKnowledgeGrid,
   .marketOpportunityGrid {
     grid-template-columns: 1fr;
