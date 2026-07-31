@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import type {
@@ -15,16 +15,14 @@ import type {
   PlanningRepairInput,
   ProjectDetail,
   QualityIssue,
-  HealthCheckTask,
-  SystemHealthReport,
 } from "../src/shared/types";
 import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
 import { AiService, type AiCachePolicy } from "./ai-service";
-import { autoBackupFileName, createEncryptedBackup, nextAutoBackupAt, pruneAutoBackups, restoreEncryptedBackup } from "./backup";
+import { createEncryptedBackup } from "./backup";
 import { analyzeRankings } from "./ranking-service";
 import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
-import { deleteAutoBackupCredential, readApiCredential, readAutoBackupCredential, writeApiCredential, writeAutoBackupCredential } from "./credential-store";
+import { readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { compileChapterContext } from "../src/shared/context-compiler";
 import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
@@ -41,8 +39,11 @@ import {
   registerResearchHandlers,
   type ResearchHandlerRuntime,
 } from "./handlers/research-handlers";
+import {
+  registerSystemHandlers,
+  type SystemHandlerRuntime,
+} from "./handlers/system-handlers";
 import type { RegisterHandler } from "./handlers/types";
-import JSZip from "jszip";
 
 let mainWindow: BrowserWindow | null = null;
 let database: WorkspaceDatabase;
@@ -53,9 +54,7 @@ const activeGenerationProjects = new Set<string>();
 let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
 let researchHandlers: ResearchHandlerRuntime;
 let autoBackupTimer: ReturnType<typeof setInterval> | null = null;
-let autoBackupRunning = false;
-const healthTasks = new Map<string, HealthCheckTask>();
-const healthTaskFinishedAt = new Map<string, number>();
+let systemHandlers: SystemHandlerRuntime;
 let logger: StructuredLogger;
 const singleInstanceLockDisabled =
   process.env.NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
@@ -69,27 +68,6 @@ else if (!singleInstanceLockDisabled) app.on("second-instance", () => {
   mainWindow.show();
   mainWindow.focus();
 });
-
-async function runAutomaticBackup(force = false) {
-  const settings = database.getAutoBackupSettings();
-  if (!settings.enabled || autoBackupRunning) return settings;
-  if (!force && settings.nextRunAt && Date.parse(settings.nextRunAt) > Date.now()) return settings;
-  autoBackupRunning = true;
-  try {
-    const password = await readAutoBackupCredential();
-    if (!password) throw new Error("自动备份密码不存在，请在系统设置中重新保存");
-    database.checkpointAll();
-    const destination = path.join(database.backupRoot, autoBackupFileName());
-    await createEncryptedBackup(database.root, destination, password);
-    await pruneAutoBackups(database.backupRoot, settings.retentionCount);
-    return database.finishAutoBackup("成功", nextAutoBackupAt(settings.frequency));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return database.finishAutoBackup("失败", new Date(Date.now() + 60 * 60 * 1000).toISOString(), message);
-  } finally {
-    autoBackupRunning = false;
-  }
-}
 
 function previewChapterBatch(
   project: ProjectDetail,
@@ -346,14 +324,6 @@ async function exportProject(projectId: string, format: "txt" | "md" | "docx") {
 }
 
 function registerHandlers() {
-  const pruneHealthTasks = () => {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    for (const [id, finishedAt] of healthTaskFinishedAt) {
-      if (finishedAt < cutoff) { healthTaskFinishedAt.delete(id); healthTasks.delete(id); }
-    }
-    const completed = [...healthTaskFinishedAt.entries()].sort((left, right) => right[1] - left[1]);
-    for (const [id] of completed.slice(100)) { healthTaskFinishedAt.delete(id); healthTasks.delete(id); }
-  };
   const handle: RegisterHandler = (channel, callback) =>
     ipcMain.handle(`studio:${channel}`, async (event, ...args) => {
       if (!mainWindow || event.sender.id !== mainWindow.webContents.id)
@@ -380,6 +350,47 @@ function registerHandlers() {
         filters: [{ name: "小说文档", extensions: ["txt", "epub", "docx"] }],
       });
       return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+  });
+  systemHandlers = registerSystemHandlers({
+    register: handle,
+    database,
+    worker,
+    logFilePath: logger.filePath,
+    getSystemMetadata: () => ({
+      appVersion: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+    }),
+    chooseBackupDestination: async (defaultFileName) => {
+      if (!mainWindow) return null;
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: "创建加密备份",
+        defaultPath: defaultFileName,
+        filters: [{ name: "加密备份", extensions: ["novelbak"] }],
+      });
+      return result.canceled ? null : result.filePath ?? null;
+    },
+    chooseBackupSource: async () => {
+      if (!mainWindow) return null;
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: "校验并恢复备份副本",
+        properties: ["openFile"],
+        filters: [{ name: "加密备份", extensions: ["novelbak"] }],
+      });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    chooseDiagnosticDestination: async (defaultFileName) => {
+      if (!mainWindow) return null;
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: "导出崩溃诊断包",
+        defaultPath: defaultFileName,
+        filters: [{ name: "诊断包", extensions: ["zip"] }],
+      });
+      return result.canceled ? null : result.filePath ?? null;
     },
   });
   handle("getDashboard", () => getDashboard());
@@ -774,115 +785,6 @@ function registerHandlers() {
     analyzeMetrics(database.getProject(id).metrics),
   );
   handle("saveReviewExperiment", (id, experiment) => database.saveReviewExperiment(id, experiment));
-  handle("createBackup", async (password) => {
-    if (!mainWindow) return null;
-    const result = await dialog.showSaveDialog(mainWindow, {
-      title: "创建加密备份",
-      defaultPath: `长篇创作工作台-${now().slice(0, 10)}.novelbak`,
-      filters: [{ name: "加密备份", extensions: ["novelbak"] }],
-    });
-    if (result.canceled || !result.filePath) return null;
-    database.checkpointAll();
-    await createEncryptedBackup(database.root, result.filePath, password);
-    return result.filePath;
-  });
-  handle("restoreBackup", async (password) => {
-    if (!mainWindow) return null;
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: "校验并恢复备份副本",
-      properties: ["openFile"],
-      filters: [{ name: "加密备份", extensions: ["novelbak"] }],
-    });
-    if (result.canceled || !result.filePaths[0]) return null;
-    return restoreEncryptedBackup(result.filePaths[0], database.root, password);
-  });
-  handle("getAutoBackupSettings", async () => ({
-    ...database.getAutoBackupSettings(),
-    hasPassword: Boolean(await readAutoBackupCredential()),
-  }));
-  handle("saveAutoBackupSettings", async (input, password) => {
-    const currentPassword = await readAutoBackupCredential();
-    if (input.enabled && !password && !currentPassword)
-      throw new Error("启用自动备份需要设置至少 8 位的专用密码");
-    if (password) await writeAutoBackupCredential(password);
-    if (!input.enabled) await deleteAutoBackupCredential();
-    const saved = database.saveAutoBackupSettings(
-      input,
-      input.enabled ? nextAutoBackupAt(input.frequency) : null,
-    );
-    return { ...saved, hasPassword: input.enabled && Boolean(password || currentPassword) };
-  });
-  handle("runAutoBackup", async () => ({
-    ...await runAutomaticBackup(true),
-    hasPassword: Boolean(await readAutoBackupCredential()),
-  }));
-  const runHealthCheck = (id: string) => worker.run<SystemHealthReport>(
-    "system-health",
-    { root: database.root },
-    {
-      id,
-      onProgress: (value) => {
-        const progress = value as { completed: number; total: number; label: string };
-        const task = healthTasks.get(id);
-        if (task?.status === "运行中") healthTasks.set(id, { ...task, ...progress });
-      },
-    },
-  );
-  handle("runSystemHealthCheck", () => runHealthCheck(randomUUID()));
-  handle("startSystemHealthCheck", () => {
-    pruneHealthTasks();
-    const running = [...healthTasks.values()].find((task) => task.status === "运行中");
-    if (running) return running;
-    const id = randomUUID();
-    const task: HealthCheckTask = { id, status: "运行中", completed: 0, total: 1, label: "准备检查", report: null, error: null };
-    healthTasks.set(id, task);
-    void runHealthCheck(id).then((report) => {
-      const current = healthTasks.get(id);
-      if (current?.status === "运行中") {
-        healthTasks.set(id, { ...current, status: "完成", completed: current.total, label: "检查完成", report });
-        healthTaskFinishedAt.set(id, Date.now());
-      }
-    }).catch((error) => {
-      const current = healthTasks.get(id);
-      const message = error instanceof Error ? error.message : String(error);
-      if (current) {
-        healthTasks.set(id, { ...current, status: message === "健康检查已取消" ? "已取消" : "失败", error: message });
-        healthTaskFinishedAt.set(id, Date.now());
-      }
-    });
-    return task;
-  });
-  handle("getSystemHealthCheck", (id) => {
-    const task = healthTasks.get(id);
-    if (!task) throw new Error("健康检查任务不存在");
-    return task;
-  });
-  handle("cancelSystemHealthCheck", (id) => {
-    const task = healthTasks.get(id);
-    if (!task || task.status !== "运行中") return false;
-    healthTasks.set(id, { ...task, status: "已取消", label: "正在取消" });
-    return worker.cancel(id);
-  });
-  handle("rebuildSearchIndexes", async (projectId) => {
-    database.rebuildSearchIndexes(projectId, false);
-    return runHealthCheck(randomUUID());
-  });
-  handle("exportDiagnosticBundle", async () => {
-    if (!mainWindow) return null;
-    const result = await dialog.showSaveDialog(mainWindow, {
-      title: "导出崩溃诊断包",
-      defaultPath: `长篇创作工作台-诊断-${now().slice(0, 10)}.zip`,
-      filters: [{ name: "诊断包", extensions: ["zip"] }],
-    });
-    if (result.canceled || !result.filePath) return null;
-    const zip = new JSZip();
-    zip.file("system.json", JSON.stringify({ appVersion: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, generatedAt: now() }, null, 2));
-    zip.file("health.json", JSON.stringify(database.runSystemHealthCheck(), null, 2));
-    try { zip.file("application.jsonl", await readFile(logger.filePath, "utf8")); } catch { zip.file("application.jsonl", ""); }
-    await writeFile(result.filePath, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
-    return result.filePath;
-  });
-  handle("getWorkspacePath", () => database.root);
 }
 
 function createWindow() {
@@ -943,12 +845,15 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   ai = new AiService(database, getApiKey, 120_000, 0, (level, event, data) => logger.write(level, event, data));
   registerHandlers();
   void researchHandlers.runDueRankingSchedules();
-  void runAutomaticBackup();
+  void systemHandlers.runAutomaticBackup();
   rankingScheduleTimer = setInterval(
     () => void researchHandlers.runDueRankingSchedules(),
     15 * 60 * 1000,
   );
-  autoBackupTimer = setInterval(() => void runAutomaticBackup(), 15 * 60 * 1000);
+  autoBackupTimer = setInterval(
+    () => void systemHandlers.runAutomaticBackup(),
+    15 * 60 * 1000,
+  );
   createWindow();
   configureAutoUpdates(logger, async () => {
     database.checkpointAll();
