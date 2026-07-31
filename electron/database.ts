@@ -54,6 +54,7 @@ import { SearchRepository } from "./repositories/search-repository";
 import { ProjectRepository } from "./repositories/project-repository";
 import { ResearchRepository } from "./repositories/research-repository";
 import { injectFault } from "./fault-injection";
+import { chapterGenerationFingerprint, type ChapterGenerationGuard } from "./ai-retry";
 
 const now = () => new Date().toISOString();
 
@@ -746,10 +747,10 @@ export class WorkspaceDatabase {
     return this.persistChapter(id, chapter, undefined, mode === "version");
   }
 
-  saveGeneratedChapter(id: string, chapter: Chapter) {
+  saveGeneratedChapter(id: string, chapter: Chapter, expected?: ChapterGenerationGuard) {
     if (!chapter.id || !chapter.content.trim())
       throw new Error("AI 草稿缺少章节或正文");
-    return this.persistChapter(id, chapter, "待质检");
+    return this.persistChapter(id, chapter, "待质检", true, expected);
   }
 
   private persistChapter(
@@ -757,11 +758,12 @@ export class WorkspaceDatabase {
     chapter: Chapter,
     forcedStatus?: ChapterStatus,
     createRevision = true,
+    expected?: ChapterGenerationGuard,
   ) {
     const db = this.projectDb(id);
     db.exec("BEGIN IMMEDIATE");
     try {
-      const saved = this.persistChapterInTransaction(db, id, chapter, forcedStatus, createRevision);
+      const saved = this.persistChapterInTransaction(db, id, chapter, forcedStatus, createRevision, expected);
       injectFault("power-loss-before-commit");
       db.exec("COMMIT");
       this.touchProject(id);
@@ -778,10 +780,18 @@ export class WorkspaceDatabase {
     chapter: Chapter,
     forcedStatus?: ChapterStatus,
     createRevision = true,
+    expected?: ChapterGenerationGuard,
   ) {
     const previous = chapter.id
       ? this.projects.getChapter(db, chapter.id)
       : undefined;
+    if (expected && (
+      !previous ||
+      previous.revision !== expected.revision ||
+      chapterGenerationFingerprint(previous) !== expected.fingerprint
+    )) {
+      throw new Error("章节在 AI 生成期间已被修改，旧生成结果未保存");
+    }
     const protectedEdit = isProtectedChapterEdit(previous, chapter);
     if (
       protectedEdit &&
@@ -1311,6 +1321,10 @@ export class WorkspaceDatabase {
 
   listAiJobs(projectId?: string): AiJobRecord[] {
     return this.aiAudit.list(projectId);
+  }
+
+  getAiJob(id: string): AiJobRecord | undefined {
+    return this.aiAudit.get(id);
   }
 
   getAiJobRetryContext(id: string) {

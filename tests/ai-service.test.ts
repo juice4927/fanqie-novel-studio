@@ -250,6 +250,74 @@ describe("AI provider routing", () => {
 });
 
 describe("chapter draft streaming", () => {
+  const draftChapter = {
+    id: "chapter-start", number: 1, title: "待生成", outline: "完成任务句柄测试", content: "", wordCount: 0,
+    status: "章纲", batchMode: "逐章", isKeyChapter: false, revision: 3, updatedAt: new Date().toISOString(),
+  } satisfies Chapter;
+  const draftContext = {
+    contract: "契约", commercialGuidance: "规则", chapterIntent: "意图", expectationLedger: "无", longTermMemory: "无",
+    volumeGoal: "无", rollingOutline: "无", recentSummary: "无", relevantFacts: "无", forbiddenKnowledge: "无", authorStyle: "无", estimatedTokens: 10,
+  } satisfies ContextPackage;
+
+  it("returns the new job id before the network request completes", async () => {
+    let resolveResponse!: (response: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolveResponse = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const startAiJob = vi.fn(() => "job-started");
+    const database = {
+      getAiSettings: () => ({ baseUrl: "https://model.invalid/v1", model: "deepseek-chat", embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
+      findAiJob: vi.fn(() => undefined), startAiJob, finishAiJob: vi.fn(),
+    } as unknown as WorkspaceDatabase;
+    const service = new AiService(database, () => "secret");
+    let completed = false;
+
+    const task = service.startDraftChapter("project", draftChapter, draftContext);
+    void task.completion.then(() => { completed = true; }, () => { completed = true; });
+
+    expect(task).toMatchObject({ jobId: "job-started", source: "network" });
+    expect(startAiJob).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(completed).toBe(false);
+
+    const content = "正文".repeat(1000);
+    resolveResponse(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: "新章节", content }) } }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await expect(task.completion).resolves.toMatchObject({ title: "新章节", content });
+    expect(completed).toBe(true);
+  });
+
+  it("uses successful cache entries normally but bypasses them for an explicit retry", async () => {
+    const cachedContent = "缓存正文".repeat(700);
+    const networkContent = "网络正文".repeat(700);
+    const findAiJob = vi.fn(() => JSON.stringify({ title: "缓存章节", content: cachedContent }));
+    const startAiJob = vi.fn(() => "job-bypass");
+    const database = {
+      getAiSettings: () => ({ baseUrl: "https://model.invalid/v1", model: "deepseek-chat", embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
+      findAiJob, startAiJob, finishAiJob: vi.fn(),
+    } as unknown as WorkspaceDatabase;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ title: "网络章节", content: networkContent }) } }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new AiService(database, () => "secret");
+
+    const cached = service.startDraftChapter("project", draftChapter, draftContext);
+    expect(cached).toMatchObject({ jobId: null, source: "cache" });
+    await expect(cached.completion).resolves.toMatchObject({ title: "缓存章节", content: cachedContent });
+    expect(startAiJob).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    findAiJob.mockClear();
+    const retried = service.startDraftChapter("project", draftChapter, draftContext, { cachePolicy: "bypass" });
+    expect(retried).toMatchObject({ jobId: "job-bypass", source: "network" });
+    expect(findAiJob).not.toHaveBeenCalled();
+    expect(startAiJob).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await expect(retried.completion).resolves.toMatchObject({ title: "网络章节", content: networkContent });
+  });
+
   it("forwards decoded content deltas and records request telemetry", async () => {
     const finishAiJob = vi.fn();
     const updateAiJobTelemetry = vi.fn();

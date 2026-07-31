@@ -27,7 +27,7 @@ import type {
 } from "../src/shared/types";
 import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
-import { AiService } from "./ai-service";
+import { AiService, type AiCachePolicy } from "./ai-service";
 import { autoBackupFileName, createEncryptedBackup, nextAutoBackupAt, pruneAutoBackups, restoreEncryptedBackup } from "./backup";
 import { analyzeRankings, captureFanqieOpeningSample, capturePublicRankingPage } from "./ranking-service";
 import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
@@ -38,6 +38,12 @@ import { deleteAutoBackupCredential, readApiCredential, readAutoBackupCredential
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { hasMajorStateChange } from "../src/shared/major-state-change";
 import { compileChapterContext } from "../src/shared/context-compiler";
+import {
+  assertChapterRetrySnapshot,
+  createChapterGenerationGuard,
+  serializeChapterAiRetryContext,
+  validateChapterAiRetrySource,
+} from "./ai-retry";
 import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
 import { validateIpcArgs } from "./ipc-validation";
 import { StructuredLogger } from "./structured-log";
@@ -202,7 +208,12 @@ function previewChapterBatch(
   };
 }
 
-async function generateOneChapter(id: string, chapterId: string, onStream?: (event: ChapterDraftStreamEvent) => void) {
+function startOneChapter(
+  id: string,
+  chapterId: string,
+  onStream?: (event: ChapterDraftStreamEvent) => void,
+  cachePolicy: AiCachePolicy = "use",
+) {
   if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
   const project = database.getProject(id);
   if (!project.contract.approved) throw new Error("创作契约审批后才能生成正文");
@@ -212,17 +223,33 @@ async function generateOneChapter(id: string, chapterId: string, onStream?: (eve
   if (["已定稿", "待发布", "已发布"].includes(chapter.status)) throw new Error("已定稿或进入发布流程的章节不能由 AI 覆写");
   assertNoHardStoryConstraint(evaluateStoryConstraints(project.facts, chapter));
   activeGenerationProjects.add(id);
+  if (!getApiKey()) throw new Error("尚未配置 AI API 密钥");
   try {
     const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
-    const generated = await ai.draftChapter(id, chapter, compileContext(project, chapter, facts), JSON.stringify({ kind: "chapter", projectId: id, chapterId }), onStream);
-    return database.saveGeneratedChapter(id, generated);
-  } finally {
+    const generationGuard = createChapterGenerationGuard(chapter);
+    const task = ai.startDraftChapter(id, chapter, compileContext(project, chapter, facts), {
+      retryContext: serializeChapterAiRetryContext("chapter", id, chapter),
+      onStream,
+      cachePolicy,
+    });
+    return {
+      ...task,
+      completion: task.completion
+        .then((generated) => database.saveGeneratedChapter(id, generated, generationGuard))
+        .finally(() => activeGenerationProjects.delete(id)),
+    };
+  } catch (error) {
     activeGenerationProjects.delete(id);
   }
 }
+    throw error;
 
 async function generateChapterBatchFrom(id: string, chapterId: string) {
   if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
+async function generateOneChapter(id: string, chapterId: string, onStream?: (event: ChapterDraftStreamEvent) => void) {
+  return startOneChapter(id, chapterId, onStream).completion;
+}
+
   const preview = previewChapterBatch(database.getProject(id), database.getAiSettings(), chapterId);
   if (!preview.canRun) throw new Error(preview.blockingReason ?? "当前不能执行五章批次");
   activeGenerationProjects.add(id);
@@ -235,8 +262,14 @@ async function generateChapterBatchFrom(id: string, chapterId: string) {
       if (chapter.content.trim()) { generated.push(chapter); continue; }
       assertNoHardStoryConstraint(evaluateStoryConstraints(currentProject.facts, chapter));
       const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
-      const draft = await ai.draftChapter(id, chapter, compileContext(currentProject, chapter, facts), JSON.stringify({ kind: "batch", projectId: id, chapterId: candidate.id }));
-      generated.push(database.saveGeneratedChapter(id, draft));
+      const generationGuard = createChapterGenerationGuard(chapter);
+      const draft = await ai.draftChapter(
+        id,
+        chapter,
+        compileContext(currentProject, chapter, facts),
+        serializeChapterAiRetryContext("batch", id, chapter),
+      );
+      generated.push(database.saveGeneratedChapter(id, draft, generationGuard));
     }
     return generated;
   } finally {
@@ -958,30 +991,27 @@ function registerHandlers() {
   handle("listAiJobs", (projectId) => database.listAiJobs(projectId));
   handle("cancelAiJob", (id) => ai.cancelJob(id));
   handle("retryAiJob", async (id) => {
-    const existingJobs = database.listAiJobs();
-    const sourceJob = existingJobs.find((job) => job.id === id);
+    const sourceJob = database.getAiJob(id);
     if (!sourceJob) throw new Error("AI 任务不存在");
-    const raw = database.getAiJobRetryContext(id);
-    if (!raw) throw new Error("该任务没有可安全重放的上下文，请返回原操作重试");
-    const context = JSON.parse(raw) as { kind: "chapter" | "batch"; projectId: string; chapterId: string };
-    const execution = context.kind === "chapter"
-      ? generateOneChapter(context.projectId, context.chapterId)
-      : context.kind === "batch"
-        ? generateChapterBatchFrom(context.projectId, context.chapterId)
-        : null;
-    if (!execution) throw new Error("不支持的任务重试类型");
-    let executionError: unknown;
-    let completed = false;
-    void execution.then(() => { completed = true; }, (error) => { executionError = error; });
-    const existingIds = new Set(existingJobs.map((job) => job.id));
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      if (executionError) throw executionError;
-      const created = database.listAiJobs(context.projectId).find((job) => !existingIds.has(job.id));
-      if (created) return created;
-      if (completed) throw new Error("重试没有创建新的 AI 任务；目标章节可能已经有正文");
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    const context = validateChapterAiRetrySource(sourceJob, database.getAiJobRetryContext(id));
+    assertChapterRetrySnapshot(context, database.getChapter(context.projectId, context.chapterId));
+    const task = startOneChapter(context.projectId, context.chapterId, undefined, "bypass");
+    if (!task.jobId || task.source !== "network") {
+      await task.completion;
+      throw new Error("重试没有创建新的 AI 任务，请返回章节工作区重新生成");
     }
-    throw new Error("AI 重试任务启动超时，请返回原操作重试");
+    void task.completion
+      .catch((error) => logger.write("error", "ai.retry.failed", {
+        sourceJobId: id,
+        retryJobId: task.jobId,
+        projectId: context.projectId,
+        chapterId: context.chapterId,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+      .catch(() => {});
+    const retryJob = database.getAiJob(task.jobId);
+    if (!retryJob) throw new Error("AI 重试任务已启动，但审计记录不可用");
+    return retryJob;
   });
   handle("exportProject", (id, format) => exportProject(id, format));
   handle("importMetricsCsv", (id, csvText) => {

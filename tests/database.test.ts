@@ -5,6 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorkspaceDatabase, now } from "../electron/database";
+import { createChapterGenerationGuard } from "../electron/ai-retry";
 import type { Chapter, LedgerFact, QualityIssue } from "../src/shared/types";
 
 const roots: string[] = [];
@@ -116,6 +117,49 @@ describe("per-book isolation and gates", () => {
     expect(database.listAiJobs().find((job) => job.id === first)).toMatchObject({ status: "失败", retryable: true });
     expect(database.findAiJob("draft-chapter", "same-hash", "prompt", "provider", "model")).toBe("{\"content\":\"成功\"}");
     expect(database.findAiJob("draft-chapter", "same-hash", "prompt", "other-provider", "model")).toBeNull();
+  });
+
+  it("gets an AI job by id even when it falls outside the bounded history list", () => {
+    const database = createDatabase();
+    const target = database.startAiJob("project", "draft-chapter", "target-hash", "prompt", "provider", "model", "目标任务", "{\"kind\":\"chapter\"}");
+    database.finishAiJob(target, "", "目标失败");
+    const inspection = new DatabaseSync(path.join(database.root, "catalog.sqlite"));
+    inspection.prepare("UPDATE ai_jobs SET created_at = ? WHERE id = ?").run("2000-01-01T00:00:00.000Z", target);
+    inspection.close();
+    for (let index = 0; index < 201; index += 1) {
+      const id = database.startAiJob("project", "quality-review", `hash-${index}`, "prompt", "provider", "model", `任务${index}`);
+      database.finishAiJob(id, "{}");
+    }
+
+    expect(database.listAiJobs().some((job) => job.id === target)).toBe(false);
+    expect(database.getAiJob(target)).toMatchObject({
+      id: target, projectId: "project", status: "失败", error: "目标失败", retryable: true,
+    });
+    expect(database.getAiJob("missing-job")).toBeUndefined();
+  });
+
+  it("does not let an AI result overwrite an autosaved chapter change", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "生成并发保护", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    const original = database.saveChapter(project.id, createChapter(1));
+    const guard = createChapterGenerationGuard(original);
+    const autosaved = database.saveChapter(project.id, {
+      ...original,
+      outline: "用户在 AI 生成期间修改并自动保存的新章纲。",
+      content: "用户保留的新正文。".repeat(80),
+    }, "autosave");
+
+    expect(autosaved.revision).toBe(original.revision);
+    expect(() => database.saveGeneratedChapter(project.id, {
+      ...original,
+      title: "AI 旧结果",
+      content: "基于旧章纲生成的正文。".repeat(100),
+    }, guard)).toThrow("生成期间已被修改");
+    expect(database.getChapter(project.id, original.id)).toMatchObject({
+      outline: autosaved.outline,
+      content: autosaved.content,
+      revision: original.revision,
+    });
   });
 
   it("detects and rebuilds incomplete chapter search indexes", () => {

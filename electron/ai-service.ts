@@ -8,6 +8,7 @@ import type {
   BookConceptSkeleton,
   ConceptCandidate,
   ContextPackage,
+  ChapterDraftStreamEvent,
   Genre,
   InsightPack,
   LedgerFact,
@@ -380,6 +381,20 @@ function hashInput(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export type AiCachePolicy = "use" | "bypass";
+
+export interface StartedAiTask<T> {
+  jobId: string | null;
+  source: "network" | "cache";
+  completion: Promise<T>;
+}
+
+export interface StartDraftChapterOptions {
+  retryContext?: string;
+  onStream?: (event: ChapterDraftStreamEvent) => void;
+  cachePolicy?: AiCachePolicy;
+}
+
 export class AiService {
   private readonly activeRequests = new Map<string, AbortController>();
   private readonly cancelledJobs = new Set<string>();
@@ -415,19 +430,28 @@ export class AiService {
     onAttempt?: (attempt: number) => void;
     onDelta?: (delta: string, attempt: number) => void;
   }): Promise<T> {
+    cachePolicy?: AiCachePolicy;
+    onJobStarted?: (jobId: string) => void;
+    onCacheHit?: () => void;
     const settings = this.database.getAiSettings();
     const apiKey = this.getApiKey();
     if (!apiKey) throw new Error("尚未配置 AI API 密钥");
     const provider = normalizeProviderUrl(settings.baseUrl);
     const inputHash = hashInput(`${options.system}\n${options.user}`);
-    const cached = this.database.findAiJob(options.taskType, inputHash, PROMPT_VERSION, provider, settings.model);
-    if (cached) return options.schema.parse(JSON.parse(cached));
+    const cached = options.cachePolicy === "bypass"
+      ? null
+      : this.database.findAiJob(options.taskType, inputHash, PROMPT_VERSION, provider, settings.model);
+    if (cached) {
+      options.onCacheHit?.();
+      return options.schema.parse(JSON.parse(cached));
+    }
     const jobId = this.database.startAiJob(
       options.projectId, options.taskType, inputHash, PROMPT_VERSION, provider, settings.model, options.inputSummary,
       options.retryContext,
     );
     const startedAt = Date.now();
     let lastError = "模型输出不符合结构要求";
+    options.onJobStarted?.(jobId);
     let repairInstruction = "";
     const useResponses = usesResponsesApi(settings.model);
     let useJsonMode = !useResponses && inferProviderCapabilities(settings.baseUrl).jsonMode;
@@ -987,7 +1011,32 @@ export class AiService {
     chapter: Chapter,
     context: ContextPackage,
     retryContext?: string,
-    onStream?: (event: { type: "attempt-start"; attempt: number } | { type: "delta"; attempt: number; delta: string } | { type: "complete"; attempt: number }) => void,
+    onStream?: (event: ChapterDraftStreamEvent) => void,
+  ): Promise<Chapter> {
+    return this.startDraftChapter(projectId, chapter, context, { retryContext, onStream }).completion;
+  }
+
+  startDraftChapter(
+    projectId: string,
+    chapter: Chapter,
+    context: ContextPackage,
+    options: StartDraftChapterOptions = {},
+  ): StartedAiTask<Chapter> {
+    let jobId: string | null = null;
+    let source: StartedAiTask<Chapter>["source"] = "network";
+    const completion = this.runDraftChapter(projectId, chapter, context, options, {
+      onJobStarted: (startedJobId) => { jobId = startedJobId; },
+      onCacheHit: () => { source = "cache"; },
+    });
+    return { jobId, source, completion };
+  }
+
+  private async runDraftChapter(
+    projectId: string,
+    chapter: Chapter,
+    context: ContextPackage,
+    options: StartDraftChapterOptions,
+    lifecycle: { onJobStarted: (jobId: string) => void; onCacheHit: () => void },
   ): Promise<Chapter> {
     let currentAttempt = 0;
     const targetCharacters = Math.min(3500, Math.max(1400, chapter.targetWords ?? 2300));
@@ -1001,13 +1050,16 @@ export class AiService {
       system: "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、项目审美、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑、契约或本书审美。项目审美是本书唯一的文风基准：冷峻、克制、均衡、热烈都可能是正确答案，不得默认采用清冷克制风，也不得把任一温度写成所有作品共用的模板。",
       user: `本章主要功能：${chapterFunction}\n本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标约 ${targetCharacters} 个非空白字符，完整结果必须落在 ${minimumCharacters}-${maximumCharacters} 个非空白字符内。按本章功能完成有效推进：行动、生存、经营或高潮章应产生可观察的局势变化；调查、关系、群像、氛围或过渡章可以通过证据重排、认知变化、关系位移、情绪积累或环境信息完成推进，不得为了显得刺激而强塞冲突、打脸或反转。若本章承担回报，展示其实际影响；若只承担蓄势，不要提前透支回报。把上下文中的叙事距离、情绪温度、文字质地、对话风格、情绪表达和标志手法落实到具体句段。遵守审美避用项，并以符合本章功能的自然余波结束。`,
       schema: chapterDraftSchema(minimumCharacters, maximumCharacters),
-      retryContext,
+      retryContext: options.retryContext,
       timeoutMs: 300_000,
       stream: true,
-      onAttempt: (attempt) => { currentAttempt = attempt; onStream?.({ type: "attempt-start", attempt }); },
-      onDelta: (delta, attempt) => onStream?.({ type: "delta", attempt, delta }),
+      cachePolicy: options.cachePolicy,
+      onJobStarted: lifecycle.onJobStarted,
+      onCacheHit: lifecycle.onCacheHit,
+      onAttempt: (attempt) => { currentAttempt = attempt; options.onStream?.({ type: "attempt-start", attempt }); },
+      onDelta: (delta, attempt) => options.onStream?.({ type: "delta", attempt, delta }),
     });
-    onStream?.({ type: "complete", attempt: currentAttempt });
+    options.onStream?.({ type: "complete", attempt: currentAttempt });
     return { ...chapter, title: result.title, content: result.content, status: "待质检", updatedAt: now() };
   }
 

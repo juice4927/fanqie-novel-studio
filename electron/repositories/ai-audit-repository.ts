@@ -4,6 +4,20 @@ import type { AiJobRecord } from "../../src/shared/types";
 
 const now = () => new Date().toISOString();
 
+function hydrateAiJob(row: Record<string, unknown>): AiJobRecord {
+  return {
+    id: String(row.id), projectId: row.project_id ? String(row.project_id) : null, taskType: String(row.task_type),
+    inputSummary: String(row.input_summary), promptVersion: String(row.prompt_version), provider: String(row.provider), model: String(row.model),
+    status: String(row.status) as AiJobRecord["status"], inputTokens: Number(row.input_tokens ?? 0), outputTokens: Number(row.output_tokens ?? 0),
+    actualCost: Number(row.actual_cost ?? 0), durationMs: Number(row.duration_ms ?? 0),
+    headersAt: row.headers_at ? String(row.headers_at) : null, firstTokenAt: row.first_token_at ? String(row.first_token_at) : null,
+    completedAt: row.completed_at ? String(row.completed_at) : null, chunkCount: Number(row.chunk_count ?? 0), attemptCount: Number(row.attempt_count ?? 0),
+    error: row.error ? String(row.error) : null,
+    retryable: Boolean(row.retry_context) && ["失败", "已取消", "已中断"].includes(String(row.status)),
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+  };
+}
+
 export interface AiJobCompletion {
   inputTokens: number;
   outputTokens: number;
@@ -60,17 +74,12 @@ export class AiAuditRepository {
     const rows = (projectId
       ? this.db.prepare("SELECT * FROM ai_jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 200").all(projectId)
       : this.db.prepare("SELECT * FROM ai_jobs ORDER BY created_at DESC LIMIT 200").all()) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      id: String(row.id), projectId: row.project_id ? String(row.project_id) : null, taskType: String(row.task_type),
-      inputSummary: String(row.input_summary), promptVersion: String(row.prompt_version), provider: String(row.provider), model: String(row.model),
-      status: String(row.status) as AiJobRecord["status"], inputTokens: Number(row.input_tokens ?? 0), outputTokens: Number(row.output_tokens ?? 0),
-      actualCost: Number(row.actual_cost ?? 0), durationMs: Number(row.duration_ms ?? 0),
-      headersAt: row.headers_at ? String(row.headers_at) : null, firstTokenAt: row.first_token_at ? String(row.first_token_at) : null,
-      completedAt: row.completed_at ? String(row.completed_at) : null, chunkCount: Number(row.chunk_count ?? 0), attemptCount: Number(row.attempt_count ?? 0),
-      error: row.error ? String(row.error) : null,
-      retryable: Boolean(row.retry_context) && ["失败", "已取消", "已中断"].includes(String(row.status)),
-      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-    }));
+    return rows.map(hydrateAiJob);
+  }
+
+  get(id: string): AiJobRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM ai_jobs WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? hydrateAiJob(row) : undefined;
   }
 
   retryContext(id: string) {
