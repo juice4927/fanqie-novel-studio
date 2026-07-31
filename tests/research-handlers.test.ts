@@ -124,4 +124,32 @@ describe("research handlers", () => {
     ).toThrow("必须确认拥有材料的合法使用权");
     expect(database.saveResearchBook).not.toHaveBeenCalled();
   });
+
+  it("does not require cloud consent for an authorized local import", () => {
+    const { dependencies, handlers, database } = createDependencies();
+    registerResearchHandlers(dependencies);
+    const preview = {
+      fileName: "sample.txt",
+      sourceType: "TXT",
+      detectedEncoding: "UTF-8",
+      chapters: [],
+      totalWords: 0,
+      warnings: [],
+    } satisfies ImportPreview;
+
+    const imported = handlers.get("importResearchBook")!(
+      preview,
+      "都市脑洞",
+      true,
+      false,
+    );
+
+    expect(imported).toMatchObject({
+      title: "sample",
+      rightsConfirmed: true,
+      cloudConsent: false,
+      status: "待拆解",
+    });
+    expect(database.saveResearchBook).toHaveBeenCalledWith(imported, []);
+  });
 });

@@ -42,6 +42,7 @@ import {
 import { prepareFactSave } from "../shared/fact-service";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
+import { assertLocalResearchImportRights } from "../shared/research-import-service";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { compileChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
@@ -1001,6 +1002,7 @@ export function createBrowserApi(): AppApi {
       rightsConfirmed,
       cloudConsent,
     ) {
+      assertLocalResearchImportRights(rightsConfirmed);
       const book: ResearchBook = {
         id: id(),
         title: preview.fileName,

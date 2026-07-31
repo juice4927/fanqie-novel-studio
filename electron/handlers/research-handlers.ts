@@ -13,6 +13,7 @@ import {
   failRankingSchedule,
   nextRankingRun,
 } from "../../src/shared/ranking-schedule";
+import { assertLocalResearchImportRights } from "../../src/shared/research-import-service";
 import type { AiService } from "../ai-service";
 import { now, type WorkspaceDatabase } from "../database";
 import {
@@ -191,8 +192,7 @@ export function registerResearchHandlers({
   register(
     "importResearchBook",
     (preview, genre, rightsConfirmed, cloudConsent) => {
-      if (!rightsConfirmed)
-        throw new Error("必须确认拥有材料的合法使用权");
+      assertLocalResearchImportRights(rightsConfirmed);
       const book: ResearchBook = {
         id: randomUUID(),
         title: path.basename(preview.fileName, path.extname(preview.fileName)),
