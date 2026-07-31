@@ -792,7 +792,11 @@ export function createBrowserApi(): AppApi {
     },
     async runQualityCheck(projectId, chapterId) {
       const project = getProject(state, projectId);
-      const chapter = project.chapters.find((item) => item.id === chapterId)!;
+      const chapterIndex = project.chapters.findIndex(
+        (item) => item.id === chapterId,
+      );
+      const chapter = project.chapters[chapterIndex];
+      if (!chapter) throw new Error("章节不存在");
       const issues: QualityIssue[] = [];
       if (chapter.wordCount < 1200)
         issues.push({
@@ -828,9 +832,26 @@ export function createBrowserApi(): AppApi {
         if (index >= 0) project.issues[index] = issue;
         else project.issues.push(issue);
       }
-      if (plan.forceSequentialReview) chapter.batchMode = "逐章";
-      if (chapter.status === "草稿") chapter.status = "待质检";
-      project.summary.updatedAt = now();
+      const batchMode = plan.forceSequentialReview
+        ? "逐章"
+        : chapter.batchMode;
+      const updatedAt = now();
+      if (chapter.status === "草稿" || batchMode !== chapter.batchMode) {
+        project.chapters[chapterIndex] = prepareChapterSave(
+          { ...chapter, batchMode },
+          {
+            previous: chapter,
+            forcedStatus: chapter.status === "草稿" ? "待质检" : undefined,
+            protectedEdit: false,
+            createRevision: true,
+            chapterId: chapter.id,
+            endingExpectationId: chapter.endingExpectationId ?? null,
+            batchMode,
+            updatedAt,
+          },
+        );
+      }
+      project.summary.updatedAt = updatedAt;
       persist();
       return issues;
     },

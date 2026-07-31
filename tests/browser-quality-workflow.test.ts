@@ -69,4 +69,29 @@ describe("browser quality workflow", () => {
       reloaded.resolveIssue("demo-project", hardIssue.id, "已忽略"),
     ).rejects.toThrow("硬性质检项不能忽略，必须解决后才能继续");
   });
+
+  it("versions a draft when quality checking advances its status", async () => {
+    const api = createBrowserApi();
+    const project = await api.getProject("demo-project");
+    const outline = project.chapters[1];
+    const draft = await api.saveChapter("demo-project", {
+      ...outline,
+      content: "短正文",
+    });
+    const checkedAt = "2026-08-01T02:00:00.000Z";
+    vi.setSystemTime(checkedAt);
+
+    await api.runQualityCheck("demo-project", draft.id);
+    const reloaded = await api.getProject("demo-project");
+    const checked = reloaded.chapters.find((item) => item.id === draft.id);
+
+    expect(checked).toMatchObject({
+      status: "待质检",
+      revision: draft.revision + 1,
+      updatedAt: checkedAt,
+    });
+    expect(reloaded.summary.updatedAt).toBe(checkedAt);
+    await expect(api.runQualityCheck("demo-project", "missing"))
+      .rejects.toThrow("章节不存在");
+  });
 });
