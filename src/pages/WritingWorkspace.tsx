@@ -101,6 +101,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   );
   const [context, setContext] = useState<ContextPackage | null>(null);
   const [busy, setBusy] = useState(false);
+  const [chapterLoading, setChapterLoading] = useState(Boolean(selected));
   const [query, setQuery] = useState("");
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searchHasMore, setSearchHasMore] = useState(false);
@@ -114,12 +115,24 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   const [recoveryAvailable, setRecoveryAvailable] = useState(true);
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
   const draftRef = useRef(draft);
+  const chapterRequestRef = useRef(0);
   const autosaveRef = useRef<AutosaveCoordinator | null>(null);
   const reloadRef = useRef(reload);
   const notifyRef = useRef(notify);
   const [batchPreview, setBatchPreview] =
     useState<BatchGenerationPreview | null>(null);
   useEffect(() => { draftRef.current = draft; reloadRef.current = reload; notifyRef.current = notify; }, [draft, reload, notify]);
+  useEffect(() => api.onChapterFactsExtracted((event) => {
+    if (event.projectId !== project.summary.id) return;
+    void reloadRef.current();
+    if (event.status === "失败") {
+      notifyRef.current(`章节已定稿，但状态扫描失败：${event.message ?? "未知错误"}`, "error");
+      return;
+    }
+    notifyRef.current(event.candidateCount
+      ? `状态扫描完成，生成 ${event.candidateCount} 条待确认状态`
+      : "状态扫描完成，本章没有新的持久状态");
+  }), [api, project.summary.id]);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 600px)");
     const update = () => setCompactList(media.matches);
@@ -153,13 +166,39 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   }, [api, project.summary.id]);
   useEffect(() => {
     const next = project.chapters.find((chapter) => chapter.id === selectedId);
-    if (!next || chapterDraftSignature(draftRef.current) !== lastSavedSignature.current) return;
-    setDraft(next);
-    lastSavedSignature.current = chapterDraftSignature(next);
+    const current = draftRef.current;
+    if (!next || current.id !== selectedId || chapterDraftSignature(current) !== lastSavedSignature.current) return;
+    const merged = { ...next, content: current.content };
+    draftRef.current = merged;
+    setDraft(merged);
+    lastSavedSignature.current = chapterDraftSignature(merged);
   }, [project, selectedId]);
+  useEffect(() => {
+    const chapter = project.chapters.find((item) => item.id === selectedId);
+    if (!chapter) {
+      setChapterLoading(false);
+      return;
+    }
+    const requestId = ++chapterRequestRef.current;
+    setChapterLoading(true);
+    void api.getChapter(project.summary.id, chapter.id).then((loaded) => {
+      if (chapterRequestRef.current !== requestId) return;
+      const recovered = readRecoveredChapter(project.summary.id, loaded);
+      draftRef.current = recovered;
+      setDraft(recovered);
+      lastSavedSignature.current = chapterDraftSignature(loaded);
+      setSaveStatus(chapterDraftSignature(recovered) === lastSavedSignature.current ? "saved" : "dirty");
+    }).catch((error) => {
+      if (chapterRequestRef.current === requestId)
+        notifyRef.current(error instanceof Error ? error.message : String(error), "error");
+    }).finally(() => {
+      if (chapterRequestRef.current === requestId) setChapterLoading(false);
+    });
+    return () => { chapterRequestRef.current += 1; };
+  }, [api, project.summary.id, selectedId]);
   const dirty = chapterDraftSignature(draft) !== lastSavedSignature.current;
   useEffect(() => {
-    if (busy) return;
+    if (busy || chapterLoading) return;
     if (!dirty) {
       setSaveStatus("saved");
       return;
@@ -173,7 +212,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
       autosaveRef.current?.enqueue(snapshot);
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [api, busy, dirty, draft, notify, project.summary.id]);
+  }, [api, busy, chapterLoading, dirty, draft, notify, project.summary.id]);
   useEffect(() => {
     const preventUnsavedExit = (event: BeforeUnloadEvent) => {
       if (chapterDraftSignature(draftRef.current) === lastSavedSignature.current) return;
@@ -256,14 +295,15 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   };
   const selectChapter = (chapter: Chapter) => {
     if (!canDiscardDraft()) return;
-    const recovered = readRecoveredChapter(project.summary.id, chapter);
+    chapterRequestRef.current += 1;
     setSelectedId(chapter.id);
-    setDraft(recovered);
-    draftRef.current = recovered;
+    setDraft(chapter);
+    draftRef.current = chapter;
     lastSavedSignature.current = chapterDraftSignature(chapter);
-    setSaveStatus(chapterDraftSignature(recovered) === lastSavedSignature.current ? "saved" : "dirty");
+    setSaveStatus("saved");
     setContext(null);
   };
+  const editorBusy = busy || chapterLoading;
   return (
     <div className="writing-layout">
       <aside className="chapter-list">
@@ -274,9 +314,11 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           </span>
           <IconButton
             label="新建章节"
-            disabled={busy}
+            disabled={editorBusy}
             onClick={() => {
               if (!canDiscardDraft()) return;
+              chapterRequestRef.current += 1;
+              setChapterLoading(false);
               const empty = EMPTY_CHAPTER(project.chapters.length + 1);
               setSelectedId("");
               setDraft(empty);
@@ -292,7 +334,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
         <label className="chapter-search">
           <Search size={13} />
           <input
-            disabled={busy}
+            disabled={editorBusy}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="检索正文"
@@ -318,7 +360,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           {virtualChapters.map((chapter) => (
             <button
               key={chapter.id}
-              disabled={busy}
+              disabled={editorBusy}
               className={selectedId === chapter.id ? "active" : ""}
               onClick={() => selectChapter(chapter)}
             >
@@ -342,7 +384,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             <p>第 {draft.number} 章</p>
             <Input
               className="title-input"
-              disabled={busy}
+              disabled={editorBusy}
               value={draft.title}
               onChange={(event) =>
                 setDraft({ ...draft, title: event.target.value })
@@ -352,18 +394,18 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           </div>
           <div className="heading-actions">
             <span className={`autosave-status autosave-${saveStatus}`} role="status">
-              {!recoveryAvailable ? "恢复副本不可用" : saveStatus === "saving" ? "正在自动保存" : saveStatus === "dirty" ? "未保存" : saveStatus === "error" ? "保存失败" : "已保存"}
+              {chapterLoading ? "正在读取正文" : !recoveryAvailable ? "恢复副本不可用" : saveStatus === "saving" ? "正在自动保存" : saveStatus === "dirty" ? "未保存" : saveStatus === "error" ? "保存失败" : "已保存"}
             </span>
             <Segmented
               options={["逐章", "五章批次"] as const}
               value={draft.batchMode}
-              disabled={busy}
+              disabled={editorBusy}
               onChange={(batchMode) => setDraft({ ...draft, batchMode })}
             />
             <label className="key-toggle">
               <input
                 type="checkbox"
-                disabled={busy}
+                disabled={editorBusy}
                 checked={draft.isKeyChapter}
                 onChange={(event) =>
                   setDraft({
@@ -378,7 +420,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             <Button
               variant="secondary"
               icon={<Save size={16} />}
-              disabled={busy || saveStatus === "saving"}
+              disabled={editorBusy || saveStatus === "saving"}
               onClick={save}
             >
               建立版本
@@ -388,7 +430,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
         <div className="writing-actions">
           <Button
             variant="secondary"
-            disabled={!draft.id || busy}
+            disabled={!draft.id || editorBusy}
             icon={<BrainCircuit size={16} />}
             onClick={async () => {
               setBusy(true);
@@ -408,7 +450,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           </Button>
           <Button
             variant="secondary"
-            disabled={!draft.id || busy}
+            disabled={!draft.id || editorBusy}
             icon={<Sparkles size={16} />}
             onClick={async () => {
               let beforeGeneration = draftRef.current;
@@ -456,7 +498,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           {draft.batchMode === "五章批次" && (
             <Button
               variant="secondary"
-              disabled={!draft.id || busy}
+              disabled={!draft.id || editorBusy}
               icon={<Layers3 size={16} />}
               onClick={async () => {
                 setBusy(true);
@@ -479,7 +521,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             </Button>
           )}
           <Button
-            disabled={!draft.id || busy}
+            disabled={!draft.id || editorBusy}
             icon={<SearchCheck size={16} />}
             onClick={async () => {
               setBusy(true);
@@ -515,7 +557,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           {draft.status === "待定稿" && (
             <Button
               icon={<Check size={16} />}
-              disabled={busy}
+              disabled={editorBusy}
               onClick={async () => {
                 try {
                   const result = await api.transitionChapter(
@@ -524,7 +566,9 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                     "已定稿",
                   );
                   await reload();
-                  if (result.ledgerExtraction.status === "已完成") {
+                  if (result.ledgerExtraction.status === "排队中") {
+                    notify("章节已定稿，状态扫描正在后台进行");
+                  } else if (result.ledgerExtraction.status === "已完成") {
                     notify(result.ledgerExtraction.candidateCount
                       ? `章节已定稿，生成 ${result.ledgerExtraction.candidateCount} 条待确认状态`
                       : "章节已定稿，本章没有新的持久状态");
@@ -551,7 +595,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               <Field label="本章承诺" hint="读者进入本章后应获得什么推进">
                 <Textarea
                   rows={2}
-                  disabled={busy}
+                  disabled={editorBusy}
                   value={draft.chapterPromise ?? ""}
                   onChange={(event) =>
                     setDraft({ ...draft, chapterPromise: event.target.value })
@@ -562,7 +606,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               <Field label="预期回报" hint="本章准备释放的情绪或利益回报">
                 <Textarea
                   rows={2}
-                  disabled={busy}
+                  disabled={editorBusy}
                   value={draft.expectedPayoff ?? ""}
                   onChange={(event) =>
                     setDraft({ ...draft, expectedPayoff: event.target.value })
@@ -573,7 +617,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               <Field label="当前危机" hint="不行动会失去什么">
                 <Textarea
                   rows={2}
-                  disabled={busy}
+                  disabled={editorBusy}
                   value={draft.crisis ?? ""}
                   onChange={(event) =>
                     setDraft({ ...draft, crisis: event.target.value })
@@ -584,7 +628,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               <Field label="结尾期待" hint="保存后自动进入跨章节账本">
                 <Textarea
                   rows={2}
-                  disabled={busy}
+                  disabled={editorBusy}
                   value={draft.endingExpectation ?? ""}
                   onChange={(event) =>
                     setDraft({
@@ -599,7 +643,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             <div className="intent-meta">
               <Field label="章节功能">
                 <Select
-                  disabled={busy}
+                  disabled={editorBusy}
                   value={draft.chapterFunction ?? "行动"}
                   onChange={(event) => setDraft({ ...draft, chapterFunction: event.target.value as Chapter["chapterFunction"] })}
                 >
@@ -609,7 +653,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               <Field label="目标字数">
                 <Input
                   type="number"
-                  disabled={busy}
+                  disabled={editorBusy}
                   min={800}
                   max={5000}
                   step={100}
@@ -620,7 +664,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               <Field label="预计兑现章">
                 <Input
                   type="number"
-                  disabled={busy}
+                  disabled={editorBusy}
                   min={draft.number}
                   value={draft.expectationTargetChapter ?? ""}
                   onChange={(event) =>
@@ -636,7 +680,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               <Field label="本章承接的历史期待">
                 <select
                   className="expectation-link-select"
-                  disabled={busy}
+                  disabled={editorBusy}
                   multiple
                   value={draft.linkedExpectationIds ?? []}
                   onChange={(event) =>
@@ -667,7 +711,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             <Field label="本章章纲">
               <Textarea
                 rows={5}
-                disabled={busy}
+                disabled={editorBusy}
                 value={draft.outline}
                 onChange={(event) =>
                   setDraft({ ...draft, outline: event.target.value })
@@ -679,7 +723,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           <Textarea
             className="manuscript"
             value={draft.content}
-            disabled={busy}
+            disabled={editorBusy}
             onChange={(event) =>
               setDraft({ ...draft, content: event.target.value })
             }
@@ -880,7 +924,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                 取消
               </Button>
               <Button
-                disabled={!batchPreview.canRun || busy}
+                disabled={!batchPreview.canRun || editorBusy}
                 onClick={async () => {
                   setBusy(true);
                   try {

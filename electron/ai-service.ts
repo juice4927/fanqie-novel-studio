@@ -117,6 +117,36 @@ const BookConceptSkeletonSchema = z.object({
 
 type GeneratedBookConcept = z.infer<typeof BookConceptSchema>["candidates"][number];
 
+const DEBT_ACCOUNTING_MOTIF = /欠(?:债|款|薪)|债(?:务|主|权|契)|负债|还债|偿债|讨债|追债|催收|顶债|背债|烂账|旧账|账本|账单|账目|亏损账|清算令/;
+const DEBT_ACCOUNTING_REJECTION = /(?:不要|不写|不得|不允许|禁止|避免|拒绝|排除|别写|勿用|无)[^，。；\n]{0,16}(?:债|账|欠款|欠薪|催收|清算)/;
+const DEBT_ACCOUNTING_REQUEST = /欠(?:债|款|薪)|债(?:务|主|权|契)|负债|还债|偿债|讨债|追债|催收|顶债|背债|账目(?:造假|调查|审计)|(?:查|核|做)账|会计(?:题材|主角|职业|调查)|审计(?:题材|主角|调查)/;
+
+export function authorRequestsDebtAccounting(input: BookConceptInput) {
+  const direction = [input.seed, input.customGenreDirection, ...(input.genreElements ?? [])].filter(Boolean).join("；");
+  return DEBT_ACCOUNTING_REQUEST.test(direction) && !DEBT_ACCOUNTING_REJECTION.test(direction);
+}
+
+export function conceptDefaultMotifIssues(
+  candidates: Array<Pick<GeneratedBookConcept,
+    "title" | "premise" | "genreElements" | "openingMechanism" | "growthCarrier" | "primaryPayoff" |
+    "protagonistDesire" | "readerPromise" | "coreEmotion" | "ending" | "immutableRules" | "audience" |
+    "commercialHook" | "longFormEngine">>,
+  allowDebtAccounting = false,
+) {
+  if (allowDebtAccounting) return [];
+  return candidates.flatMap((candidate, index) => {
+    const narrative = [
+      candidate.title, candidate.premise, ...candidate.genreElements, candidate.openingMechanism,
+      candidate.growthCarrier, candidate.primaryPayoff, candidate.protagonistDesire, candidate.readerPromise,
+      candidate.coreEmotion, candidate.ending, ...candidate.immutableRules, candidate.audience,
+      candidate.commercialHook, candidate.longFormEngine,
+    ].join("；");
+    return DEBT_ACCOUNTING_MOTIF.test(narrative)
+      ? [`方案${index + 1}在作者未指定时使用了债务、欠款或账目清算母题`]
+      : [];
+  });
+}
+
 const diversityKey = (value: string) => value.toLowerCase().replace(/[\s，。、“”‘’：；！？,.!?:;\-_/]+/g, "");
 
 const ngramSimilarity = (left: string, right: string, size = 2) => {
@@ -729,7 +759,11 @@ export class AiService {
 
   async generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]> {
     const plugin = GENRE_PLUGINS[input.genre];
-    const system = "你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案不得共享同一套升级换皮结构：主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机至少有四项实质不同。genreSubtype 必须分别概括三条不同路线，不得使用近义词伪装差异。书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。";
+    const allowDebtAccounting = authorRequestsDebtAccounting(input);
+    const defaultMotifBoundary = allowDebtAccounting
+      ? "作者已明确选择债务或账目相关内容，可以据此创作，但仍需避免重复套路。"
+      : "作者没有选择债务或账目题材。不得把债务、欠款、欠薪、讨债、催收、还债、清账、旧账、账本或清算作为人物困境、开局钩子、能力隐喻、冲突主线或成长载体；请从身份、生存、竞争、关系、规则、探索、技艺、责任或外部危机中选择更贴合题材的压力。";
+    const system = `你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案不得共享同一套升级换皮结构：主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机至少有四项实质不同。genreSubtype 必须分别概括三条不同路线，不得使用近义词伪装差异。书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。${defaultMotifBoundary}`;
     const baseUser = `平台主题材：${input.genre}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。三个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n输出 candidates，严格三项。先在内部为三案分别确定叙事主轴、开局机制、成长载体和主要回报，确认至少三项互不相同后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，每个方案的 secondaryGenres 都必须包含作者所选类型，但三案仍须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、secondaryGenres、genreElements、openingMechanism、growthCarrier、primaryPayoff、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。secondaryGenres 必须使用给定的叙事主轴枚举。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`;
     const run = (retryIssues?: string[]) => this.runJson({
       projectId: null,
@@ -745,17 +779,20 @@ export class AiService {
     const selectionIssues = (candidates: GeneratedBookConcept[]) => (input.secondaryGenres ?? []).flatMap((genre) =>
       candidates.every((candidate) => candidate.secondaryGenres.includes(genre)) ? [] : [`部分方案未保留作者选择的叙事主轴：${genre}`],
     );
-    let issues = [...conceptDiversityIssues(result.candidates, !(input.secondaryGenres?.length)), ...selectionIssues(result.candidates)];
+    let issues = [...conceptDiversityIssues(result.candidates, !(input.secondaryGenres?.length)), ...selectionIssues(result.candidates), ...conceptDefaultMotifIssues(result.candidates, allowDebtAccounting)];
     if (issues.length) {
       this.log("warn", "book-concepts.diversity-retry", { issues });
       result = await run(issues);
-      issues = [...conceptDiversityIssues(result.candidates, !(input.secondaryGenres?.length)), ...selectionIssues(result.candidates)];
-      if (issues.length) throw new Error(`三套方案仍过于相似：${issues.join("；")}。请补充更具体的复合类型或自定义方向后重试。`);
+      issues = [...conceptDiversityIssues(result.candidates, !(input.secondaryGenres?.length)), ...selectionIssues(result.candidates), ...conceptDefaultMotifIssues(result.candidates, allowDebtAccounting)];
+      if (issues.length) throw new Error(`三套方案未通过立项检查：${issues.join("；")}。请补充更具体的复合类型或自定义方向后重试。`);
     }
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
   }
 
   async expandBookConcept(input: BookConceptInput, concept: BookConceptCandidate): Promise<BookConceptSkeleton> {
+    const defaultMotifBoundary = authorRequestsDebtAccounting(input)
+      ? ""
+      : "作者没有选择债务或账目题材，不得在扩展时新增欠债、欠款、讨债、清账、旧账、账本或清算等冲突与隐喻。";
     return this.runJson({
       projectId: null,
       taskType: "expand-book-concept-skeleton",
@@ -763,6 +800,7 @@ export class AiService {
       system: [
         "你是中文长篇小说的故事架构师。作者已经选定立项方案，现在只扩展这一本书的人物与世界骨架。",
         "不得更换主角、核心矛盾、开局机制、成长载体、主要回报、长篇发动机或终局，不得偷偷加入系统、重生、血脉等未选择元素。",
+        defaultMotifBoundary,
         "主角弧光必须写清起点认知、阶段转变、关键代价和终局状态。关键关系必须说明双方、初始张力、各自目标和不可替代作用。",
         "世界规则必须是会影响人物选择的职业、社会、能力、资源或超自然规则，并写清边界或代价。主要势力必须说明目标、资源和与主线的冲突位置。",
         "时间锚点必须覆盖开局前因、开局触发、至少一个中期不可逆节点和终局兑现，使用相对阶段，不要编造具体公历日期。",

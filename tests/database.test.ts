@@ -236,6 +236,78 @@ describe("per-book isolation and gates", () => {
     expect((revisions[0].payload as Chapter).content).toBe("自动保存正文二");
   });
 
+  it("loads project chapter metadata separately from chapter bodies", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "正文懒加载", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    const body = "只应通过单章接口读取的正文".repeat(1000);
+    const saved = database.saveChapter(project.id, createChapter(1, body));
+
+    const overview = database.getProjectOverview(project.id);
+    expect(overview.chapters[0]).toMatchObject({ id: saved.id, content: "", wordCount: body.length });
+    expect(JSON.stringify(overview)).not.toContain("只应通过单章接口读取的正文");
+    expect(database.getChapter(project.id, saved.id).content).toBe(body);
+    expect(() => database.getChapter(project.id, "missing-chapter")).toThrow("章节不存在");
+
+    const inspection = new DatabaseSync(path.join(database.projectPath(project.id), "project.sqlite"));
+    const chapterColumns = inspection.prepare("PRAGMA table_info(chapters)").all() as Array<{ name: string }>;
+    expect(chapterColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      "number", "status", "word_count", "updated_at",
+    ]));
+    expect((inspection.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count).toBe(0);
+    expect((inspection.prepare("SELECT content FROM chapter_contents WHERE chapter_id = ?").get(saved.id) as { content: string }).content).toBe(body);
+    inspection.close();
+  });
+
+  it("migrates legacy chapter records into indexed metadata and separate content", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "旧章节迁移", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    const root = database.root;
+    const projectPath = database.projectPath(project.id);
+    database.close();
+    databases.splice(databases.indexOf(database), 1);
+
+    const legacy = new DatabaseSync(path.join(projectPath, "project.sqlite"));
+    legacy.exec("DROP TABLE chapter_contents; DROP TABLE chapters; PRAGMA user_version = 1;");
+    const chapter = { ...createChapter(3, "迁移后仍需保留的正文"), id: crypto.randomUUID(), wordCount: 10 };
+    legacy.prepare("INSERT INTO records(collection, id, payload, updated_at) VALUES('chapters', ?, ?, ?)")
+      .run(chapter.id, JSON.stringify(chapter), chapter.updatedAt);
+    legacy.close();
+
+    const reopened = new WorkspaceDatabase(root);
+    databases.push(reopened);
+    expect(reopened.getProjectOverview(project.id).chapters[0]).toMatchObject({ id: chapter.id, number: 3, content: "" });
+    expect(reopened.getChapter(project.id, chapter.id).content).toBe(chapter.content);
+    const migrated = new DatabaseSync(path.join(projectPath, "project.sqlite"));
+    expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    expect((migrated.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count).toBe(0);
+    migrated.close();
+  });
+
+  it("loads dashboard activity without loading chapter bodies", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "轻量总览", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    let chapter = database.saveChapter(project.id, createChapter(1, "不应进入仪表盘的正文".repeat(1000)));
+    chapter = database.transitionChapter(project.id, chapter.id, "待质检");
+    chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
+    chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    database.saveSchedule(project.id, {
+      id: "", projectId: project.id, projectTitle: project.title,
+      chapterId: chapter.id, chapterNumber: chapter.number, chapterTitle: chapter.title,
+      publishAt: "2026-07-31T08:00:00.000Z", status: "待发布",
+    });
+    database.saveIssues(project.id, chapter.id, Array.from({ length: 15 }, (_, index) => ({
+      id: crypto.randomUUID(), projectId: project.id, chapterId: chapter.id,
+      severity: "警告" as const, category: "测试", message: `告警${index}`,
+      evidence: "摘要", status: "待处理" as const, createdAt: new Date(Date.now() + index).toISOString(),
+    })));
+
+    const activity = database.getDashboardActivity("2026-07-31");
+    expect(activity.dueToday).toHaveLength(1);
+    expect(activity.activeAlerts).toHaveLength(12);
+    expect(activity.pendingIssues).toBe(15);
+    expect(JSON.stringify(activity)).not.toContain("不应进入仪表盘的正文");
+  });
+
   it("keeps same-name entities inside their own project databases", () => {
     const database = createDatabase();
     const one = database.createProject({ title: "项目一", genre: "都市脑洞", targetWords: 3000000, updateCadence: "每日2章" });
@@ -354,6 +426,38 @@ describe("research firewall", () => {
 });
 
 describe("approval gates", () => {
+  it("moves chapter state and publication schedule in one database operation", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "排期事务", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    let chapter = database.saveChapter(project.id, createChapter(1));
+    chapter = database.transitionChapter(project.id, chapter.id, "待质检");
+    chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
+    chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    const scheduled = database.saveSchedule(project.id, {
+      id: "", projectId: "forged", projectTitle: "forged", chapterId: chapter.id,
+      chapterNumber: 999, chapterTitle: "forged", publishAt: "2026-08-01T08:00:00.000Z", status: "待发布",
+    });
+    expect(scheduled).toMatchObject({ projectId: project.id, projectTitle: "排期事务", chapterNumber: 1, chapterTitle: "第1章" });
+    expect(database.getProject(project.id).chapters[0].status).toBe("待发布");
+    expect(database.getProjectSummary(project.id)).toMatchObject({ currentWords: chapter.wordCount, chapterCount: 1, stockChapters: 1, nextPublishAt: "2026-08-01T08:00:00.000Z" });
+
+    database.saveSchedule(project.id, { ...scheduled, status: "已发布" });
+    expect(database.getProject(project.id).chapters[0].status).toBe("已发布");
+    expect(database.getProjectSummary(project.id)).toMatchObject({ stockChapters: 0, nextPublishAt: null });
+  });
+
+  it("does not save a schedule when the chapter transition is invalid", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "排期回滚", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    const chapter = database.saveChapter(project.id, createChapter(1));
+    expect(() => database.saveSchedule(project.id, {
+      id: "", projectId: project.id, projectTitle: project.title, chapterId: chapter.id,
+      chapterNumber: 1, chapterTitle: chapter.title, publishAt: "2026-08-01T08:00:00.000Z", status: "待发布",
+    })).toThrow("不允许");
+    expect(database.getProject(project.id).schedule).toEqual([]);
+    expect(database.getProject(project.id).chapters[0].status).toBe("草稿");
+  });
+
   it("persists each project's aesthetic profile in the story contract", () => {
     const database = createDatabase();
     const project = database.createProject({ title: "审美隔离", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });

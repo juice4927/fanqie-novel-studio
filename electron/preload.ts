@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppApi, ChapterDraftStreamEvent } from "../src/shared/types";
+import type { AppApi, ChapterDraftStreamEvent, ChapterFactsExtractionEvent } from "../src/shared/types";
 
 const invoke = <T>(channel: string, ...args: unknown[]) => ipcRenderer.invoke(`studio:${channel}`, ...args) as Promise<T>;
 
@@ -11,6 +11,7 @@ const api: AppApi = {
   createProjectFromConcept: (input, concept) => invoke("createProjectFromConcept", input, concept),
   deleteProject: (id, confirmationTitle) => invoke("deleteProject", id, confirmationTitle),
   getProject: (id) => invoke("getProject", id),
+  getChapter: (id, chapterId) => invoke("getChapter", id, chapterId),
   updateProject: (id, patch) => invoke("updateProject", id, patch),
   saveContract: (id, contract) => invoke("saveContract", id, contract),
   suggestAestheticProfile: (id, contract) => invoke("suggestAestheticProfile", id, contract),
@@ -23,6 +24,11 @@ const api: AppApi = {
   saveChapter: (id, chapter, mode) => invoke("saveChapter", id, chapter, mode),
   saveExpectation: (id, expectation) => invoke("saveExpectation", id, expectation),
   transitionChapter: (id, chapterId, status) => invoke("transitionChapter", id, chapterId, status),
+  onChapterFactsExtracted: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: ChapterFactsExtractionEvent) => listener(payload);
+    ipcRenderer.on("studio:chapter-facts-extracted", wrapped);
+    return () => ipcRenderer.removeListener("studio:chapter-facts-extracted", wrapped);
+  },
   compileContext: (id, chapterId) => invoke("compileContext", id, chapterId),
   searchProject: (id, query, offset, limit) => invoke("searchProject", id, query, offset, limit),
   listRevisions: (id, collection, entityId) => invoke("listRevisions", id, collection, entityId),

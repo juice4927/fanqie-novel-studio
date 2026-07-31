@@ -189,15 +189,27 @@ const insightInput = z.object({
   evidenceCount: z.number().int().min(0).max(10_000_000), confidence: z.enum(["低", "中", "高"]),
 }).strict();
 
-const schemas: Partial<Record<keyof AppApi, z.ZodType<unknown[]>>> = {
+const noArgs = z.tuple([]);
+const idOnly = z.tuple([id]);
+const projectEntity = z.tuple([id, id]);
+
+type InvokeApiKey = Exclude<keyof AppApi, "onChapterFactsExtracted">;
+
+const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
+  getDashboard: noArgs,
+  listProjects: noArgs,
   createProject: z.tuple([createProject]),
   generateBookConcepts: z.tuple([bookConceptInput]),
   createProjectFromConcept: z.tuple([bookConceptInput, bookConcept]),
   deleteProject: z.tuple([id, z.string().max(100)]),
+  getProject: idOnly,
+  getChapter: projectEntity,
   updateProject: z.tuple([id, z.object({ title: z.string().max(100).optional(), status: z.enum(["研究中", "候选立项", "设定中", "大纲审批", "连载准备", "连载中", "暂停", "完结", "归档"]).optional(), targetWords: z.number().int().min(10_000).max(20_000_000).optional(), updateCadence: z.string().max(100).optional(), safeStockLine: z.number().int().min(0).max(1000).optional() }).strict()]),
   saveContract: z.tuple([id, contract]),
   suggestAestheticProfile: z.tuple([id, contract]),
+  approveContract: idOnly,
   savePlan: z.tuple([id, plan]),
+  approvePlan: projectEntity,
   generatePlanningDraft: z.tuple([id, z.object({ mode: z.enum(["全书结构", "后续章纲"]), fromChapter: positiveInt.optional(), chapterCount: z.union([z.literal(10), z.literal(30)]).optional() }).strict()]),
   reviewPlanning: z.tuple([id, z.object({ fromChapter: positiveInt, chapterCount: z.union([z.literal(10), z.literal(30)]) }).strict()]),
   applyPlanningRepairs: z.tuple([id, z.object({
@@ -211,40 +223,65 @@ const schemas: Partial<Record<keyof AppApi, z.ZodType<unknown[]>>> = {
   saveChapter: z.tuple([id, chapter, z.enum(["version", "autosave"]).optional()]),
   saveExpectation: z.tuple([id, expectation]),
   transitionChapter: z.tuple([id, id, z.enum(["章纲", "草稿", "待质检", "待定稿", "已定稿", "待发布", "已发布"])]),
+  compileContext: projectEntity,
   reviseChapterFromQuality: z.tuple([id, id]),
   searchProject: z.tuple([id, z.string().max(500), z.number().int().min(0).max(1_000_000).optional(), z.number().int().min(1).max(200).optional()]),
+  listRevisions: z.tuple([id, z.enum(["state", "plans", "chapters", "facts", "changes"]), id]),
+  restoreRevision: projectEntity,
+  runQualityCheck: projectEntity,
+  extractChapterFacts: projectEntity,
   saveFact: z.tuple([id, fact]),
   resolveIssue: z.tuple([id, id, z.enum(["待处理", "已忽略", "已解决"])]),
   saveChangeRequest: z.tuple([id, changeRequest]),
   decideChangeRequest: z.tuple([id, id, z.enum(["批准", "拒绝"])]),
   saveSchedule: z.tuple([id, z.object({ id: z.string().max(200), projectId: id, projectTitle: shortText, chapterId: id, chapterNumber: positiveInt, chapterTitle: shortText, publishAt: timestamp, status: z.enum(["待排期", "待发布", "已发布"]) }).strict()]),
+  listRankings: noArgs,
   importRankingCsv: z.tuple([z.string().max(20_000_000), z.string().trim().min(1).max(200)]),
   capturePublicRanking: z.tuple([httpUrl, z.string().trim().min(1).max(200)]),
   saveRankingSchedule: z.tuple([z.object({ id: z.string().max(200).optional(), url: httpUrl, listName: z.string().trim().min(1).max(200), frequency: z.enum(["每日", "每周"]), enabled: z.boolean() }).strict()]),
+  listRankingSchedules: noArgs,
+  runRankingSchedule: idOnly,
+  deleteRankingSchedule: idOnly,
+  getRankingAnalytics: noArgs,
+  listResearchBooks: noArgs,
+  previewResearchFile: noArgs,
   importResearchBook: z.tuple([importPreview, genre, z.boolean(), z.boolean()]),
   importPublicResearchSample: z.tuple([httpUrl, genre, z.boolean()]),
+  listInsights: noArgs,
   createInsight: z.tuple([insightInput]),
+  deconstructResearchBook: idOnly,
+  listResearchAnalyses: idOnly,
   attachInsights: z.tuple([id, z.array(id).max(1000)]),
+  generateConcepts: idOnly,
   generateChapterDraft: z.tuple([id, id, id.optional()]),
+  previewChapterBatch: projectEntity,
+  generateChapterBatch: projectEntity,
+  getAiSettings: noArgs,
   saveAiSettings: z.tuple([z.object({ baseUrl: httpUrl, model: z.string().trim().min(1).max(200), embeddingModel: z.string().trim().min(1).max(200), inputPricePerMillion: z.number().min(0).max(1_000_000), outputPricePerMillion: z.number().min(0).max(1_000_000), longTaskTimeoutMinutes: z.number().int().min(5).max(15) }).strict(), z.string().max(10_000).optional()]),
   listAiJobs: z.tuple([id.optional()]),
   cancelAiJob: z.tuple([id]),
   retryAiJob: z.tuple([id]),
   exportProject: z.tuple([id, z.enum(["txt", "md", "docx"])]),
   importMetricsCsv: z.tuple([id, z.string().max(20_000_000)]),
+  getReviewSuggestions: idOnly,
   saveReviewExperiment: z.tuple([id, reviewExperiment]),
   createBackup: z.tuple([z.string().min(8).max(1000)]),
   restoreBackup: z.tuple([z.string().min(8).max(1000)]),
+  getAutoBackupSettings: noArgs,
   saveAutoBackupSettings: z.tuple([z.object({ enabled: z.boolean(), frequency: z.enum(["daily", "weekly"]), retentionCount: z.number().int().min(1).max(30) }).strict(), z.string().min(8).max(1000).optional()]),
+  runAutoBackup: noArgs,
+  runSystemHealthCheck: noArgs,
+  startSystemHealthCheck: noArgs,
   rebuildSearchIndexes: z.tuple([id]),
   exportDiagnosticBundle: z.tuple([]),
+  getWorkspacePath: noArgs,
   getSystemHealthCheck: z.tuple([id]),
   cancelSystemHealthCheck: z.tuple([id]),
 };
 
-export function validateIpcArgs(channel: keyof AppApi, args: unknown[]) {
+export function validateIpcArgs(channel: InvokeApiKey, args: unknown[]) {
   const schema = schemas[channel];
-  if (!schema) return args;
+  if (!schema) throw new Error(`拒绝未注册的 IPC 通道：${String(channel)}`);
   const result = schema.safeParse(args);
   if (result.success) return result.data;
   const issue = result.error.issues[0];

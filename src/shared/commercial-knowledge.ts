@@ -4,7 +4,7 @@ import { getFanqieCategoryProfile } from "./fanqie-taxonomy";
 import { compileGenreComposition, type GenreComposition } from "./genre-composition";
 
 export const COMMERCIAL_KNOWLEDGE_VERSION =
-  "cn-web-fiction.2026-07.v4-adaptive-genres";
+  "cn-web-fiction.2026-07.v5-motif-balance";
 
 export interface CommercialKnowledgeSource {
   title: string;
@@ -165,7 +165,7 @@ export function compileCommercialGuidance(
     ...plugin.planningChecks.map((item) => `- ${item}`),
     "题材质量检查：",
     ...plugin.qualityChecks.map((item) => `- ${item}`),
-    "使用边界：密度和字数仅用于观察，不作为机械硬门禁；不得为制造钩子破坏人物动机、事实或创作契约。",
+    "使用边界：密度和字数仅用于观察，不作为机械硬门禁；不得为制造钩子破坏人物动机、事实或创作契约。成本、资源与后果是抽象约束，不得在作者未指定时反复具象为债务、欠款、账目、清算或同类财务母题。",
   ].join("\n");
 }
 

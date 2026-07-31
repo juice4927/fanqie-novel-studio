@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
 import type { AutoBackupFrequency } from "../src/shared/types";
@@ -57,9 +57,32 @@ export async function createEncryptedBackup(workspaceRoot: string, destination: 
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(archive), cipher.final()]);
   const tag = cipher.getAuthTag();
-  injectFault("disk-full");
-  await writeFile(destination, Buffer.concat([MAGIC, salt, iv, tag, encrypted]));
-  await verifyEncryptedBackup(destination, password);
+  const suffix = randomBytes(8).toString("hex");
+  const temporary = `${destination}.${suffix}.tmp`;
+  const previous = `${destination}.${suffix}.previous`;
+  let previousMoved = false;
+  try {
+    injectFault("disk-full");
+    await writeFile(temporary, Buffer.concat([MAGIC, salt, iv, tag, encrypted]));
+    await verifyEncryptedBackup(temporary, password);
+    const destinationExists = await access(destination).then(() => true, () => false);
+    if (destinationExists) {
+      await rename(destination, previous);
+      previousMoved = true;
+    }
+    try {
+      await rename(temporary, destination);
+    } catch (error) {
+      if (previousMoved) await rename(previous, destination);
+      previousMoved = false;
+      throw error;
+    }
+    if (previousMoved) await unlink(previous);
+  } catch (error) {
+    await unlink(temporary).catch(() => {});
+    if (previousMoved) await rename(previous, destination).catch(() => {});
+    throw error;
+  }
 }
 
 async function readVerifiedArchive(source: string, password: string) {

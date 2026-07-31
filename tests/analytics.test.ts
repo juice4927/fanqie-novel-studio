@@ -58,6 +58,22 @@ describe("ranking analytics", () => {
     await expect(fetchPublicHtml(new URL("https://example.com/rank"), { attempts: 1 })).rejects.toThrow("超过 5MB");
   });
 
+  it("rejects local and private destinations before fetching", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchPublicHtml(new URL("http://127.0.0.1/private"), { attempts: 1 })).rejects.toThrow(/私有网络|本机/);
+    await expect(fetchPublicHtml(new URL("http://169.254.169.254/latest/meta-data"), { attempts: 1 })).rejects.toThrow(/私有网络|保留地址/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("revalidates every redirect target", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: "http://127.0.0.1/private" },
+    })));
+    await expect(fetchPublicHtml(new URL("http://93.184.216.34/rank"), { attempts: 1 })).rejects.toThrow(/私有网络|本机/);
+  });
+
   it("captures only public page metadata", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(`<html><body><article class="book-item"><span class="rank">1</span><a href="/page/123" title="公开书名">公开书名</a><span class="author">公开作者</span><span>都市脑洞 88万字 连载</span></article></body></html>`, { status: 200, headers: { "content-type": "text/html" } })));
     const result = await capturePublicRankingPage("https://example.com/rank", "公开榜");

@@ -187,11 +187,6 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
                     icon={<Send size={15} />}
                     onClick={async () => {
                       try {
-                        await api.transitionChapter(
-                          project.summary.id,
-                          item.chapterId,
-                          "已发布",
-                        );
                         await api.saveSchedule(project.summary.id, {
                           ...item,
                           status: "已发布",
@@ -258,13 +253,7 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
                   const chapter = project.chapters.find(
                     (item) => item.id === chapterId,
                   )!;
-                  if (chapter.status === "已定稿")
-                    await api.transitionChapter(
-                      project.summary.id,
-                      chapterId,
-                      "待发布",
-                    );
-                  const item: ScheduleItem = {
+                   const item: ScheduleItem = {
                     id: "",
                     projectId: project.summary.id,
                     projectTitle: project.summary.title,

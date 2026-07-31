@@ -9,6 +9,7 @@ import type {
   BatchGenerationPreview,
   Chapter,
   ChapterDraftStreamEvent,
+  ChapterFactsExtractionEvent,
   ConceptCandidate,
   ContextPackage,
   ImportPreview,
@@ -254,6 +255,36 @@ function getApiKey() {
   return apiCredential;
 }
 
+async function extractFinalizedChapterFacts(
+  projectId: string,
+  chapter: Chapter,
+): Promise<ChapterFactsExtractionEvent> {
+  try {
+    const project = database.getProjectOverview(projectId);
+    const candidates = await ai.extractChapterFacts(project, chapter);
+    const existing = new Set(project.facts.map((fact) =>
+      `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`,
+    ));
+    let candidateCount = 0;
+    for (const fact of candidates) {
+      const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
+      if (existing.has(key)) continue;
+      database.saveFact(projectId, fact);
+      existing.add(key);
+      candidateCount += 1;
+    }
+    return { projectId, chapterId: chapter.id, status: "已完成", candidateCount };
+  } catch (error) {
+    return {
+      projectId,
+      chapterId: chapter.id,
+      status: "失败",
+      candidateCount: 0,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function compileContext(
   project: ProjectDetail,
   chapter: Chapter,
@@ -444,18 +475,7 @@ function compileContext(
 
 function getDashboard() {
   const projects = database.listProjects();
-  const details = projects.map((project) => database.getProject(project.id));
-  const dueToday = details
-    .flatMap((detail) => detail.schedule)
-    .filter(
-      (item) =>
-        item.publishAt.slice(0, 10) <= now().slice(0, 10) &&
-        item.status !== "已发布",
-    );
-  const activeAlerts = details
-    .flatMap((detail) => detail.issues)
-    .filter((issue) => issue.status === "待处理")
-    .slice(0, 12);
+  const { dueToday, activeAlerts, pendingIssues } = database.getDashboardActivity(now().slice(0, 10));
   return {
     projects,
     dueToday,
@@ -472,7 +492,7 @@ function getDashboard() {
         (sum, project) => sum + project.stockChapters,
         0,
       ),
-      pendingIssues: activeAlerts.length,
+      pendingIssues,
     },
   };
 }
@@ -620,7 +640,7 @@ function registerHandlers() {
     for (const [id] of completed.slice(100)) { healthTaskFinishedAt.delete(id); healthTasks.delete(id); }
   };
   const handle = (
-    channel: keyof AppApi,
+    channel: Exclude<keyof AppApi, "onChapterFactsExtracted">,
     callback: (...args: any[]) => unknown,
   ) =>
     ipcMain.handle(`studio:${channel}`, async (event, ...args) => {
@@ -678,7 +698,8 @@ function registerHandlers() {
       throw new Error("该作品仍有正文生成任务运行，暂时不能删除");
     return database.deleteProject(id, confirmationTitle);
   });
-  handle("getProject", (id) => database.getProject(id));
+  handle("getProject", (id) => database.getProjectOverview(id));
+  handle("getChapter", (id, chapterId) => database.getChapter(id, chapterId));
   handle("updateProject", (id, patch) => database.updateProject(id, patch));
   handle("saveContract", (id, contract) => database.saveContract(id, contract));
   handle("suggestAestheticProfile", (id, contract) => {
@@ -754,30 +775,13 @@ function registerHandlers() {
     if (!getApiKey()) {
       return { chapter: saved, ledgerExtraction: { status: "未配置", candidateCount: 0 } };
     }
-    try {
-      const project = database.getProject(id);
-      const candidates = await ai.extractChapterFacts(project, saved);
-      const existing = new Set(project.facts.map((fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`));
-      let candidateCount = 0;
-      for (const fact of candidates) {
-        const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
-        if (!existing.has(key)) {
-          database.saveFact(id, fact);
-          existing.add(key);
-          candidateCount += 1;
-        }
-      }
-      return { chapter: saved, ledgerExtraction: { status: "已完成", candidateCount } };
-    } catch (error) {
-      return {
-        chapter: saved,
-        ledgerExtraction: {
-          status: "失败",
-          candidateCount: 0,
-          message: error instanceof Error ? error.message : String(error),
-        },
-      };
-    }
+    setImmediate(() => {
+      void extractFinalizedChapterFacts(id, saved).then((result) => {
+        if (mainWindow && !mainWindow.isDestroyed())
+          mainWindow.webContents.send("studio:chapter-facts-extracted", result);
+      });
+    });
+    return { chapter: saved, ledgerExtraction: { status: "排队中", candidateCount: 0 } };
   });
   handle("compileContext", (id, chapterId) => {
     const project = database.getProject(id);
@@ -937,9 +941,8 @@ function registerHandlers() {
     }
   });
   handle("extractChapterFacts", async (id, chapterId) => {
-    const project = database.getProject(id);
-    const chapter = project.chapters.find((item) => item.id === chapterId);
-    if (!chapter) throw new Error("章节不存在");
+    const project = database.getProjectOverview(id);
+    const chapter = database.getChapter(id, chapterId);
     if (!chapter.content.trim()) throw new Error("章节还没有正文");
     const relevantFacts = database.searchRelevantFacts(
       id,

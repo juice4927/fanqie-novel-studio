@@ -41,6 +41,9 @@ describe("IPC runtime validation", () => {
     expect(() => validateIpcArgs("capturePublicRanking", ["file:///etc/passwd", "榜单"])).toThrow("参数无效");
     expect(() => validateIpcArgs("importMetricsCsv", ["project", "x".repeat(20_000_001)])).toThrow("参数无效");
     expect(() => validateIpcArgs("createBackup", ["short"])).toThrow("参数无效");
+    expect(() => validateIpcArgs("unknownChannel" as never, [])).toThrow("未注册");
+    expect(() => validateIpcArgs("approvePlan", ["project"])).toThrow("参数无效");
+    expect(validateIpcArgs("runSystemHealthCheck", [])).toEqual([]);
   });
 
   it("accepts valid autosaves and does not echo secret values in errors", () => {

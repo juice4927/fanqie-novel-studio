@@ -356,7 +356,7 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
       "升级必须改变解题方式",
       "新地图必须带来新规则",
       "资源获取有因果和代价",
-      "战力胜负与既有账本一致",
+      "战力胜负与已确认状态一致",
     ],
     qualityChecks: [
       "境界与战力一致",

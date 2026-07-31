@@ -302,10 +302,18 @@ export interface LedgerFact {
 export interface ChapterTransitionResult {
   chapter: Chapter;
   ledgerExtraction: {
-    status: "不适用" | "未配置" | "已完成" | "失败";
+    status: "不适用" | "未配置" | "排队中" | "已完成" | "失败";
     candidateCount: number;
     message?: string;
   };
+}
+
+export interface ChapterFactsExtractionEvent {
+  projectId: string;
+  chapterId: string;
+  status: "已完成" | "失败";
+  candidateCount: number;
+  message?: string;
 }
 
 export interface QualityIssue {
@@ -716,6 +724,7 @@ export interface AppApi {
   createProjectFromConcept(input: BookConceptInput, concept: BookConceptCandidate): Promise<ProjectSummary>;
   deleteProject(id: string, confirmationTitle: string): Promise<string>;
   getProject(id: string): Promise<ProjectDetail>;
+  getChapter(id: string, chapterId: string): Promise<Chapter>;
   updateProject(id: string, patch: ProjectPatch): Promise<ProjectSummary>;
   saveContract(id: string, contract: StoryContract): Promise<StoryContract>;
   suggestAestheticProfile(id: string, contract: StoryContract): Promise<AestheticProfileSuggestion>;
@@ -735,6 +744,9 @@ export interface AppApi {
     chapterId: string,
     status: ChapterStatus,
   ): Promise<ChapterTransitionResult>;
+  onChapterFactsExtracted(
+    listener: (event: ChapterFactsExtractionEvent) => void,
+  ): () => void;
   compileContext(id: string, chapterId: string): Promise<ContextPackage>;
   searchProject(id: string, query: string, offset?: number, limit?: number): Promise<SearchHit[]>;
   listRevisions(

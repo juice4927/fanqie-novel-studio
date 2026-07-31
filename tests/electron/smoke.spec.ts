@@ -41,6 +41,7 @@ test("starts the production Electron app and persists through the preload API", 
       }
       const plan = await api.savePlan(project.id, { id: "", kind: "细纲", title: "旧章纲", ordinal: 1, goal: "直接获得线索", conflict: "没有阻碍", outcome: "找到答案", targetWords: 2300, status: "草稿", parentId: null });
       const first = (await api.getProject(project.id)).chapters[0];
+      const loadedFirst = await api.getChapter(project.id, first.id);
       const repaired = await api.applyPlanningRepairs(project.id, {
         plans: [{ targetId: plan.id, after: { title: "核对事故记录", goal: "交叉验证事故线索", conflict: "记录残缺且时间有限", outcome: "确认下一处调查地点", targetWords: 2200 } }],
         chapters: [{ targetId: first.id, after: { title: "残缺记录", outline: "先取得记录，再核对时间矛盾", chapterFunction: "调查", targetWords: 2200, chapterPromise: "验证事故线索", expectedPayoff: "确认一处矛盾", crisis: "记录即将被销毁", endingExpectation: "矛盾指向维修主管", expectationTargetChapter: 3 } }],
@@ -53,10 +54,12 @@ test("starts the production Electron app and persists through the preload API", 
       const autoBackup = await api.getAutoBackupSettings();
       const health = await api.runSystemHealthCheck();
       const detail = await api.getProject(project.id);
-      return { workspace: await api.getWorkspacePath(), projectId: project.id, title: detail.summary.title, batch, autoBackup, health, repaired, protectedRepairBlocked };
+      return { workspace: await api.getWorkspacePath(), projectId: project.id, title: detail.summary.title, firstOverviewContent: first.content, loadedFirstId: loadedFirst.id, batch, autoBackup, health, repaired, protectedRepairBlocked };
     });
     expect(result.workspace).toBe(workspace);
     expect(result.title).toBe("桌面烟雾测试");
+    expect(result.firstOverviewContent).toBe("");
+    expect(result.loadedFirstId).toBeTruthy();
     expect(result.batch.canRun).toBe(true);
     expect(result.batch.chapters).toHaveLength(5);
     expect(result.repaired).toMatchObject({ appliedPlanIds: [expect.any(String)], appliedChapterIds: [expect.any(String)] });

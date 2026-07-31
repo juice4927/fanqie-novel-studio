@@ -27,7 +27,7 @@ test("navigates through research and the complete project workflow", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "商业知识" }).click();
   await expect(
-    page.getByText("cn-web-fiction.2026-07.v4-adaptive-genres"),
+    page.getByText("cn-web-fiction.2026-07.v5-motif-balance"),
   ).toBeVisible();
   for (const genre of [
     "都市脑洞",
@@ -196,7 +196,7 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await expect(page.getByText("平台商业基线", { exact: true })).toBeVisible();
   await expect(page.getByText(/三套方案会分别选择不同叙事主轴/)).toBeVisible();
   await page.getByRole("button", { name: "生成三套方案" }).click();
-  await expect(page.getByRole("heading", { name: "她把烂账改成了金饭碗" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "她能看见事故留下的断点" })).toBeVisible();
   await expect(page.locator(".book-concept-grid > button")).toHaveCount(3);
   await page.getByRole("button", { name: /离婚当天，我接手了倒闭供销社/ }).click();
   await page.getByRole("button", { name: "采用此方案并创建" }).click();
@@ -210,8 +210,8 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await expect(page.getByLabel("核心回报")).toHaveValue("经营成果改变个人和社区处境");
   await expect(page.getByLabel("长篇发动机")).toHaveValue(/个人止损、团队经营、区域产业/);
   await expect(page.getByLabel("主角弧光")).toHaveValue(/建立合作规则/);
-  await expect(page.getByLabel("关键关系")).toHaveValue(/供销社老会计/);
-  await expect(page.getByLabel("世界规则")).toHaveValue(/采购、赊销和票据/);
+  await expect(page.getByLabel("关键关系")).toHaveValue(/供销社老采购员/);
+  await expect(page.getByLabel("世界规则")).toHaveValue(/采购、库存和运输/);
   await expect(page.getByLabel("主要势力")).toHaveValue(/旧利益网络/);
   await expect(page.getByLabel("时间锚点")).toHaveValue(/中期节点/);
   await expect(page.getByRole("heading", { name: "审美设定" })).toBeVisible();

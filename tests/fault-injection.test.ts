@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,9 +39,11 @@ describe("real boundary fault injection", () => {
   it("surfaces disk-full and credential-service failures without partial success", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "novel-full-")); roots.push(root);
     const backup = path.join(root, "failed.novelbak");
+    writeFileSync(backup, "previous-valid-backup");
     process.env.NOVEL_STUDIO_FAULTS = "disk-full";
     await expect(createEncryptedBackup(root, backup, "strong-password")).rejects.toMatchObject({ code: "ENOSPC" });
-    expect(existsSync(backup)).toBe(false);
+    expect(existsSync(backup)).toBe(true);
+    expect(readFileSync(backup, "utf8")).toBe("previous-valid-backup");
     process.env.NOVEL_STUDIO_FAULTS = "credential-unavailable";
     await expect(readApiCredential()).rejects.toThrow("credential service unavailable");
   });

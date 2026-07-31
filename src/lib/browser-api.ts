@@ -389,10 +389,10 @@ function browserRankingAnalytics(
 function browserConceptSkeleton(concept: BookConceptCandidate): BookConceptSkeleton {
   if (concept.genreElements.includes("探案")) return {
     protagonistArc: "她从只想证明自己没有失职，走到敢于承担调查后果、建立可靠证据标准，并最终以公开真相重新定义职业尊严。",
-    keyRelationships: ["主角与受害客户：从相互怀疑到共同追索欠款，客户掌握线索却隐瞒自身责任", "主角与同行调查者：既争夺职业机会又共享证据方法，对规则边界持相反立场"],
-    worldRules: ["每条欠款线索必须由票据、往来记录或证人交叉验证，异常提示不能直接作为结论", "调查会消耗职业信用和现实资源，越接近利益链核心，主角承担的法律与人际代价越高"],
-    majorForces: ["主角的职业协作网络：依靠财务能力与基层信息追索证据", "恶意欠款利益链：依靠合同漏洞、关系掩护和信息差转移责任"],
-    timelineAnchors: ["开局前：主角因替他人背责失去职业信任", "开局触发：一笔恶意欠款显露首条可追索证据", "中期节点：证据指向主角曾信任的职业体系并迫使她公开站队", "终局兑现：利益链完成司法与行业双重定性，主角建立新的调查规范"],
+    keyRelationships: ["主角与事故幸存者：从相互怀疑到共同还原现场，对方掌握线索却隐瞒自身责任", "主角与同行调查者：既争夺职业机会又共享证据方法，对规则边界持相反立场"],
+    worldRules: ["每条事故线索必须由现场痕迹、运行记录或证人交叉验证，异常提示不能直接作为结论", "调查会消耗职业信用和现实资源，越接近事故源头，主角承担的法律与人际风险越高"],
+    majorForces: ["主角的职业协作网络：依靠专业能力与基层信息还原事故", "掩盖安全隐患的利益联盟：依靠流程漏洞、关系掩护和信息差转移责任"],
+    timelineAnchors: ["开局前：主角因一次错误定责失去职业信任", "开局触发：一处反常痕迹揭示事故并非偶然", "中期节点：证据指向主角曾信任的职业体系并迫使她公开站队", "终局兑现：事故链完成司法与行业双重定性，主角建立新的调查规范"],
   };
   if (concept.genreElements.includes("乡村")) return {
     protagonistArc: "她从把荒山当作最后退路，走到理解土地、合作与长期责任的代价，最终成为能够让个人选择与地方共同发展并存的经营者。",
@@ -403,10 +403,10 @@ function browserConceptSkeleton(concept: BookConceptCandidate): BookConceptSkele
   };
   return {
     protagonistArc: "她从只求尽快止损、拒绝再次信任任何人，走到能够建立合作规则、承担共同体责任，并在终局以平等关系守住自己的事业和选择。",
-    keyRelationships: ["主角与供销社老会计：从互相防备到共同核账，老会计掌握旧渠道但害怕再次担责", "主角与前夫家利益代表：围绕资产和名誉持续对抗，对方每次施压都会暴露旧账链条", "主角与女性互助团队：成员各有生计目标，合作成果与分配矛盾共同推动群像线"],
-    worldRules: ["供销社的采购、赊销和票据必须留下可核对记录，经营成果不能凭空出现", "主角只能依靠职业能力、渠道谈判和团队协作解决问题，每次扩张都会增加现金流与责任风险"],
-    majorForces: ["主角经营团队：目标是让供销社恢复稳定经营，资源是专业能力、基层渠道和社区信任", "旧利益网络：目标是掩盖历史烂账并夺回资产控制权，资源是人情关系、合同漏洞和舆论压力"],
-    timelineAnchors: ["开局前：主角在婚姻与工作中长期替他人承担损失", "开局触发：离婚与资产争夺当天，她接手濒临倒闭的供销社", "中期节点：团队首次扩张后因分配与旧账证据出现不可逆分裂", "终局兑现：旧利益链被公开清算，供销社形成可持续制度并由团队共同治理"],
+    keyRelationships: ["主角与供销社老采购员：从互相防备到共同恢复渠道，老采购员熟悉地方需求却害怕再次担责", "主角与前夫家利益代表：围绕资产和名誉持续对抗，对方每次施压都会暴露供应链漏洞", "主角与女性互助团队：成员各有生计目标，合作成果与分配矛盾共同推动群像线"],
+    worldRules: ["供销社的采购、库存和运输必须符合真实经营周期，成果不能凭空出现", "主角只能依靠职业能力、渠道谈判和团队协作解决问题，每次扩张都会增加供给与管理风险"],
+    majorForces: ["主角经营团队：目标是让供销社恢复稳定经营，资源是专业能力、基层渠道和社区信任", "旧利益网络：目标是维持渠道控制并夺回资产控制权，资源是人情关系、合同漏洞和舆论压力"],
+    timelineAnchors: ["开局前：主角在婚姻与工作中长期替他人承担损失", "开局触发：离婚与资产争夺当天，她接手濒临倒闭的供销社", "中期节点：团队首次扩张后因分配方式和发展路线出现不可逆分裂", "终局兑现：地方供应体系完成重组，供销社形成可持续制度并由团队共同治理"],
   };
 }
 
@@ -471,12 +471,12 @@ export function createBrowserApi(): AppApi {
     },
     async generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]> {
       const ideas = [
-        ["她把烂账改成了金饭碗", "被亲友推去顶债的女会计，发现每笔恶意欠款都会显露一条可追索的证据链。"],
+        ["她能看见事故留下的断点", "被错误定责的安全调查员，发现每起事故现场都会显露一处可验证的因果断点。"],
         ["离婚当天，我接手了倒闭供销社", "被夺走婚房的基层职员接手濒临倒闭的供销社，用一张异常进货单串起女性互助生意。"],
         ["全家等我认输，我却承包了荒山", "返乡姑娘被逼让出工作名额，她用一份旧承包合同把荒山变成整个县的新产业。"],
       ];
       const routes = [
-        { secondaryGenres: ["悬疑", "成长"] as const, genreElements: ["现代都市", "探案"], openingMechanism: "一笔恶意欠款暴露可追索证据", growthCarrier: "职业调查能力与证据网络", primaryPayoff: "揭穿利益链并夺回职业尊严" },
+        { secondaryGenres: ["悬疑", "成长"] as const, genreElements: ["现代都市", "探案"], openingMechanism: "事故现场暴露一处反常断点", growthCarrier: "职业调查能力与证据网络", primaryPayoff: "还原事故真相并夺回职业尊严" },
         { secondaryGenres: ["经营", "群像"] as const, genreElements: ["年代", "经商"], openingMechanism: "接手即将倒闭的供销社", growthCarrier: "商品渠道与女性互助团队", primaryPayoff: "经营成果改变个人和社区处境" },
         { secondaryGenres: ["冒险", "经营"] as const, genreElements: ["乡村", "种田"], openingMechanism: "旧承包合同引出荒山争夺", growthCarrier: "土地改造技术与产业合作", primaryPayoff: "守住土地并建立区域产业" },
       ];
@@ -494,7 +494,7 @@ export function createBrowserApi(): AppApi {
         prohibitedPatterns: ["反派无理由降智", "用连续误会拖延关系"],
         audience: "偏好女性成长、现实经营与稳定情绪回报的番茄女频读者",
         commercialHook: "低谷止损开局，身份反差和事业成果形成连续可见回报。",
-        longFormEngine: "个人止损、团队经营、区域产业三轮扩张，关系与旧账在每轮同步升级。",
+        longFormEngine: "个人止损、团队经营、区域产业三轮扩张，关系与现实阻力在每轮同步升级。",
       }));
     },
     async createProjectFromConcept(input: BookConceptInput, concept: BookConceptCandidate) {
@@ -524,7 +524,16 @@ export function createBrowserApi(): AppApi {
       return "浏览器预览作品已从 localStorage 移除";
     },
     async getProject(projectId) {
-      return structuredClone(getProject(state, projectId));
+      const project = getProject(state, projectId);
+      return structuredClone({
+        ...project,
+        chapters: project.chapters.map((chapter) => ({ ...chapter, content: "" })),
+      });
+    },
+    async getChapter(projectId, chapterId) {
+      const chapter = getProject(state, projectId).chapters.find((item) => item.id === chapterId);
+      if (!chapter) throw new Error("章节不存在");
+      return structuredClone(chapter);
     },
     async updateProject(projectId, patch: ProjectPatch) {
       const project = getProject(state, projectId);
@@ -735,6 +744,9 @@ export function createBrowserApi(): AppApi {
         },
       };
     },
+    onChapterFactsExtracted() {
+      return () => {};
+    },
     async compileContext(projectId, chapterId): Promise<ContextPackage> {
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((item) => item.id === chapterId)!;
@@ -937,7 +949,19 @@ export function createBrowserApi(): AppApi {
     },
     async saveSchedule(projectId, item: ScheduleItem) {
       const project = getProject(state, projectId);
-      const next = { ...item, id: item.id || id() };
+      const chapter = project.chapters.find((entry) => entry.id === item.chapterId);
+      if (!chapter) throw new Error("排期章节不存在");
+      const targetStatus = item.status === "已发布" ? "已发布" : item.status === "待发布" ? "待发布" : null;
+      if (targetStatus && chapter.status !== targetStatus) {
+        assertChapterTransition(chapter.status, targetStatus, chapter.id, project.issues);
+        chapter.status = targetStatus;
+      }
+      if (!targetStatus && !["已定稿", "待发布"].includes(chapter.status))
+        throw new Error("只有已定稿或待发布章节可以安排发布");
+      const next = {
+        ...item, id: item.id || id(), projectId,
+        projectTitle: project.summary.title, chapterNumber: chapter.number, chapterTitle: chapter.title,
+      };
       const index = project.schedule.findIndex((entry) => entry.id === next.id);
       if (index >= 0) project.schedule[index] = next;
       else project.schedule.push(next);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { abortableDelay, AiService, conceptDiversityIssues } from "../electron/ai-service";
+import { abortableDelay, AiService, authorRequestsDebtAccounting, conceptDefaultMotifIssues, conceptDiversityIssues } from "../electron/ai-service";
 import type { WorkspaceDatabase } from "../electron/database";
 import type { BookConceptCandidate, BookConceptInput, Chapter, ContextPackage, ProjectDetail, QualityIssue, ResearchBook } from "../src/shared/types";
 
@@ -50,15 +50,53 @@ describe("book concept diversity", () => {
   });
 });
 
+describe("book concept default motifs", () => {
+  const concept = (overrides: Partial<BookConceptCandidate> = {}) => ({
+    id: "concept", title: "废站重启计划", premise: "检修员进入停运车站，依靠工程能力恢复避难通道。",
+    genreSubtype: "城市生存", secondaryGenres: ["生存"], genreElements: ["现代都市", "工程维修"],
+    openingMechanism: "停电事故封锁换乘站", growthCarrier: "工程能力与协作网络", primaryPayoff: "恢复设施并救出乘客",
+    protagonistDesire: "带领被困者离开车站", readerPromise: "以真实行动持续改变城市生存局势", coreEmotion: "绝境中的可靠感",
+    ending: "主角恢复城市交通网络并建立公共应急体系", immutableRules: ["材料必须来自现场", "修复需要真实操作"],
+    prohibitedPatterns: ["凭空获得资源", "反派无故降智"], audience: "偏好职业成长和城市生存的读者",
+    commercialHook: "普通检修员用专业能力重启瘫痪城市", longFormEngine: "车站、街区与城区三轮恢复逐级展开",
+    ...overrides,
+  }) satisfies BookConceptCandidate;
+
+  it("rejects debt and accounting as an unsolicited default conflict", () => {
+    expect(conceptDefaultMotifIssues([
+      concept({ premise: "宗门灵田枯萎，主角还要面对欠债山门与三日清算令。" }),
+    ])).toEqual([expect.stringContaining("作者未指定")]);
+  });
+
+  it("accepts neutral conflicts and author-requested debt stories", () => {
+    const candidate = concept({ premise: "宗门灵田枯萎，弟子必须在妖潮抵达前恢复护山阵。" });
+    expect(conceptDefaultMotifIssues([candidate])).toEqual([]);
+    expect(conceptDefaultMotifIssues([
+      concept({ premise: "主角接手欠款纠纷，追查伪造合同。" }),
+    ], true)).toEqual([]);
+  });
+
+  it("does not treat generic state ledgers as permission for debt plots", () => {
+    const input = (direction: string) => ({
+      genre: "玄幻/仙侠", targetWords: 1000000, updateCadence: "每日2章", seed: "",
+      genreElements: [direction], customGenreDirection: "",
+    }) satisfies BookConceptInput;
+    expect(authorRequestsDebtAccounting(input("战力账本"))).toBe(false);
+    expect(authorRequestsDebtAccounting(input("状态账本"))).toBe(false);
+    expect(authorRequestsDebtAccounting(input("欠款追讨与合同调查"))).toBe(true);
+    expect(authorRequestsDebtAccounting({ ...input("都市经营"), customGenreDirection: "禁止债务和旧账" })).toBe(false);
+  });
+});
+
 describe("selected concept expansion", () => {
   it("builds a complete character and world skeleton only after selection", async () => {
     const requests: string[] = [];
     const skeleton = {
-      protagonistArc: "主角从只想独自止损，走到愿意建立合作规则并承担团队失败的责任，最终以公开账目守住共同事业。",
-      keyRelationships: ["主角与老会计从互相防备到共同核账，双方对旧责任有不同立场", "主角与前夫家代表围绕资产控制持续对抗，对方掌握旧合同"],
-      worldRules: ["每笔采购和赊销都必须留下可核验票据，经营成果不能凭空出现", "团队扩张会同步增加现金流风险和分配责任"],
+      protagonistArc: "主角从只想独自止损，走到愿意建立合作规则并承担团队失败的责任，最终以公开制度守住共同事业。",
+      keyRelationships: ["主角与老采购员从互相防备到共同恢复渠道，双方对经营路线有不同立场", "主角与前夫家代表围绕资产控制持续对抗，对方掌握旧合同"],
+      worldRules: ["每次采购和运输都必须符合真实经营周期，经营成果不能凭空出现", "团队扩张会同步增加供应风险和分配责任"],
       majorForces: ["供销社经营团队掌握基层渠道和社区信任", "旧利益网络掌握合同漏洞和地方人情关系"],
-      timelineAnchors: ["开局前主角长期替家人承担债务", "开局当天主角接手濒临倒闭的供销社", "中期旧账证据引发团队路线分裂", "终局公开清算旧账并建立共同治理制度"],
+      timelineAnchors: ["开局前主角长期替家人承担损失", "开局当天主角接手濒临倒闭的供销社", "中期分配矛盾引发团队路线分裂", "终局重组供应体系并建立共同治理制度"],
     };
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
       requests.push(String(init.body));

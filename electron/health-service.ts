@@ -98,7 +98,7 @@ export async function scanSystemHealth(
       let db: DatabaseSync | null = null;
       try {
         db = openReadOnly(databasePath);
-        const records = Number((db.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count);
+        const records = Number((db.prepare("SELECT COUNT(*) AS count FROM chapters").get() as { count: number }).count);
         const fts = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts").get() as { count: number }).count);
         const trigram = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts_tri").get() as { count: number }).count);
         chapterCount += records;

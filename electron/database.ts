@@ -259,6 +259,45 @@ export class WorkspaceDatabase {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_jobs_dedupe ON ai_jobs(task_type, input_hash, prompt_version, model);
       `),
+      (database) => database.exec(`
+      CREATE TABLE chapters (
+        id TEXT PRIMARY KEY,
+        number INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        outline TEXT NOT NULL,
+        status TEXT NOT NULL,
+        word_count INTEGER NOT NULL,
+        batch_mode TEXT NOT NULL,
+        is_key_chapter INTEGER NOT NULL DEFAULT 0,
+        metadata TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_chapters_number ON chapters(number);
+      CREATE INDEX idx_chapters_status ON chapters(status, number);
+      CREATE TABLE chapter_contents (
+        chapter_id TEXT PRIMARY KEY,
+        content TEXT NOT NULL
+      );
+      INSERT INTO chapters(
+        id, number, title, outline, status, word_count, batch_mode,
+        is_key_chapter, metadata, updated_at
+      )
+      SELECT id,
+        CAST(json_extract(payload, '$.number') AS INTEGER),
+        COALESCE(json_extract(payload, '$.title'), ''),
+        COALESCE(json_extract(payload, '$.outline'), ''),
+        COALESCE(json_extract(payload, '$.status'), '章纲'),
+        COALESCE(CAST(json_extract(payload, '$.wordCount') AS INTEGER), 0),
+        COALESCE(json_extract(payload, '$.batchMode'), '逐章'),
+        COALESCE(CAST(json_extract(payload, '$.isKeyChapter') AS INTEGER), 0),
+        json_remove(payload, '$.content'),
+        updated_at
+      FROM records WHERE collection = 'chapters';
+      INSERT INTO chapter_contents(chapter_id, content)
+      SELECT id, COALESCE(json_extract(payload, '$.content'), '')
+      FROM records WHERE collection = 'chapters';
+      DELETE FROM records WHERE collection = 'chapters';
+      `),
     ]);
   }
 
@@ -398,40 +437,73 @@ export class WorkspaceDatabase {
     return this.hydrateSummary(row);
   }
 
+  getDashboardActivity(throughDate: string) {
+    const dueToday: ScheduleItem[] = [];
+    const activeAlerts: QualityIssue[] = [];
+    let pendingIssues = 0;
+    const projects = this.catalog.prepare("SELECT id FROM projects").all() as Array<{ id: string }>;
+    for (const project of projects) {
+      const db = this.projectDb(project.id);
+      dueToday.push(...(db.prepare(`
+        SELECT payload FROM records
+        WHERE collection = 'schedule'
+          AND json_extract(payload, '$.status') != '已发布'
+          AND substr(json_extract(payload, '$.publishAt'), 1, 10) <= ?
+        ORDER BY json_extract(payload, '$.publishAt')
+      `).all(throughDate) as Array<{ payload: string }>).map((row) => parseJson<ScheduleItem>(row.payload)));
+      const issueCount = db.prepare(`
+        SELECT COUNT(*) AS count FROM records
+        WHERE collection = 'issues' AND json_extract(payload, '$.status') = '待处理'
+      `).get() as { count: number };
+      pendingIssues += Number(issueCount.count);
+      activeAlerts.push(...(db.prepare(`
+        SELECT payload FROM records
+        WHERE collection = 'issues' AND json_extract(payload, '$.status') = '待处理'
+        ORDER BY json_extract(payload, '$.createdAt') DESC LIMIT 12
+      `).all() as Array<{ payload: string }>).map((row) => parseJson<QualityIssue>(row.payload)));
+    }
+    return {
+      dueToday: dueToday.sort((a, b) => a.publishAt.localeCompare(b.publishAt)),
+      activeAlerts: activeAlerts.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12),
+      pendingIssues,
+    };
+  }
+
   private hydrateSummary(row: CatalogRow): ProjectSummary {
     const db = this.projectDb(row.id);
-    const chapters = this.listRecords<Chapter>(db, "chapters");
-    const issues = this.listRecords<QualityIssue>(db, "issues");
-    const schedule = this.listRecords<ScheduleItem>(db, "schedule");
-    const currentWords = chapters.reduce(
-      (sum, chapter) => sum + chapter.wordCount,
-      0,
-    );
-    const stockChapters = chapters.filter(
-      (chapter) => chapter.status === "已定稿" || chapter.status === "待发布",
-    ).length;
-    const pendingHardIssues = issues.filter(
-      (issue) => issue.status === "待处理" && issue.severity === "硬性",
-    ).length;
-    const next = schedule
-      .filter((item) => item.status !== "已发布")
-      .sort((a, b) => a.publishAt.localeCompare(b.publishAt))[0];
+    const chapterStats = db.prepare(`
+      SELECT COUNT(*) AS chapter_count,
+        COALESCE(SUM(word_count), 0) AS current_words,
+        COALESCE(SUM(CASE WHEN status IN ('已定稿', '待发布') THEN 1 ELSE 0 END), 0) AS stock_chapters
+      FROM chapters
+    `).get() as { chapter_count: number; current_words: number; stock_chapters: number };
+    const pendingHardIssues = Number((db.prepare(`
+      SELECT COUNT(*) AS count FROM records
+      WHERE collection = 'issues'
+        AND json_extract(payload, '$.status') = '待处理'
+        AND json_extract(payload, '$.severity') = '硬性'
+    `).get() as { count: number }).count);
+    const next = db.prepare(`
+      SELECT json_extract(payload, '$.publishAt') AS publish_at FROM records
+      WHERE collection = 'schedule' AND json_extract(payload, '$.status') != '已发布'
+      ORDER BY publish_at LIMIT 1
+    `).get() as { publish_at: string } | undefined;
     return {
       id: row.id,
       title: row.title,
       genre: row.genre,
       status: row.status,
       targetWords: row.target_words,
-      currentWords,
-      chapterCount: chapters.length,
-      stockChapters,
+      currentWords: Number(chapterStats.current_words),
+      chapterCount: Number(chapterStats.chapter_count),
+      stockChapters: Number(chapterStats.stock_chapters),
       safeStockLine: row.safe_stock_line,
       updateCadence: row.update_cadence,
-      nextPublishAt: next?.publishAt ?? null,
+      nextPublishAt: next?.publish_at ?? null,
       riskLevel:
         pendingHardIssues > 0
           ? "告警"
-          : stockChapters < row.safe_stock_line && row.status === "连载中"
+          : Number(chapterStats.stock_chapters) < row.safe_stock_line && row.status === "连载中"
             ? "注意"
             : "正常",
       updatedAt: row.updated_at,
@@ -466,9 +538,7 @@ export class WorkspaceDatabase {
       plans: this.listRecords<PlanNode>(db, "plans").sort(
         (a, b) => a.ordinal - b.ordinal,
       ),
-      chapters: this.listRecords<Chapter>(db, "chapters").sort(
-        (a, b) => a.number - b.number,
-      ),
+      chapters: this.projects.listChapters(db),
       facts: this.listRecords<LedgerFact>(db, "facts").sort((a, b) =>
         b.updatedAt.localeCompare(a.updatedAt),
       ),
@@ -495,6 +565,31 @@ export class WorkspaceDatabase {
         (a, b) => a.sourceChapter - b.sourceChapter,
       ),
     };
+  }
+
+  getProjectOverview(id: string): ProjectDetail {
+    const db = this.projectDb(id);
+    return {
+      summary: this.getProjectSummary(id),
+      contract: this.getState<StoryContract>(db, "contract"),
+      plans: this.listRecords<PlanNode>(db, "plans").sort((a, b) => a.ordinal - b.ordinal),
+      chapters: this.projects.listChapterMetadata(db),
+      facts: this.listRecords<LedgerFact>(db, "facts").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      issues: this.listRecords<QualityIssue>(db, "issues").sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      changes: this.listRecords<ChangeRequest>(db, "changes").sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      schedule: this.listRecords<ScheduleItem>(db, "schedule").sort((a, b) => a.publishAt.localeCompare(b.publishAt)),
+      metrics: this.listRecords<MetricSnapshot>(db, "metrics").sort((a, b) => b.recordedAt.localeCompare(a.recordedAt)),
+      experiments: this.listRecords<ReviewExperiment>(db, "experiments").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      insightIds: this.getState<string[]>(db, "insightIds", []),
+      summaries: this.listRecords<StorySummary>(db, "summaries").sort((a, b) => a.fromChapter - b.fromChapter),
+      expectations: this.listRecords<ExpectationEntry>(db, "expectations").sort((a, b) => a.sourceChapter - b.sourceChapter),
+    };
+  }
+
+  getChapter(id: string, chapterId: string): Chapter {
+    const chapter = this.projects.getChapter(this.projectDb(id), chapterId);
+    if (!chapter) throw new Error("章节不存在");
+    return chapter;
   }
 
   saveContract(id: string, contract: StoryContract) {
@@ -681,7 +776,7 @@ export class WorkspaceDatabase {
     createRevision = true,
   ) {
     const previous = chapter.id
-      ? this.getRecord<Chapter>(db, "chapters", chapter.id)
+      ? this.projects.getChapter(db, chapter.id)
       : undefined;
     const protectedEdit = isProtectedChapterEdit(previous, chapter);
     if (
@@ -746,7 +841,7 @@ export class WorkspaceDatabase {
           : chapter.batchMode,
       updatedAt: now(),
     };
-    this.saveRecord(db, "chapters", next.id, next, previous?.revision, createRevision);
+    this.projects.saveChapter(db, next, previous?.revision, createRevision);
     db.prepare("DELETE FROM chapter_fts WHERE id = ?").run(next.id);
     db.prepare(
       "INSERT INTO chapter_fts(id, title, content) VALUES(?, ?, ?)",
@@ -805,7 +900,7 @@ export class WorkspaceDatabase {
 
   transitionChapter(id: string, chapterId: string, status: ChapterStatus) {
     const db = this.projectDb(id);
-    const chapter = this.getRecord<Chapter>(db, "chapters", chapterId);
+    const chapter = this.projects.getChapter(db, chapterId);
     if (!chapter) throw new Error("章节不存在");
     const issues = this.listRecords<QualityIssue>(db, "issues");
     assertChapterTransition(chapter.status, status, chapterId, issues);
@@ -905,7 +1000,7 @@ export class WorkspaceDatabase {
 
   searchProject(id: string, query: string, offset = 0, limit = 50): SearchHit[] {
     const db = this.projectDb(id);
-    return this.search.search(db, query, this.listRecords<Chapter>(db, "chapters"), offset, limit);
+    return this.search.search(db, query, this.projects.listChapters(db), offset, limit);
   }
 
   listRevisions(
@@ -942,7 +1037,7 @@ export class WorkspaceDatabase {
     }
     for (const issue of issues) this.saveRecord(db, "issues", issue.id, issue);
     if (issues.some((issue) => issue.severity === "硬性")) {
-      const chapter = this.getRecord<Chapter>(db, "chapters", chapterId);
+      const chapter = this.projects.getChapter(db, chapterId);
       if (chapter && chapter.batchMode !== "逐章")
         this.saveChapter(id, { ...chapter, batchMode: "逐章" });
     }
@@ -990,15 +1085,34 @@ export class WorkspaceDatabase {
   saveSchedule(id: string, item: ScheduleItem) {
     const db = this.projectDb(id);
     const project = this.getProjectSummary(id);
-    const next = {
-      ...item,
-      id: item.id || randomUUID(),
-      projectId: id,
-      projectTitle: project.title,
-    };
-    this.saveRecord(db, "schedule", next.id, next);
-    this.touchProject(id);
-    return next;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      let chapter = this.projects.getChapter(db, item.chapterId);
+      if (!chapter) throw new Error("排期章节不存在");
+      const targetStatus = item.status === "已发布" ? "已发布" : item.status === "待发布" ? "待发布" : null;
+      if (targetStatus && chapter.status !== targetStatus) {
+        const issues = this.listRecords<QualityIssue>(db, "issues");
+        assertChapterTransition(chapter.status, targetStatus, chapter.id, issues);
+        chapter = this.persistChapterInTransaction(db, id, { ...chapter, status: targetStatus }, targetStatus);
+      }
+      if (!targetStatus && !["已定稿", "待发布"].includes(chapter.status))
+        throw new Error("只有已定稿或待发布章节可以安排发布");
+      const next: ScheduleItem = {
+        ...item,
+        id: item.id || randomUUID(),
+        projectId: id,
+        projectTitle: project.title,
+        chapterNumber: chapter.number,
+        chapterTitle: chapter.title,
+      };
+      this.saveRecord(db, "schedule", next.id, next);
+      db.exec("COMMIT");
+      this.touchProject(id);
+      return next;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
   }
 
   saveMetrics(id: string, metrics: MetricSnapshot[]) {
@@ -1303,7 +1417,7 @@ export class WorkspaceDatabase {
       }
       const db = this.projectDb(row.id);
       addIntegrityCheck(`project-integrity-${row.id}`, `${row.title} · 项目数据库`, db, row.id);
-      const records = Number((db.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count);
+      const records = Number((db.prepare("SELECT COUNT(*) AS count FROM chapters").get() as { count: number }).count);
       const fts = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts").get() as { count: number }).count);
       const trigram = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts_tri").get() as { count: number }).count);
       chapterCount += records;
@@ -1325,7 +1439,7 @@ export class WorkspaceDatabase {
     const row = this.catalog.prepare("SELECT id FROM projects WHERE id = ?").get(projectId);
     if (!row) throw new Error("项目不存在");
     const db = this.projectDb(projectId);
-    const chapters = this.listRecords<Chapter>(db, "chapters");
+    const chapters = this.projects.listChapters(db);
     db.exec("BEGIN IMMEDIATE");
     try {
       db.exec("DELETE FROM chapter_fts; DELETE FROM chapter_fts_tri;");
@@ -1417,7 +1531,7 @@ export class WorkspaceDatabase {
         throw new Error("变更目标规划不存在");
       return this.entityVersion(db, "plans", targetId);
     }
-    const chapter = this.getRecord<Chapter>(db, "chapters", targetId);
+    const chapter = this.projects.getChapter(db, targetId);
     if (!chapter) throw new Error("变更目标章节不存在");
     return chapter.revision;
   }
