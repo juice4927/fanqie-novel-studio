@@ -8,7 +8,6 @@ import type {
   Chapter,
   ChapterDraftStreamEvent,
   ChapterFactsExtractionEvent,
-  ConceptCandidate,
   ContextPackage,
   MetricSnapshot,
   ProjectDetail,
@@ -18,7 +17,6 @@ import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
 import { AiService, type AiCachePolicy } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
-import { analyzeRankings } from "./ranking-service";
 import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
 import { readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
@@ -604,18 +602,6 @@ function registerHandlers() {
   handle("attachInsights", (id, insightIds) =>
     database.attachInsights(id, insightIds),
   );
-  handle("generateConcepts", async (id): Promise<ConceptCandidate[]> => {
-    const project = database.getProject(id);
-    const opportunities = analyzeRankings(database.listRankings()).marketOpportunities
-      .filter((item) => project.contract.fanqieCategoryKey ? item.categoryKey === project.contract.fanqieCategoryKey : item.genre === project.summary.genre)
-      .filter((item) => item.evidenceLevel !== "基线")
-      .slice(0, 5);
-    return ai.generateConcepts(
-      project,
-      database.getInsights(project.insightIds),
-      opportunities,
-    );
-  });
   handle("generateChapterDraft", (id, chapterId, streamId) => generateOneChapter(id, chapterId, streamId
     ? (event) => mainWindow?.webContents.send("studio:chapter-draft-stream", { streamId, event })
     : undefined));

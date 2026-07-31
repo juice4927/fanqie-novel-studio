@@ -9,8 +9,10 @@ import type {
   AiJobRecord,
   AiSettings,
   Chapter,
+  InsightPack,
   PlanNode,
   ProjectDetail,
+  RankingSnapshot,
 } from "../src/shared/types";
 
 const chapter = {
@@ -79,11 +81,64 @@ const planningProject = {
   summary: {
     id: "project-1",
     title: "旧城回声",
+    genre: "都市脑洞",
   },
-  contract: { approved: true },
+  contract: { approved: true, fanqieCategoryKey: "男频:262" },
   plans: [plan],
   chapters: [chapter],
+  insightIds: ["insight-1"],
 } as unknown as ProjectDetail;
+
+const insight = {
+  id: "insight-1",
+  name: "开篇异常承诺",
+  genre: "都市脑洞",
+  audienceNeed: "快速确认异常规则",
+  openingPromise: "首章出现可验证异常",
+  conflictEngine: "调查推进与规则反噬",
+  emotionalRhythm: "紧张后短暂缓冲",
+  retentionDevices: "证据链",
+  longFormEngine: "规则逐层揭示",
+  marketGap: "职业调查",
+  risks: "设定解释过量",
+  evidenceCount: 3,
+  confidence: "中",
+  createdAt: "2026-07-31T00:00:00.000Z",
+} satisfies InsightPack;
+
+function rankingSnapshot(
+  id: string,
+  capturedAt: string,
+  rank: number,
+): RankingSnapshot {
+  return {
+    id,
+    source: "番茄小说官网",
+    listName: "番茄男频阅读榜·都市脑洞",
+    capturedAt,
+    status: "成功",
+    error: null,
+    entries: [
+      {
+        id: `${id}-entry`,
+        snapshotId: id,
+        rank,
+        title: "规则调查员",
+        author: "作者",
+        genre: "都市脑洞",
+        words: 500_000,
+        status: "连载",
+        tags: [],
+        sourceUrl: "",
+      },
+    ],
+  };
+}
+
+const rankings = [
+  rankingSnapshot("rank-old", "2026-07-29T00:00:00.000Z", 3),
+  rankingSnapshot("rank-new", "2026-07-30T00:00:00.000Z", 1),
+];
 
 function createDependencies(
   completion: Promise<Chapter> = new Promise(() => {}),
@@ -105,8 +160,10 @@ function createDependencies(
     ),
     getAiSettings: vi.fn(() => ({ ...settings, hasApiKey: false })),
     getChapter: vi.fn(() => chapter),
+    getInsights: vi.fn(() => [insight]),
     getProject: vi.fn(() => planningProject),
     listAiJobs: vi.fn(() => [sourceJob]),
+    listRankings: vi.fn(() => rankings),
     saveChapter: vi.fn((_id, next: Chapter) => next),
     saveAiSettings: vi.fn((next) => ({ ...next, hasApiKey: false })),
     savePlan: vi.fn((_id, next: PlanNode) => next),
@@ -125,6 +182,7 @@ function createDependencies(
     database,
     ai: {
       cancelJob: vi.fn(() => true),
+      generateConcepts: vi.fn(async () => []),
       generatePlanning: vi.fn(),
       reviewPlanning: vi.fn(),
     },
@@ -153,6 +211,7 @@ describe("AI handlers", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "applyPlanningRepairs",
       "cancelAiJob",
+      "generateConcepts",
       "generatePlanningDraft",
       "getAiSettings",
       "listAiJobs",
@@ -160,6 +219,26 @@ describe("AI handlers", () => {
       "reviewPlanning",
       "saveAiSettings",
     ]);
+  });
+
+  it("generates concepts from linked insights and matching non-baseline opportunities", async () => {
+    const { dependencies, handlers, database, ai } = createDependencies();
+    registerAiHandlers(dependencies);
+
+    await handlers.get("generateConcepts")!("project-1");
+
+    expect(database.getInsights).toHaveBeenCalledWith(["insight-1"]);
+    expect(ai.generateConcepts).toHaveBeenCalledWith(
+      planningProject,
+      [insight],
+      [
+        expect.objectContaining({
+          categoryKey: "男频:262",
+          evidenceLevel: "暂定",
+          snapshots: 2,
+        }),
+      ],
+    );
   });
 
   it("persists streamed planning batches and returns their saved records", async () => {

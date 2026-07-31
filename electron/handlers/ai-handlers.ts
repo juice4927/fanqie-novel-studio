@@ -9,6 +9,7 @@ import {
 } from "../ai-retry";
 import type { AiService, StartedAiTask } from "../ai-service";
 import type { WorkspaceDatabase } from "../database";
+import { analyzeRankings } from "../ranking-service";
 import type { RegisterHandler } from "./types";
 
 type AiDatabase = Pick<
@@ -17,8 +18,10 @@ type AiDatabase = Pick<
   | "getAiJobRetryContext"
   | "getAiSettings"
   | "getChapter"
+  | "getInsights"
   | "getProject"
   | "listAiJobs"
+  | "listRankings"
   | "saveChapter"
   | "saveAiSettings"
   | "savePlan"
@@ -35,7 +38,10 @@ interface RetryFailureDetails {
 export interface AiHandlerDependencies {
   register: RegisterHandler;
   database: AiDatabase;
-  ai: Pick<AiService, "cancelJob" | "generatePlanning" | "reviewPlanning">;
+  ai: Pick<
+    AiService,
+    "cancelJob" | "generateConcepts" | "generatePlanning" | "reviewPlanning"
+  >;
   getApiKey: () => string;
   saveApiKey: (apiKey: string) => Promise<void>;
   startChapterRetry: (
@@ -54,6 +60,24 @@ export function registerAiHandlers({
   startChapterRetry,
   logRetryFailure,
 }: AiHandlerDependencies): void {
+  register("generateConcepts", async (id) => {
+    const project = database.getProject(id);
+    const opportunities = analyzeRankings(
+      database.listRankings(),
+    ).marketOpportunities
+      .filter((item) =>
+        project.contract.fanqieCategoryKey
+          ? item.categoryKey === project.contract.fanqieCategoryKey
+          : item.genre === project.summary.genre,
+      )
+      .filter((item) => item.evidenceLevel !== "基线")
+      .slice(0, 5);
+    return ai.generateConcepts(
+      project,
+      database.getInsights(project.insightIds),
+      opportunities,
+    );
+  });
   register("generatePlanningDraft", async (id, input) => {
     const project = database.getProject(id);
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
