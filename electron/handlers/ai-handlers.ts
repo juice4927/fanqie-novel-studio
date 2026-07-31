@@ -1,7 +1,9 @@
 import type {
   Chapter,
+  ContextPackage,
   PlanningGenerationResult,
   PlanningRepairInput,
+  ProjectDetail,
 } from "../../src/shared/types";
 import {
   assertChapterRetrySnapshot,
@@ -20,11 +22,14 @@ type AiDatabase = Pick<
   | "getChapter"
   | "getInsights"
   | "getProject"
+  | "getProjectOverview"
   | "listAiJobs"
   | "listRankings"
   | "saveChapter"
   | "saveAiSettings"
   | "savePlan"
+  | "saveFact"
+  | "searchRelevantFacts"
 >;
 
 interface RetryFailureDetails {
@@ -40,8 +45,17 @@ export interface AiHandlerDependencies {
   database: AiDatabase;
   ai: Pick<
     AiService,
-    "cancelJob" | "generateConcepts" | "generatePlanning" | "reviewPlanning"
+    | "cancelJob"
+    | "extractChapterFacts"
+    | "generateConcepts"
+    | "generatePlanning"
+    | "reviewPlanning"
   >;
+  compileContext: (
+    project: ProjectDetail,
+    chapter: Chapter,
+    relevantFacts?: ReadonlyArray<ProjectDetail["facts"][number]>,
+  ) => ContextPackage;
   getApiKey: () => string;
   saveApiKey: (apiKey: string) => Promise<void>;
   startChapterRetry: (
@@ -55,11 +69,55 @@ export function registerAiHandlers({
   register,
   database,
   ai,
+  compileContext,
   getApiKey,
   saveApiKey,
   startChapterRetry,
   logRetryFailure,
 }: AiHandlerDependencies): void {
+  register("compileContext", (id, chapterId) => {
+    const project = database.getProject(id);
+    const chapter = project.chapters.find((item) => item.id === chapterId);
+    if (!chapter) throw new Error("章节不存在");
+    return compileContext(
+      project,
+      chapter,
+      database.searchRelevantFacts(
+        id,
+        `${chapter.title} ${chapter.outline}`,
+        chapter.number,
+      ),
+    );
+  });
+  register("extractChapterFacts", async (id, chapterId) => {
+    const project = database.getProjectOverview(id);
+    const chapter = database.getChapter(id, chapterId);
+    if (!chapter.content.trim()) throw new Error("章节还没有正文");
+    const relevantFacts = database.searchRelevantFacts(
+      id,
+      `${chapter.title}\n${chapter.outline}\n${chapter.content.slice(0, 4_000)}`,
+      chapter.number,
+      40,
+    );
+    const candidates = await ai.extractChapterFacts(
+      { ...project, facts: relevantFacts },
+      chapter,
+    );
+    const existing = new Set(
+      project.facts.map(
+        (fact) =>
+          `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`,
+      ),
+    );
+    const saved = [];
+    for (const fact of candidates) {
+      const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
+      if (existing.has(key)) continue;
+      saved.push(database.saveFact(id, fact));
+      existing.add(key);
+    }
+    return saved;
+  });
   register("generateConcepts", async (id) => {
     const project = database.getProject(id);
     const opportunities = analyzeRankings(

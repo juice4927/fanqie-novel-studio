@@ -9,7 +9,9 @@ import type {
   AiJobRecord,
   AiSettings,
   Chapter,
+  ContextPackage,
   InsightPack,
+  LedgerFact,
   PlanNode,
   ProjectDetail,
   RankingSnapshot,
@@ -77,6 +79,20 @@ const plan = {
   parentId: null,
 } satisfies PlanNode;
 
+const existingFact = {
+  id: "fact-existing",
+  kind: "地点",
+  subject: "林舟",
+  predicate: "所在地",
+  value: "旧城",
+  validFromChapter: 1,
+  validToChapter: null,
+  evidenceChapter: 2,
+  confidence: "已确认",
+  knowledgeScope: "公开",
+  updatedAt: "2026-07-31T00:00:00.000Z",
+} satisfies LedgerFact;
+
 const planningProject = {
   summary: {
     id: "project-1",
@@ -86,6 +102,7 @@ const planningProject = {
   contract: { approved: true, fanqieCategoryKey: "男频:262" },
   plans: [plan],
   chapters: [chapter],
+  facts: [existingFact],
   insightIds: ["insight-1"],
 } as unknown as ProjectDetail;
 
@@ -162,11 +179,14 @@ function createDependencies(
     getChapter: vi.fn(() => chapter),
     getInsights: vi.fn(() => [insight]),
     getProject: vi.fn(() => planningProject),
+    getProjectOverview: vi.fn(() => planningProject),
     listAiJobs: vi.fn(() => [sourceJob]),
     listRankings: vi.fn(() => rankings),
     saveChapter: vi.fn((_id, next: Chapter) => next),
+    saveFact: vi.fn((_id, fact: LedgerFact) => fact),
     saveAiSettings: vi.fn((next) => ({ ...next, hasApiKey: false })),
     savePlan: vi.fn((_id, next: PlanNode) => next),
+    searchRelevantFacts: vi.fn(() => [existingFact]),
   };
   const saveApiKey = vi.fn(async (next: string) => {
     apiKey = next;
@@ -182,10 +202,14 @@ function createDependencies(
     database,
     ai: {
       cancelJob: vi.fn(() => true),
+      extractChapterFacts: vi.fn(),
       generateConcepts: vi.fn(async () => []),
       generatePlanning: vi.fn(),
       reviewPlanning: vi.fn(),
     },
+    compileContext: vi.fn(
+      () => ({ estimatedTokens: 123 }) as ContextPackage,
+    ),
     getApiKey: () => apiKey,
     saveApiKey,
     startChapterRetry,
@@ -196,6 +220,7 @@ function createDependencies(
     handlers,
     database,
     ai: dependencies.ai,
+    compileContext: dependencies.compileContext,
     saveApiKey,
     startChapterRetry,
     logRetryFailure,
@@ -211,6 +236,8 @@ describe("AI handlers", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "applyPlanningRepairs",
       "cancelAiJob",
+      "compileContext",
+      "extractChapterFacts",
       "generateConcepts",
       "generatePlanningDraft",
       "getAiSettings",
@@ -219,6 +246,113 @@ describe("AI handlers", () => {
       "reviewPlanning",
       "saveAiSettings",
     ]);
+  });
+
+  it("compiles chapter context with relevant facts from the database", () => {
+    const { dependencies, handlers, database, compileContext } =
+      createDependencies();
+    registerAiHandlers(dependencies);
+
+    expect(handlers.get("compileContext")!("project-1", chapter.id)).toEqual({
+      estimatedTokens: 123,
+    });
+    expect(database.searchRelevantFacts).toHaveBeenCalledWith(
+      "project-1",
+      `${chapter.title} ${chapter.outline}`,
+      chapter.number,
+    );
+    expect(compileContext).toHaveBeenCalledWith(
+      planningProject,
+      chapter,
+      [existingFact],
+    );
+  });
+
+  it("rejects context compilation when the chapter is missing", () => {
+    const { dependencies, handlers, database, compileContext } =
+      createDependencies();
+    database.getProject.mockReturnValue({
+      ...planningProject,
+      chapters: [],
+    });
+    registerAiHandlers(dependencies);
+
+    expect(() =>
+      handlers.get("compileContext")!("project-1", "missing-chapter"),
+    ).toThrow("章节不存在");
+    expect(database.searchRelevantFacts).not.toHaveBeenCalled();
+    expect(compileContext).not.toHaveBeenCalled();
+  });
+
+  it("rejects fact extraction before search and AI when content is blank", async () => {
+    const { dependencies, handlers, database, ai } = createDependencies();
+    database.getChapter.mockReturnValue({ ...chapter, content: " \n\t" });
+    registerAiHandlers(dependencies);
+
+    await expect(
+      handlers.get("extractChapterFacts")!("project-1", chapter.id),
+    ).rejects.toThrow("章节还没有正文");
+    expect(database.getProjectOverview).toHaveBeenCalledWith("project-1");
+    expect(database.getChapter).toHaveBeenCalledWith(
+      "project-1",
+      chapter.id,
+    );
+    expect(database.searchRelevantFacts).not.toHaveBeenCalled();
+    expect(ai.extractChapterFacts).not.toHaveBeenCalled();
+  });
+
+  it("extracts and saves only facts that are new to the project and batch", async () => {
+    const { dependencies, handlers, database, ai } = createDependencies();
+    registerAiHandlers(dependencies);
+    const contentChapter = { ...chapter, content: "甲".repeat(4_001) };
+    const unrelatedFact = {
+      ...existingFact,
+      id: "fact-unrelated",
+      subject: "顾晴",
+      predicate: "身份",
+      value: "记者",
+    };
+    const projectOverview = {
+      ...planningProject,
+      facts: [existingFact, unrelatedFact],
+    };
+    const newFact = {
+      ...existingFact,
+      id: "fact-new",
+      predicate: "行动",
+      value: "返回旧城",
+    };
+    const savedFact = {
+      ...newFact,
+      id: "fact-saved",
+      updatedAt: "2026-07-31T01:00:00.000Z",
+    };
+    database.getProjectOverview.mockReturnValue(projectOverview);
+    database.getChapter.mockReturnValue(contentChapter);
+    database.saveFact.mockReturnValue(savedFact);
+    ai.extractChapterFacts.mockResolvedValue([
+      existingFact,
+      unrelatedFact,
+      newFact,
+      { ...newFact, id: "fact-duplicate" },
+    ]);
+
+    await expect(
+      handlers.get("extractChapterFacts")!("project-1", chapter.id),
+    ).resolves.toEqual([savedFact]);
+    expect(database.searchRelevantFacts).toHaveBeenCalledWith(
+      "project-1",
+      `${chapter.title}\n${chapter.outline}\n${"甲".repeat(4_000)}`,
+      chapter.number,
+      40,
+    );
+    expect(ai.extractChapterFacts).toHaveBeenCalledWith(
+      { ...projectOverview, facts: [existingFact] },
+      contentChapter,
+    );
+    expect(database.saveFact).toHaveBeenCalledTimes(1);
+    expect(database.saveFact).toHaveBeenCalledWith("project-1", newFact);
+    expect(database.getProject).not.toHaveBeenCalled();
   });
 
   it("generates concepts from linked insights and matching non-baseline opportunities", async () => {

@@ -378,6 +378,7 @@ function registerHandlers() {
     register: handle,
     database,
     ai,
+    compileContext,
     getApiKey,
     saveApiKey: async (apiKey) => {
       await writeApiCredential(apiKey);
@@ -403,20 +404,6 @@ function registerHandlers() {
       });
     });
     return { chapter: saved, ledgerExtraction: { status: "排队中", candidateCount: 0 } };
-  });
-  handle("compileContext", (id, chapterId) => {
-    const project = database.getProject(id);
-    const chapter = project.chapters.find((item) => item.id === chapterId);
-    if (!chapter) throw new Error("章节不存在");
-    return compileContext(
-      project,
-      chapter,
-      database.searchRelevantFacts(
-        id,
-        `${chapter.title} ${chapter.outline}`,
-        chapter.number,
-      ),
-    );
   });
   handle("runQualityCheck", async (id, chapterId) => {
     const project = database.getProject(id);
@@ -551,30 +538,6 @@ function registerHandlers() {
     } finally {
       activeGenerationProjects.delete(id);
     }
-  });
-  handle("extractChapterFacts", async (id, chapterId) => {
-    const project = database.getProjectOverview(id);
-    const chapter = database.getChapter(id, chapterId);
-    if (!chapter.content.trim()) throw new Error("章节还没有正文");
-    const relevantFacts = database.searchRelevantFacts(
-      id,
-      `${chapter.title}\n${chapter.outline}\n${chapter.content.slice(0, 4_000)}`,
-      chapter.number,
-      40,
-    );
-    const candidates = await ai.extractChapterFacts(
-      { ...project, facts: relevantFacts },
-      chapter,
-    );
-    const existing = new Set(project.facts.map((fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`));
-    const saved = [];
-    for (const fact of candidates) {
-      const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
-      if (existing.has(key)) continue;
-      saved.push(database.saveFact(id, fact));
-      existing.add(key);
-    }
-    return saved;
   });
   handle("generateChapterDraft", (id, chapterId, streamId) => generateOneChapter(id, chapterId, streamId
     ? (event) => mainWindow?.webContents.send("studio:chapter-draft-stream", { streamId, event })
