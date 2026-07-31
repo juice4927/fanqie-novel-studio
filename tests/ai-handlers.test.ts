@@ -256,6 +256,8 @@ describe("AI handlers", () => {
     expect(handlers.get("compileContext")!("project-1", chapter.id)).toEqual({
       estimatedTokens: 123,
     });
+    expect(database.getProject).toHaveBeenCalledWith("project-1");
+    expect(database.getProjectOverview).not.toHaveBeenCalled();
     expect(database.searchRelevantFacts).toHaveBeenCalledWith(
       "project-1",
       `${chapter.title} ${chapter.outline}`,
@@ -299,6 +301,7 @@ describe("AI handlers", () => {
     );
     expect(database.searchRelevantFacts).not.toHaveBeenCalled();
     expect(ai.extractChapterFacts).not.toHaveBeenCalled();
+    expect(database.saveFact).not.toHaveBeenCalled();
   });
 
   it("extracts and saves only facts that are new to the project and batch", async () => {
@@ -340,6 +343,11 @@ describe("AI handlers", () => {
     await expect(
       handlers.get("extractChapterFacts")!("project-1", chapter.id),
     ).resolves.toEqual([savedFact]);
+    expect(database.getProjectOverview).toHaveBeenCalledWith("project-1");
+    expect(database.getChapter).toHaveBeenCalledWith(
+      "project-1",
+      chapter.id,
+    );
     expect(database.searchRelevantFacts).toHaveBeenCalledWith(
       "project-1",
       `${chapter.title}\n${chapter.outline}\n${"甲".repeat(4_000)}`,
