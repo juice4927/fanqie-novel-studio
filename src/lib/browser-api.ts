@@ -34,6 +34,7 @@ import {
   findApprovedContractChange,
   prepareContractUpdate,
 } from "../shared/contract-service";
+import { prepareFactSave } from "../shared/fact-service";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { compileChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
@@ -844,35 +845,22 @@ export function createBrowserApi(): AppApi {
     },
     async saveFact(projectId, fact: LedgerFact) {
       const project = getProject(state, projectId);
-      const next = { ...fact, id: fact.id || id(), updatedAt: now() };
-      const replacement = next.confidence === "已确认" && next.replacesFactId
-        ? project.facts.find((item) =>
-            item.id === next.replacesFactId &&
-            item.confidence === "已确认" &&
-            item.validFromChapter < next.validFromChapter &&
-            (item.value !== next.value || item.knowledgeScope !== next.knowledgeScope)
-          )
-        : undefined;
+      const updatedAt = now();
+      const { fact: next, replacement } = prepareFactSave(
+        project.facts,
+        fact,
+        { factId: fact.id || id(), updatedAt },
+      );
       if (replacement) {
-        replacement.validToChapter = next.validFromChapter - 1;
-        replacement.updatedAt = now();
+        const replacementIndex = project.facts.findIndex(
+          (item) => item.id === replacement.id,
+        );
+        project.facts[replacementIndex] = replacement;
       }
-      if (
-        next.confidence !== "已忽略" &&
-        project.facts.some(
-          (item) =>
-            item.id !== next.id &&
-            item.id !== next.replacesFactId &&
-            item.subject === next.subject &&
-            item.predicate === next.predicate &&
-            item.validToChapter === null &&
-            item.value !== next.value,
-        )
-      )
-        next.confidence = "有冲突";
       const factIndex = project.facts.findIndex((item) => item.id === next.id);
       if (factIndex >= 0) project.facts[factIndex] = next;
       else project.facts.push(next);
+      project.summary.updatedAt = updatedAt;
       persist();
       return next;
     },

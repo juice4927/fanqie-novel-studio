@@ -38,6 +38,7 @@ import {
   approveContractDraft,
   prepareContractUpdate,
 } from "../src/shared/contract-service";
+import { prepareFactSave } from "../src/shared/fact-service";
 import {
   cosineSimilarity,
   HASH_BIGRAM_PROVIDER_ID,
@@ -867,38 +868,16 @@ export class WorkspaceDatabase {
     const db = this.projectDb(id);
     db.exec("BEGIN IMMEDIATE");
     try {
-      const next = { ...fact, id: fact.id || randomUUID(), updatedAt: now() };
       const facts = this.listRecords<LedgerFact>(db, "facts");
-      const proposedReplacement = next.replacesFactId
-        ? facts.find((item) =>
-            item.id === next.replacesFactId &&
-            item.confidence === "已确认" &&
-            item.subject === next.subject &&
-            item.predicate === next.predicate &&
-            (item.value !== next.value || item.knowledgeScope !== next.knowledgeScope) &&
-            item.validFromChapter < next.validFromChapter &&
-            (item.validToChapter === null || item.validToChapter >= next.validFromChapter)
-          )
-        : undefined;
-      const replacement = next.confidence === "已确认" ? proposedReplacement : undefined;
+      const prepared = prepareFactSave(facts, fact, {
+        factId: fact.id || randomUUID(),
+        updatedAt: now(),
+      });
+      const { replacement } = prepared;
       if (replacement) {
-        this.saveRecord(db, "facts", replacement.id, {
-          ...replacement,
-          validToChapter: next.validFromChapter - 1,
-          updatedAt: now(),
-        });
+        this.saveRecord(db, "facts", replacement.id, replacement);
       }
-      const conflicts = facts.filter(
-        (item) =>
-          item.id !== next.id &&
-          item.id !== proposedReplacement?.id &&
-          item.subject === next.subject &&
-          item.predicate === next.predicate &&
-          item.validToChapter === null &&
-          next.validToChapter === null &&
-          item.value !== next.value,
-      );
-      if (next.confidence !== "已忽略" && conflicts.length) next.confidence = "有冲突";
+      const next = prepared.fact;
       this.saveRecord(db, "facts", next.id, next);
       this.saveEmbedding(
         db,
