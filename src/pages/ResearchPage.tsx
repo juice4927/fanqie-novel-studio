@@ -33,6 +33,7 @@ import {
 } from "./ResearchRankingModals";
 import { ResearchRankingView } from "./ResearchRankingView";
 import { ResearchSampleModals } from "./ResearchSampleModals";
+import styles from "./ResearchPage.module.css";
 
 type ResearchTab = "榜单快照" | "样本拆书" | "脱敏洞察" | "商业知识";
 
@@ -279,7 +280,7 @@ export function ResearchPage({
           value={tab}
           onChange={setTab}
         />
-        <div className="toolbar-actions">
+        <div className={styles.toolbarActions}>
           {tab === "榜单快照" && (
             <>
               <Button

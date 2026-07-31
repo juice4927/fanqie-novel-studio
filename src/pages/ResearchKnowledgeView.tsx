@@ -6,6 +6,7 @@ import {
 } from "../shared/commercial-knowledge";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import { GENRES } from "../shared/types";
+import styles from "./ResearchPage.module.css";
 
 export function ResearchKnowledgeView() {
   return (
@@ -17,7 +18,7 @@ export function ResearchKnowledgeView() {
         </div>
         <Badge tone="success">已用于拆书与写作</Badge>
       </div>
-      <div className="knowledge-loop">
+      <div className={styles.knowledgeLoop}>
         <BookOpenText size={19} />
         <span>读者承诺</span>
         <i>→</i>
@@ -31,7 +32,7 @@ export function ResearchKnowledgeView() {
         <i>→</i>
         <span>续读问题</span>
       </div>
-      <div className="genre-knowledge-grid">
+      <div className={styles.genreKnowledgeGrid}>
         {GENRES.map((genre) => {
           const plugin = GENRE_PLUGINS[genre];
           return (
@@ -67,7 +68,7 @@ export function ResearchKnowledgeView() {
           );
         })}
       </div>
-      <div className="knowledge-source-list">
+      <div className={styles.knowledgeSourceList}>
         {COMMERCIAL_KNOWLEDGE_SOURCES.map((source) => (
           <a key={source.url} href={source.url} target="_blank" rel="noreferrer">
             <span>
@@ -81,7 +82,7 @@ export function ResearchKnowledgeView() {
           </a>
         ))}
       </div>
-      <p className="knowledge-boundary">
+      <p className={styles.knowledgeBoundary}>
         平台官方方法用于确定分析维度；作者经验只作观察提示。字数和看点密度不作为机械门禁，创作契约、人物动机、事实与知识边界始终优先。
       </p>
     </section>

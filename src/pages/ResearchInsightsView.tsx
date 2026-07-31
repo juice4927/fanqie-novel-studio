@@ -2,15 +2,16 @@ import { Lightbulb } from "lucide-react";
 import type { InsightPack } from "../shared/types";
 import { Badge, EmptyState } from "../components/UI";
 import { formatDate } from "../lib/format";
+import styles from "./ResearchPage.module.css";
 
 export function ResearchInsightsView({ insights }: { insights: InsightPack[] }) {
   return (
     <section className="section-band">
       {insights.length ? (
-        <div className="insight-grid">
+        <div className={styles.insightGrid}>
           {insights.map((insight) => (
-            <article className="insight-item" key={insight.id}>
-              <div className="insight-top">
+            <article className={styles.insightItem} key={insight.id}>
+              <div className={styles.insightTop}>
                 <Badge tone="accent">{insight.genre}</Badge>
                 <Badge
                   tone={

@@ -10,6 +10,7 @@ import {
   Textarea,
 } from "../components/UI";
 import { formatDate } from "../lib/format";
+import styles from "./ResearchPage.module.css";
 
 export const FANQIE_CATEGORIES = {
   男频: [
@@ -121,7 +122,7 @@ function PublicRankingModal({
   return (
     <Modal title="采集番茄公开榜单" onClose={onClose}>
       <div className="form-stack">
-        <div className="form-grid fanqie-ranking-filters">
+        <div className={`form-grid ${styles.fanqieRankingFilters}`}>
           <Field label="频道">
             <Select
               value={gender}
@@ -220,7 +221,7 @@ function RankingScheduleModal({
   return (
     <Modal title="定时采集番茄榜单" onClose={onClose} width={720}>
       <div className="form-stack">
-        <div className="schedule-create-row">
+        <div className={styles.scheduleCreateRow}>
           <span>
             <strong>{rankingName}</strong>
             <small>{publicUrl}</small>
@@ -241,7 +242,7 @@ function RankingScheduleModal({
         <p className="inline-warning">
           仅在桌面应用运行时检查任务；失败会记录并顺延到下一周期，不会绕过验证或访问限制。
         </p>
-        <div className="ranking-schedule-list">
+        <div className={styles.rankingScheduleList}>
           {schedules.length ? (
             schedules.map((schedule) => (
               <article key={schedule.id}>
@@ -251,7 +252,7 @@ function RankingScheduleModal({
                     {schedule.frequency} · 下次 {formatDate(schedule.nextRunAt, true)}
                   </small>
                   {schedule.lastError && (
-                    <small className="error-text">{schedule.lastError}</small>
+                    <small className={styles.errorText}>{schedule.lastError}</small>
                   )}
                 </div>
                 <Badge
@@ -266,7 +267,7 @@ function RankingScheduleModal({
                   {schedule.lastStatus}
                 </Badge>
                 <label
-                  className="schedule-toggle"
+                  className={styles.scheduleToggle}
                   title={schedule.enabled ? "暂停任务" : "启用任务"}
                 >
                   <input

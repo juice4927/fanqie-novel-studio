@@ -6,6 +6,7 @@ import type {
 } from "../shared/types";
 import { Badge, Button, EmptyState } from "../components/UI";
 import { formatCount, formatDate } from "../lib/format";
+import styles from "./ResearchPage.module.css";
 
 interface ResearchRankingViewProps {
   analytics: RankingAnalytics | null;
@@ -23,7 +24,7 @@ export function ResearchRankingView({
   return (
     <section className="section-band">
       {analytics && (
-        <div className="ranking-analytics">
+        <div className={styles.rankingAnalytics}>
           <div>
             <TrendingUp size={17} />
             <span>
@@ -49,26 +50,30 @@ export function ResearchRankingView({
               <strong>{analytics.newEntrants.length}</strong>
             </span>
           </div>
-          <div className="analytics-wide">
+          <div className={styles.analyticsWide}>
             <small>数据范围</small>
             <strong>{analytics.timeRange}</strong>
           </div>
         </div>
       )}
       {analytics?.marketOpportunities.length ? (
-        <div className="market-opportunity-panel">
+        <div className={styles.marketOpportunityPanel}>
           <div className="section-heading">
             <div>
               <h2>榜单趋势与立项机会</h2>
               <p>按同一番茄榜单的连续快照估算动能与竞争，仅作选题证据，不替代人工判断。</p>
             </div>
           </div>
-          <div className="market-opportunity-grid">
+          <div className={styles.marketOpportunityGrid}>
             {analytics.marketOpportunities.slice(0, 6).map((opportunity) => (
               <article key={opportunity.listName}>
-                <div className="opportunity-head">
+                <div className={styles.opportunityHead}>
                   <div><Badge tone="accent">{opportunity.genre}</Badge><strong>{opportunity.categoryName}</strong></div>
-                  <span className={`opportunity-score ${opportunity.opportunityScore === null ? "is-baseline" : ""}`}>{opportunity.opportunityScore ?? "--"}</span>
+                  <span
+                    className={`${styles.opportunityScore} ${opportunity.opportunityScore === null ? styles.isBaseline : ""}`}
+                  >
+                    {opportunity.opportunityScore ?? "--"}
+                  </span>
                 </div>
                 <p>{opportunity.recommendation}</p>
                 <small>{opportunity.evidenceLevel} · 证据 {opportunity.dataSufficiency}% · 动能 {opportunity.momentumScore ?? "待观察"} · 竞争{opportunity.competition}</small>
@@ -81,8 +86,8 @@ export function ResearchRankingView({
       ) : null}
       {rankings.length ? (
         rankings.map((snapshot) => (
-          <div className="snapshot" key={snapshot.id}>
-            <div className="snapshot-head">
+          <div className={styles.snapshot} key={snapshot.id}>
+            <div className={styles.snapshotHead}>
               <span>
                 <strong>{snapshot.listName}</strong>
                 <small>
@@ -94,7 +99,7 @@ export function ResearchRankingView({
               </Badge>
             </div>
             <div className="data-table">
-              <div className="data-head ranking-grid">
+              <div className={`data-head ${styles.rankingGrid}`}>
                 <span>排名</span>
                 <span>书名</span>
                 <span>题材</span>
@@ -103,8 +108,8 @@ export function ResearchRankingView({
                 <span>官方页</span>
               </div>
               {snapshot.entries.slice(0, 20).map((entry) => (
-                <div className="data-row ranking-grid" key={entry.id}>
-                  <span className="rank-number">{entry.rank}</span>
+                <div className={`data-row ${styles.rankingGrid}`} key={entry.id}>
+                  <span className={styles.rankNumber}>{entry.rank}</span>
                   <span>
                     <strong>{entry.title}</strong>
                     <small>{entry.author}</small>
@@ -112,7 +117,7 @@ export function ResearchRankingView({
                   <span>{entry.genre}</span>
                   <span>{formatCount(entry.words)}</span>
                   <span>{entry.status}</span>
-                  <span className="ranking-links">
+                  <span className={styles.rankingLinks}>
                     {entry.sourceUrl && (
                       <a href={entry.sourceUrl} target="_blank" rel="noreferrer" title={entry.synopsis || "打开番茄官方详情页"}>
                         详情 <ExternalLink size={12} />
@@ -125,7 +130,7 @@ export function ResearchRankingView({
                     )}
                     {entry.sourceUrl && entry.platform === "番茄小说" && (
                       <button
-                        className="link-button"
+                        className={styles.linkButton}
                         type="button"
                         onClick={() => onOpenPublicSample(snapshot, entry)}
                         title="读取官方公开前10章并拆书"

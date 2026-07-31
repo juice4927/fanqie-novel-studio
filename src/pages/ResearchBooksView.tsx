@@ -8,6 +8,7 @@ import {
 import type { ResearchBook } from "../shared/types";
 import { Badge, Button, EmptyState } from "../components/UI";
 import { formatCount } from "../lib/format";
+import styles from "./ResearchPage.module.css";
 
 interface ResearchBooksViewProps {
   books: ResearchBook[];
@@ -27,13 +28,13 @@ export function ResearchBooksView({
   return (
     <section className="section-band">
       {books.length ? (
-        <div className="research-book-grid">
+        <div className={styles.researchBookGrid}>
           {books.map((book) => (
-            <article className="research-book" key={book.id}>
-              <div className="research-book-icon">
+            <article className={styles.researchBook} key={book.id}>
+              <div className={styles.researchBookIcon}>
                 <BookCopy size={20} />
               </div>
-              <div className="research-book-main">
+              <div className={styles.researchBookMain}>
                 <div>
                   <Badge>{book.genre}</Badge>
                   <h3>{book.title}</h3>
@@ -41,18 +42,18 @@ export function ResearchBooksView({
                     {book.sourceType} · {book.chapterCount} 章 · {formatCount(book.wordCount)}字
                   </p>
                 </div>
-                <div className="book-consents">
+                <div className={styles.bookConsents}>
                   <span>
                     <CheckCircle2 size={14} />
                     {book.sourceType === "公开试读" ? (book.sampleScope ?? "官方公开开篇样本") : "权利已确认"}
                   </span>
-                  <span className={book.cloudConsent ? "" : "muted"}>
+                  <span className={book.cloudConsent ? "" : styles.muted}>
                     <CheckCircle2 size={14} />
                     {book.cloudConsent ? "允许脱敏上云" : "仅本地分析"}
                   </span>
                 </div>
               </div>
-              <div className="research-book-action">
+              <div className={styles.researchBookAction}>
                 <Badge
                   tone={
                     book.status === "已拆解"

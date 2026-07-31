@@ -14,6 +14,7 @@ import {
   estimateCjkTextTokens,
   TOKEN_ESTIMATE_WARNING,
 } from "../shared/token-estimator";
+import styles from "./ResearchPage.module.css";
 
 function splitPastedText(text: string): ImportPreview["chapters"] {
   const pattern =
@@ -81,7 +82,7 @@ function PublicSampleModal({
       onClose={() => !reading && onClose()}
     >
       <div className="form-stack">
-        <div className="source-preview">
+        <div className={styles.sourcePreview}>
           <ScanText size={20} />
           <span>
             <strong>{entry.title}</strong>
@@ -190,8 +191,8 @@ function ImportPreviewModal({
   if (!preview) return null;
   return (
     <Modal title="确认样本导入" onClose={onClose} width={760}>
-      <div className="import-preview">
-        <div className="preview-summary">
+      <div className={styles.importPreview}>
+        <div className={styles.previewSummary}>
           <span>
             <strong>{preview.fileName}</strong>
             <small>
@@ -274,7 +275,7 @@ function ResearchAnalysisModal({
   if (!book) return null;
   return (
     <Modal title={`${book.title} · 四层拆解证据`} onClose={onClose} width={820}>
-      <div className="analysis-counts">
+      <div className={styles.analysisCounts}>
         {(["章节", "十章阶段", "分卷", "全书"] as const).map((layer) => (
           <div key={layer}>
             <strong>
@@ -284,7 +285,7 @@ function ResearchAnalysisModal({
           </div>
         ))}
       </div>
-      <div className="analysis-list">
+      <div className={styles.analysisList}>
         {analyses.length ? (
           analyses
             .filter((item) => item.layer !== "章节" || item.fromChapter <= 20)
