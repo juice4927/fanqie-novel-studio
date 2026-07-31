@@ -27,6 +27,7 @@ import { PublishingPage } from "./PublishingWorkspace";
 import { ProjectDashboard } from "./ProjectDashboard";
 import { ReviewPage } from "./ReviewWorkspace";
 import { StoryBiblePage } from "./StoryBibleWorkspace";
+import styles from "./ProjectPage.module.css";
 
 type ProjectTab =
   | "驾驶舱"
@@ -89,24 +90,24 @@ export function ProjectPage({
     );
   const plugin = GENRE_PLUGINS[project.summary.genre];
   return (
-    <div className="project-shell">
-      <aside className="project-subnav">
-        <button className="back-link" onClick={onBack}>
+    <div className={styles.shell}>
+      <aside className={styles.subnav}>
+        <button className={styles.backLink} onClick={onBack}>
           <ArrowLeft size={16} />
           返回多书总览
         </button>
-        <div className="project-identity">
-          <div className="project-avatar">
+        <div className={styles.identity}>
+          <div className={styles.avatar}>
             {project.summary.title.slice(0, 1)}
           </div>
           <strong>{project.summary.title}</strong>
           <span>{project.summary.genre}</span>
         </div>
-        <nav>
+        <nav className={styles.nav}>
           {TABS.map((item) => (
             <button
               key={item.id}
-              className={tab === item.id ? "active" : ""}
+              className={`${styles.navButton}${tab === item.id ? ` ${styles.active}` : ""}`}
               onClick={() => setTab(item.id)}
             >
               <item.icon size={17} />
@@ -114,7 +115,7 @@ export function ProjectPage({
               {item.id === "质检中心" &&
                 project.issues.filter((issue) => issue.status === "待处理")
                   .length > 0 && (
-                  <i>
+                  <i className={styles.issueCount}>
                     {
                       project.issues.filter(
                         (issue) => issue.status === "待处理",
@@ -125,7 +126,7 @@ export function ProjectPage({
             </button>
           ))}
         </nav>
-        <div className="project-stage">
+        <div className={styles.stage}>
           <span>当前阶段</span>
           <Select
             value={project.summary.status}
@@ -156,7 +157,7 @@ export function ProjectPage({
           </Select>
         </div>
       </aside>
-      <main className="project-content">
+      <main className={styles.content}>
         {tab === "驾驶舱" && (
           <ProjectDashboard
             project={project}
