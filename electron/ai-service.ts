@@ -429,10 +429,10 @@ export class AiService {
     reasoningEffort?: "low" | "medium" | "high";
     onAttempt?: (attempt: number) => void;
     onDelta?: (delta: string, attempt: number) => void;
-  }): Promise<T> {
     cachePolicy?: AiCachePolicy;
     onJobStarted?: (jobId: string) => void;
     onCacheHit?: () => void;
+  }): Promise<T> {
     const settings = this.database.getAiSettings();
     const apiKey = this.getApiKey();
     if (!apiKey) throw new Error("尚未配置 AI API 密钥");

@@ -222,8 +222,8 @@ function startOneChapter(
   if (!chapter.outline.trim()) throw new Error("请先填写本章章纲");
   if (["已定稿", "待发布", "已发布"].includes(chapter.status)) throw new Error("已定稿或进入发布流程的章节不能由 AI 覆写");
   assertNoHardStoryConstraint(evaluateStoryConstraints(project.facts, chapter));
-  activeGenerationProjects.add(id);
   if (!getApiKey()) throw new Error("尚未配置 AI API 密钥");
+  activeGenerationProjects.add(id);
   try {
     const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
     const generationGuard = createChapterGenerationGuard(chapter);
@@ -240,16 +240,16 @@ function startOneChapter(
     };
   } catch (error) {
     activeGenerationProjects.delete(id);
+    throw error;
   }
 }
-    throw error;
 
-async function generateChapterBatchFrom(id: string, chapterId: string) {
-  if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
 async function generateOneChapter(id: string, chapterId: string, onStream?: (event: ChapterDraftStreamEvent) => void) {
   return startOneChapter(id, chapterId, onStream).completion;
 }
 
+async function generateChapterBatchFrom(id: string, chapterId: string) {
+  if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
   const preview = previewChapterBatch(database.getProject(id), database.getAiSettings(), chapterId);
   if (!preview.canRun) throw new Error(preview.blockingReason ?? "当前不能执行五章批次");
   activeGenerationProjects.add(id);
