@@ -4,6 +4,7 @@ import {
   assembleDashboard,
   localDayEndExclusive,
 } from "../../src/shared/dashboard-policy";
+import { analyzeMetrics, parseMetricsCsv } from "../../src/shared/metrics";
 import type { RegisterHandler } from "./types";
 
 type ProjectDatabase = Pick<
@@ -19,6 +20,8 @@ type ProjectDatabase = Pick<
   | "getDashboardActivity"
   | "getProject"
   | "getProjectOverview"
+  | "saveMetrics"
+  | "saveReviewExperiment"
   | "listProjects"
   | "listRevisions"
   | "resolveIssue"
@@ -139,6 +142,17 @@ export function registerProjectHandlers({
   register("saveSchedule", (id, item) => database.saveSchedule(id, item));
   register("attachInsights", (id, insightIds) =>
     database.attachInsights(id, insightIds),
+  );
+  register("importMetricsCsv", (id, csvText) => {
+    const metrics = parseMetricsCsv(csvText);
+    database.saveMetrics(id, metrics);
+    return metrics.length;
+  });
+  register("getReviewSuggestions", (id) =>
+    analyzeMetrics(database.getProject(id).metrics),
+  );
+  register("saveReviewExperiment", (id, experiment) =>
+    database.saveReviewExperiment(id, experiment),
   );
   register("updateProject", (id, patch) => database.updateProject(id, patch));
   register("saveContract", (id, contract) =>

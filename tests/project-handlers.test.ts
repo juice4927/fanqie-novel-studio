@@ -88,7 +88,7 @@ function createDependencies(activeProjectId = "") {
       activeAlerts: [],
       pendingIssues: 0,
     })),
-    getProject: vi.fn(() => ({ summary: project, contract: {} })),
+    getProject: vi.fn(() => ({ summary: project, contract: {}, metrics: [] })),
     getProjectOverview: vi.fn(),
     listProjects: vi.fn(() => [project]),
     listRevisions: vi.fn(),
@@ -99,7 +99,9 @@ function createDependencies(activeProjectId = "") {
     saveContract: vi.fn(),
     saveExpectation: vi.fn(),
     saveFact: vi.fn(),
+    saveMetrics: vi.fn(),
     savePlan: vi.fn(),
+    saveReviewExperiment: vi.fn(),
     saveSchedule: vi.fn(),
     searchProject: vi.fn(),
     updateProject: vi.fn(),
@@ -137,6 +139,8 @@ describe("project handlers", () => {
       "getChapter",
       "getDashboard",
       "getProject",
+      "getReviewSuggestions",
+      "importMetricsCsv",
       "listProjects",
       "listRevisions",
       "resolveIssue",
@@ -147,11 +151,49 @@ describe("project handlers", () => {
       "saveExpectation",
       "saveFact",
       "savePlan",
+      "saveReviewExperiment",
       "saveSchedule",
       "searchProject",
       "suggestAestheticProfile",
       "updateProject",
     ]);
+  });
+
+  it("parses metric imports and forwards review experiment persistence", () => {
+    const { dependencies, handlers, database } = createDependencies();
+    registerProjectHandlers(dependencies);
+    const csv = [
+      "date,chapter,exposure,reads,retention,follows,revenue,comments",
+      "2026-07-31,3,1000,600,42,120,9.5,第三章回落",
+    ].join("\n");
+    const experiment = { id: "experiment-1", title: "缩短开篇铺垫" };
+
+    expect(handlers.get("importMetricsCsv")!(project.id, csv)).toBe(1);
+    expect(database.saveMetrics).toHaveBeenCalledWith(
+      project.id,
+      [
+        expect.objectContaining({
+          chapterNumber: 3,
+          exposure: 1000,
+          reads: 600,
+          retention: 42,
+          follows: 120,
+          revenue: 9.5,
+          comments: "第三章回落",
+        }),
+      ],
+    );
+    expect(handlers.get("getReviewSuggestions")!(project.id)).toEqual([
+      expect.objectContaining({
+        id: "data-volume",
+        category: "数据质量",
+      }),
+    ]);
+    handlers.get("saveReviewExperiment")!(project.id, experiment);
+    expect(database.saveReviewExperiment).toHaveBeenCalledWith(
+      project.id,
+      experiment,
+    );
   });
 
   it("forwards project records and revision operations without reshaping arguments", () => {
@@ -249,10 +291,12 @@ describe("project handlers", () => {
       premise: "候选契约覆盖内容",
     } as StoryContract;
     handlers.get("suggestAestheticProfile")!(project.id, candidate);
-    expect(ai.suggestAestheticProfile).toHaveBeenCalledWith({
-      summary: project,
-      contract: candidate,
-    });
+    expect(ai.suggestAestheticProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary: project,
+        contract: candidate,
+      }),
+    );
   });
 
   it("blocks deletion while chapter generation is active", () => {

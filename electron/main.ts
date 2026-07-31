@@ -17,7 +17,6 @@ import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
 import { AiService, type AiCachePolicy } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
-import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
 import { readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { compileChapterContext } from "../src/shared/context-compiler";
@@ -589,15 +588,6 @@ function registerHandlers() {
   );
   handle("generateChapterBatch", generateChapterBatchFrom);
   handle("exportProject", (id, format) => exportProject(id, format));
-  handle("importMetricsCsv", (id, csvText) => {
-    const metrics = parseMetricsCsv(csvText);
-    database.saveMetrics(id, metrics);
-    return metrics.length;
-  });
-  handle("getReviewSuggestions", (id) =>
-    analyzeMetrics(database.getProject(id).metrics),
-  );
-  handle("saveReviewExperiment", (id, experiment) => database.saveReviewExperiment(id, experiment));
 }
 
 function createWindow() {
