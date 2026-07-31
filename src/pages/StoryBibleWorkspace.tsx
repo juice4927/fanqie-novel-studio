@@ -84,10 +84,16 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
   }));
   const save = async () => {
     try {
-      setContract(await api.saveContract(project.summary.id, contract));
+      const previousVersion = contract.version;
+      const saved = await api.saveContract(project.summary.id, contract);
+      setContract(saved);
       setAestheticSuggestion(null);
       await reload();
-      notify("创作契约已保存为新版本");
+      notify(
+        saved.version === previousVersion
+          ? "创作契约内容未变"
+          : `创作契约已保存为 v${saved.version}`,
+      );
     } catch (error) {
       notify(String(error), "error");
     }
@@ -125,7 +131,7 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
               : `待审批 · v${contract.version}`}
           </Badge>
           <Button variant="secondary" icon={<Save size={16} />} onClick={save}>
-            保存新版本
+            保存契约
           </Button>
           <Button
             icon={<LockKeyhole size={16} />}

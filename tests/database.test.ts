@@ -561,7 +561,8 @@ describe("approval gates", () => {
       ...database.getProject(project.id).contract,
       premise: "主角发现异常规则", readerPromise: "持续解谜与成长", ending: "主角关闭规则源头", ...completeNarrativeEngine,
     });
-    database.approveContract(project.id);
+    const approved = database.approveContract(project.id);
+    expect(database.saveContract(project.id, { ...approved })).toEqual(approved);
     expect(() => database.saveContract(project.id, { ...initial, premise: "未经审批的新前提" })).toThrow(/变更单/);
     const change = database.saveChangeRequest(project.id, {
       id: "", targetKind: "创作契约", targetId: "contract", baseVersion: 0,

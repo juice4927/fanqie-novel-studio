@@ -34,6 +34,10 @@ import type {
   SystemHealthReport,
 } from "../src/shared/types";
 import { normalizeAestheticProfile } from "../src/shared/aesthetic-profile";
+import {
+  approveContractDraft,
+  prepareContractUpdate,
+} from "../src/shared/contract-service";
 import { hasMajorStateChange } from "../src/shared/major-state-change";
 import {
   cosineSimilarity,
@@ -616,75 +620,15 @@ export class WorkspaceDatabase {
   saveContract(id: string, contract: StoryContract) {
     const db = this.projectDb(id);
     const previous = this.getState<StoryContract>(db, "contract");
-    const changed =
-      JSON.stringify({
-        premise: contract.premise,
-        genreSubtype: contract.genreSubtype,
-        fanqieCategoryKey: contract.fanqieCategoryKey,
-        secondaryGenres: contract.secondaryGenres ?? [],
-        genreElements: contract.genreElements ?? [],
-        customGenreDirection: contract.customGenreDirection ?? "",
-        audience: contract.audience ?? "",
-        commercialHook: contract.commercialHook ?? "",
-        openingMechanism: contract.openingMechanism ?? "",
-        growthCarrier: contract.growthCarrier ?? "",
-        primaryPayoff: contract.primaryPayoff ?? "",
-        longFormEngine: contract.longFormEngine ?? "",
-        protagonistDesire: contract.protagonistDesire,
-        protagonistArc: contract.protagonistArc ?? "",
-        keyRelationships: contract.keyRelationships ?? [],
-        worldRules: contract.worldRules ?? [],
-        majorForces: contract.majorForces ?? [],
-        timelineAnchors: contract.timelineAnchors ?? [],
-        readerPromise: contract.readerPromise,
-        coreEmotion: contract.coreEmotion,
-        ending: contract.ending,
-        immutableRules: contract.immutableRules,
-        prohibitedPatterns: contract.prohibitedPatterns,
-        majorStateChanges: contract.majorStateChanges ?? { include: [], exclude: [] },
-        aestheticProfile: normalizeAestheticProfile(contract.aestheticProfile),
-      }) !==
-      JSON.stringify({
-        premise: previous.premise,
-        genreSubtype: previous.genreSubtype,
-        fanqieCategoryKey: previous.fanqieCategoryKey,
-        secondaryGenres: previous.secondaryGenres ?? [],
-        genreElements: previous.genreElements ?? [],
-        customGenreDirection: previous.customGenreDirection ?? "",
-        audience: previous.audience ?? "",
-        commercialHook: previous.commercialHook ?? "",
-        openingMechanism: previous.openingMechanism ?? "",
-        growthCarrier: previous.growthCarrier ?? "",
-        primaryPayoff: previous.primaryPayoff ?? "",
-        longFormEngine: previous.longFormEngine ?? "",
-        protagonistDesire: previous.protagonistDesire,
-        protagonistArc: previous.protagonistArc ?? "",
-        keyRelationships: previous.keyRelationships ?? [],
-        worldRules: previous.worldRules ?? [],
-        majorForces: previous.majorForces ?? [],
-        timelineAnchors: previous.timelineAnchors ?? [],
-        readerPromise: previous.readerPromise,
-        coreEmotion: previous.coreEmotion,
-        ending: previous.ending,
-        immutableRules: previous.immutableRules,
-        prohibitedPatterns: previous.prohibitedPatterns,
-        majorStateChanges: previous.majorStateChanges ?? { include: [], exclude: [] },
-        aestheticProfile: normalizeAestheticProfile(previous.aestheticProfile),
-      });
-    if (!changed) return previous;
+    const update = prepareContractUpdate(previous, contract, now());
+    if (!update.changed) return previous;
     if (
       previous.approved &&
       !this.consumeApprovedChange(db, "创作契约", "contract", previous.version)
     ) {
       throw new Error("已审批创作契约只能通过已批准的改纲变更单修改");
     }
-    const next = {
-      ...contract,
-      aestheticProfile: normalizeAestheticProfile(contract.aestheticProfile),
-      approved: false,
-      version: previous.version + 1,
-      updatedAt: now(),
-    };
+    const next = update.contract;
     this.addRevision(db, "state", "contract", previous.version, previous);
     this.setState(db, "contract", next);
     this.touchProject(id);
@@ -694,19 +638,7 @@ export class WorkspaceDatabase {
   approveContract(id: string) {
     const db = this.projectDb(id);
     const contract = this.getState<StoryContract>(db, "contract");
-    const required: Array<[string, string | undefined]> = [
-      ["故事前提", contract.premise], ["读者承诺", contract.readerPromise], ["故事终局", contract.ending],
-      ["开局机制", contract.openingMechanism], ["成长载体", contract.growthCarrier],
-      ["核心回报", contract.primaryPayoff], ["长篇发动机", contract.longFormEngine],
-    ];
-    const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label);
-    if (!contract.protagonistArc?.trim()) missing.push("主角弧光");
-    if ((contract.keyRelationships?.length ?? 0) < 2) missing.push("关键关系（至少2条）");
-    if ((contract.worldRules?.length ?? 0) < 2) missing.push("世界规则（至少2条）");
-    if ((contract.majorForces?.length ?? 0) < 2) missing.push("主要势力（至少2个）");
-    if ((contract.timelineAnchors?.length ?? 0) < 3) missing.push("时间锚点（至少3条）");
-    if (missing.length) throw new Error(`创作契约尚未补全：${missing.join("、")}`);
-    const next = { ...contract, approved: true, updatedAt: now() };
+    const next = approveContractDraft(contract, now());
     this.setState(db, "contract", next);
     this.updateProject(id, { status: "大纲审批" });
     return next;

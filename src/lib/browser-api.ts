@@ -29,6 +29,11 @@ import type {
   StoryContract,
 } from "../shared/types";
 import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
+import {
+  approveContractDraft,
+  findApprovedContractChange,
+  prepareContractUpdate,
+} from "../shared/contract-service";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { hasMajorStateChange } from "../shared/major-state-change";
 import { compileChapterContext } from "../shared/context-compiler";
@@ -571,32 +576,18 @@ export function createBrowserApi(): AppApi {
     },
     async saveContract(projectId, contract: StoryContract) {
       const project = getProject(state, projectId);
-      if (
-        project.contract.approved &&
-        !project.changes.some(
-          (item) =>
-            item.status === "已批准" &&
-            item.targetKind === "创作契约" &&
-            item.targetId === "contract" &&
-            item.baseVersion === project.contract.version,
-        )
-      )
+      const previous = project.contract;
+      const updatedAt = now();
+      const update = prepareContractUpdate(previous, contract, updatedAt);
+      if (!update.changed) return previous;
+      const approval = previous.approved
+        ? findApprovedContractChange(project.changes, previous.version)
+        : undefined;
+      if (previous.approved && !approval)
         throw new Error("已审批创作契约只能通过匹配的已批准变更单修改");
-      const approval = project.changes.find(
-        (item) =>
-          item.status === "已批准" &&
-          item.targetKind === "创作契约" &&
-          item.targetId === "contract" &&
-          item.baseVersion === project.contract.version,
-      );
       if (approval) approval.status = "已应用";
-      project.contract = {
-        ...contract,
-        aestheticProfile: normalizeAestheticProfile(contract.aestheticProfile),
-        version: project.contract.version + 1,
-        approved: false,
-        updatedAt: now(),
-      };
+      project.contract = update.contract;
+      project.summary.updatedAt = updatedAt;
       persist();
       return project.contract;
     },
@@ -605,20 +596,10 @@ export function createBrowserApi(): AppApi {
     },
     async approveContract(projectId) {
       const project = getProject(state, projectId);
-      const required: Array<[string, string | undefined]> = [
-        ["故事前提", project.contract.premise], ["读者承诺", project.contract.readerPromise], ["故事终局", project.contract.ending],
-        ["开局机制", project.contract.openingMechanism], ["成长载体", project.contract.growthCarrier],
-        ["核心回报", project.contract.primaryPayoff], ["长篇发动机", project.contract.longFormEngine],
-      ];
-      const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label);
-      if (!project.contract.protagonistArc?.trim()) missing.push("主角弧光");
-      if ((project.contract.keyRelationships?.length ?? 0) < 2) missing.push("关键关系（至少2条）");
-      if ((project.contract.worldRules?.length ?? 0) < 2) missing.push("世界规则（至少2条）");
-      if ((project.contract.majorForces?.length ?? 0) < 2) missing.push("主要势力（至少2个）");
-      if ((project.contract.timelineAnchors?.length ?? 0) < 3) missing.push("时间锚点（至少3条）");
-      if (missing.length) throw new Error(`创作契约尚未补全：${missing.join("、")}`);
-      project.contract.approved = true;
+      const updatedAt = now();
+      project.contract = approveContractDraft(project.contract, updatedAt);
       project.summary.status = "大纲审批";
+      project.summary.updatedAt = updatedAt;
       persist();
       return project.contract;
     },
