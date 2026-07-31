@@ -1,20 +1,13 @@
 import { useEffect, useState } from "react";
 import {
-  BarChart3,
-  BookCopy,
-  BookOpenText,
-  CheckCircle2,
   ClipboardPaste,
-  ExternalLink,
   FileInput,
-  Lightbulb,
   Link2,
   LoaderCircle,
   ScanText,
   Clock3,
   Play,
   Trash2,
-  TrendingUp,
   Upload,
 } from "lucide-react";
 import type {
@@ -34,7 +27,6 @@ import { GENRES } from "../shared/types";
 import {
   Badge,
   Button,
-  EmptyState,
   Field,
   Input,
   Modal,
@@ -43,16 +35,15 @@ import {
   Textarea,
 } from "../components/UI";
 import { formatCount, formatDate } from "../lib/format";
-import {
-  COMMERCIAL_KNOWLEDGE_SOURCES,
-  COMMERCIAL_KNOWLEDGE_VERSION,
-} from "../shared/commercial-knowledge";
-import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import { FANQIE_CATEGORY_PROFILES } from "../shared/fanqie-taxonomy";
 import {
   estimateCjkTextTokens,
   TOKEN_ESTIMATE_WARNING,
 } from "../shared/token-estimator";
+import { ResearchBooksView } from "./ResearchBooksView";
+import { ResearchInsightsView } from "./ResearchInsightsView";
+import { ResearchKnowledgeView } from "./ResearchKnowledgeView";
+import { ResearchRankingView } from "./ResearchRankingView";
 
 type ResearchTab = "榜单快照" | "样本拆书" | "脱敏洞察" | "商业知识";
 
@@ -314,383 +305,28 @@ export function ResearchPage({
       </div>
 
       {tab === "榜单快照" && (
-        <section className="section-band">
-          {analytics && (
-            <div className="ranking-analytics">
-              <div>
-                <TrendingUp size={17} />
-                <span>
-                  <small>统计可信度</small>
-                  <strong>{analytics.confidence}</strong>
-                </span>
-              </div>
-              <div>
-                <span>
-                  <small>有效快照</small>
-                  <strong>{analytics.snapshotCount}</strong>
-                </span>
-              </div>
-              <div>
-                <span>
-                  <small>累计样本</small>
-                  <strong>{analytics.sampleSize}</strong>
-                </span>
-              </div>
-              <div>
-                <span>
-                  <small>新晋书目</small>
-                  <strong>{analytics.newEntrants.length}</strong>
-                </span>
-              </div>
-              <div className="analytics-wide">
-                <small>数据范围</small>
-                <strong>{analytics.timeRange}</strong>
-              </div>
-            </div>
-          )}
-          {analytics?.marketOpportunities.length ? (
-            <div className="market-opportunity-panel">
-              <div className="section-heading">
-                <div>
-                  <h2>榜单趋势与立项机会</h2>
-                  <p>按同一番茄榜单的连续快照估算动能与竞争，仅作选题证据，不替代人工判断。</p>
-                </div>
-              </div>
-              <div className="market-opportunity-grid">
-                {analytics.marketOpportunities.slice(0, 6).map((opportunity) => (
-                  <article key={opportunity.listName}>
-                    <div className="opportunity-head">
-                      <div><Badge tone="accent">{opportunity.genre}</Badge><strong>{opportunity.categoryName}</strong></div>
-                      <span className={`opportunity-score ${opportunity.opportunityScore === null ? "is-baseline" : ""}`}>{opportunity.opportunityScore ?? "--"}</span>
-                    </div>
-                    <p>{opportunity.recommendation}</p>
-                    <small>{opportunity.evidenceLevel} · 证据 {opportunity.dataSufficiency}% · 动能 {opportunity.momentumScore ?? "待观察"} · 竞争{opportunity.competition}</small>
-                    <small>{opportunity.snapshots}次快照 · 新晋率 {opportunity.newEntrantRate}% · 平均升位 {opportunity.averageRankChange}{opportunity.scoreRange ? ` · 机会区间 ${opportunity.scoreRange[0]}–${opportunity.scoreRange[1]}` : ""}</small>
-                    {opportunity.sampleWarning && <small className="warning-text">{opportunity.sampleWarning}</small>}
-                  </article>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {rankings.length ? (
-            rankings.map((snapshot) => (
-              <div className="snapshot" key={snapshot.id}>
-                <div className="snapshot-head">
-                  <span>
-                    <strong>{snapshot.listName}</strong>
-                    <small>
-                      {snapshot.source} ·{" "}
-                      {formatDate(snapshot.capturedAt, true)}
-                    </small>
-                  </span>
-                  <Badge
-                    tone={snapshot.status === "成功" ? "success" : "warning"}
-                  >
-                    {snapshot.status}
-                  </Badge>
-                </div>
-                <div className="data-table">
-                  <div className="data-head ranking-grid">
-                    <span>排名</span>
-                    <span>书名</span>
-                    <span>题材</span>
-                    <span>字数</span>
-                    <span>状态</span>
-                    <span>官方页</span>
-                  </div>
-                  {snapshot.entries.slice(0, 20).map((entry) => (
-                    <div className="data-row ranking-grid" key={entry.id}>
-                      <span className="rank-number">{entry.rank}</span>
-                      <span>
-                        <strong>{entry.title}</strong>
-                        <small>{entry.author}</small>
-                      </span>
-                      <span>{entry.genre}</span>
-                      <span>{formatCount(entry.words)}</span>
-                      <span>{entry.status}</span>
-                      <span className="ranking-links">
-                        {entry.sourceUrl && (
-                          <a href={entry.sourceUrl} target="_blank" rel="noreferrer" title={entry.synopsis || "打开番茄官方详情页"}>
-                            详情 <ExternalLink size={12} />
-                          </a>
-                        )}
-                        {entry.officialReaderUrl && (
-                          <a href={entry.officialReaderUrl} target="_blank" rel="noreferrer">
-                            阅读
-                          </a>
-                        )}
-                        {entry.sourceUrl && entry.platform === "番茄小说" && (
-                          <button
-                            className="link-button"
-                            type="button"
-                            onClick={() => openPublicSample(snapshot, entry)}
-                            title="读取官方公开前10章并拆书"
-                          >
-                            拆前10章
-                          </button>
-                        )}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))
-          ) : (
-            <EmptyState
-              icon={<BarChart3 />}
-              title="还没有榜单快照"
-              description="采集番茄官方公开榜单或导入 CSV，系统会按日期保留不可变快照。"
-              action={
-                <Button
-                  onClick={() => setPublicModal(true)}
-                  icon={<Link2 size={17} />}
-                >
-                  采集番茄榜单
-                </Button>
-              }
-            />
-          )}
-        </section>
+        <ResearchRankingView
+          analytics={analytics}
+          rankings={rankings}
+          onOpenPublicSample={openPublicSample}
+          onOpenPublicRanking={() => setPublicModal(true)}
+        />
       )}
-
       {tab === "样本拆书" && (
-        <section className="section-band">
-          {books.length ? (
-            <div className="research-book-grid">
-              {books.map((book) => (
-                <article className="research-book" key={book.id}>
-                  <div className="research-book-icon">
-                    <BookCopy size={20} />
-                  </div>
-                  <div className="research-book-main">
-                    <div>
-                      <Badge>{book.genre}</Badge>
-                      <h3>{book.title}</h3>
-                      <p>
-                        {book.sourceType} · {book.chapterCount} 章 ·{" "}
-                        {formatCount(book.wordCount)}字
-                      </p>
-                    </div>
-                    <div className="book-consents">
-                      <span>
-                        <CheckCircle2 size={14} />
-                        {book.sourceType === "公开试读" ? (book.sampleScope ?? "官方公开开篇样本") : "权利已确认"}
-                      </span>
-                      <span className={book.cloudConsent ? "" : "muted"}>
-                        <CheckCircle2 size={14} />
-                        {book.cloudConsent ? "允许脱敏上云" : "仅本地分析"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="research-book-action">
-                    <Badge
-                      tone={
-                        book.status === "已拆解"
-                          ? "success"
-                          : book.status === "失败"
-                            ? "danger"
-                            : "warning"
-                      }
-                    >
-                      {book.status}
-                    </Badge>
-                    {book.status === "已拆解" && (
-                      <Button
-                        variant="ghost"
-                        onClick={async () => {
-                          setAnalyses(await api.listResearchAnalyses(book.id));
-                          setAnalysisBook(book);
-                        }}
-                      >
-                        查看分层
-                      </Button>
-                    )}
-                    <Button
-                      variant="secondary"
-                      disabled={busyBook !== null}
-                      onClick={() => requestDeconstruct(book)}
-                      icon={
-                        busyBook === book.id ? (
-                          <LoaderCircle className="spin" size={16} />
-                        ) : (
-                          <Lightbulb size={16} />
-                        )
-                      }
-                    >
-                      {busyBook === book.id ? "流式拆书中" : book.status === "已拆解" ? "重新拆解" : "生成洞察"}
-                    </Button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={<BookCopy />}
-              title="研究库为空"
-              description="导入你有权使用的样本材料，系统会先预览切章结果。"
-              action={
-                <Button onClick={chooseFile} icon={<FileInput size={17} />}>
-                  导入样本
-                </Button>
-              }
-            />
-          )}
-        </section>
+        <ResearchBooksView
+          books={books}
+          busyBookId={busyBook}
+          onChooseFile={chooseFile}
+          onOpenAnalysis={async (book) => {
+            setAnalyses(await api.listResearchAnalyses(book.id));
+            setAnalysisBook(book);
+          }}
+          onRequestDeconstruct={requestDeconstruct}
+        />
       )}
+      {tab === "脱敏洞察" && <ResearchInsightsView insights={insights} />}
+      {tab === "商业知识" && <ResearchKnowledgeView />}
 
-      {tab === "脱敏洞察" && (
-        <section className="section-band">
-          {insights.length ? (
-            <div className="insight-grid">
-              {insights.map((insight) => (
-                <article className="insight-item" key={insight.id}>
-                  <div className="insight-top">
-                    <Badge tone="accent">{insight.genre}</Badge>
-                    <Badge
-                      tone={
-                        insight.confidence === "高"
-                          ? "success"
-                          : insight.confidence === "中"
-                            ? "warning"
-                            : "neutral"
-                      }
-                    >
-                      {insight.confidence}可信度
-                    </Badge>
-                  </div>
-                  <h3>{insight.name}</h3>
-                  <dl>
-                    <div>
-                      <dt>读者需求</dt>
-                      <dd>{insight.audienceNeed}</dd>
-                    </div>
-                    <div>
-                      <dt>冲突发动机</dt>
-                      <dd>{insight.conflictEngine}</dd>
-                    </div>
-                    <div>
-                      <dt>长篇能力</dt>
-                      <dd>{insight.longFormEngine}</dd>
-                    </div>
-                    <div>
-                      <dt>市场空位</dt>
-                      <dd>{insight.marketGap}</dd>
-                    </div>
-                  </dl>
-                  <footer>
-                    {insight.evidenceCount} 个章节证据 ·{" "}
-                    {formatDate(insight.createdAt)}
-                  </footer>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={<Lightbulb />}
-              title="还没有脱敏洞察"
-              description="完成样本拆书后，抽象结构结论会出现在这里。"
-            />
-          )}
-        </section>
-      )}
-
-      {tab === "商业知识" && (
-        <section className="section-band knowledge-base">
-          <div className="section-heading">
-            <div>
-              <h2>中国网文商业拆解</h2>
-              <p>版本 {COMMERCIAL_KNOWLEDGE_VERSION}</p>
-            </div>
-            <Badge tone="success">已用于拆书与写作</Badge>
-          </div>
-          <div className="knowledge-loop">
-            <BookOpenText size={19} />
-            <span>读者承诺</span>
-            <i>→</i>
-            <span>具体压力</span>
-            <i>→</i>
-            <span>主动行动</span>
-            <i>→</i>
-            <span>情绪回报</span>
-            <i>→</i>
-            <span>影响发酵</span>
-            <i>→</i>
-            <span>续读问题</span>
-          </div>
-          <div className="genre-knowledge-grid">
-            {GENRES.map((genre) => {
-              const plugin = GENRE_PLUGINS[genre];
-              return (
-                <article key={genre}>
-                  <div>
-                    <Badge tone="accent">{genre}</Badge>
-                    <small>{plugin.id}</small>
-                  </div>
-                  <h3>{plugin.readerPromise}</h3>
-                  <dl>
-                    <div>
-                      <dt>子类型</dt>
-                      <dd>
-                        {plugin.subtypes.map((item) => item.name).join("、")}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>回报阶梯</dt>
-                      <dd>{plugin.rewardLadder.join(" → ")}</dd>
-                    </div>
-                    <div>
-                      <dt>扩张轴</dt>
-                      <dd>{plugin.expansionAxes.join("；")}</dd>
-                    </div>
-                    <div>
-                      <dt>疲劳识别</dt>
-                      <dd>
-                        {plugin.fatigueRules
-                          .map((item) => item.name)
-                          .join("、")}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>专属账本</dt>
-                      <dd>
-                        {plugin.ledgerTemplates
-                          .map((item) => item.label)
-                          .join("、")}
-                      </dd>
-                    </div>
-                  </dl>
-                </article>
-              );
-            })}
-          </div>
-          <div className="knowledge-source-list">
-            {COMMERCIAL_KNOWLEDGE_SOURCES.map((source) => (
-              <a
-                key={source.url}
-                href={source.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span>
-                  <Badge
-                    tone={
-                      source.authority === "平台官方" ? "accent" : "neutral"
-                    }
-                  >
-                    {source.authority}
-                  </Badge>
-                  <strong>{source.title}</strong>
-                  <small>{source.appliesTo}</small>
-                </span>
-                <ExternalLink size={15} />
-              </a>
-            ))}
-          </div>
-          <p className="knowledge-boundary">
-            平台官方方法用于确定分析维度；作者经验只作观察提示。字数和看点密度不作为机械门禁，创作契约、人物动机、事实与知识边界始终优先。
-          </p>
-        </section>
-      )}
 
       {rankingModal && (
         <Modal title="导入榜单 CSV" onClose={() => setRankingModal(false)}>
