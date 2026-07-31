@@ -559,11 +559,13 @@ describe("approval gates", () => {
       chapterNumber: 999, chapterTitle: "forged", publishAt: "2026-08-01T08:00:00.000Z", status: "待发布",
     });
     expect(scheduled).toMatchObject({ projectId: project.id, projectTitle: "排期事务", chapterNumber: 1, chapterTitle: "第1章" });
-    expect(database.getProject(project.id).chapters[0].status).toBe("待发布");
+    expect(database.getProject(project.id).chapters[0]).toMatchObject({ status: "待发布", revision: 5 });
     expect(database.getProjectSummary(project.id)).toMatchObject({ currentWords: chapter.wordCount, chapterCount: 1, stockChapters: 1, nextPublishAt: "2026-08-01T08:00:00.000Z" });
 
+    database.saveSchedule(project.id, scheduled);
+    expect(database.getProject(project.id).chapters[0].revision).toBe(5);
     database.saveSchedule(project.id, { ...scheduled, status: "已发布" });
-    expect(database.getProject(project.id).chapters[0].status).toBe("已发布");
+    expect(database.getProject(project.id).chapters[0]).toMatchObject({ status: "已发布", revision: 6 });
     expect(database.getProjectSummary(project.id)).toMatchObject({ stockChapters: 0, nextPublishAt: null });
   });
 

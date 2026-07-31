@@ -45,13 +45,13 @@ import {
   prepareQualityIssueSave,
   resolveQualityIssue,
 } from "../shared/quality-issue-service";
+import { prepareScheduleSave } from "../shared/schedule-service";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
 import { assertLocalResearchImportRights } from "../shared/research-import-service";
 import { parseRankingCsv } from "../shared/ranking-csv";
 import {
   assembleDashboard,
-  assertSchedulePublishAt,
   collectDashboardActivity,
   deriveProjectRisk,
   localDayEndExclusive,
@@ -899,26 +899,48 @@ export function createBrowserApi(): AppApi {
       persist();
     },
     async saveSchedule(projectId, item: ScheduleItem) {
-      assertSchedulePublishAt(item.publishAt);
       const project = getProject(state, projectId);
-      const chapter = project.chapters.find((entry) => entry.id === item.chapterId);
-      if (!chapter) throw new Error("排期章节不存在");
-      const targetStatus = item.status === "已发布" ? "已发布" : item.status === "待发布" ? "待发布" : null;
-      if (targetStatus && chapter.status !== targetStatus) {
-        assertChapterTransition(chapter.status, targetStatus, chapter.id, project.issues);
-        chapter.status = targetStatus;
+      const chapterIndex = project.chapters.findIndex(
+        (entry) => entry.id === item.chapterId,
+      );
+      const chapter = project.chapters[chapterIndex];
+      const updatedAt = now();
+      const plan = prepareScheduleSave(item, {
+        scheduleId: item.id || id(),
+        projectId,
+        projectTitle: project.summary.title,
+        chapter,
+        issues: project.issues,
+      });
+      if (plan.transitionTo) {
+        project.chapters[chapterIndex] = prepareChapterSave(
+          { ...chapter, status: plan.transitionTo },
+          {
+            previous: chapter,
+            forcedStatus: plan.transitionTo,
+            protectedEdit: false,
+            createRevision: true,
+            chapterId: chapter.id,
+            endingExpectationId: chapter.endingExpectationId ?? null,
+            batchMode: deriveChapterBatchMode(chapter, {
+              facts: project.facts,
+              issues: project.issues,
+              plans: project.plans,
+              genre: project.summary.genre,
+              majorStateChanges: project.contract.majorStateChanges,
+            }),
+            updatedAt,
+          },
+        );
       }
-      if (!targetStatus && !["已定稿", "待发布"].includes(chapter.status))
-        throw new Error("只有已定稿或待发布章节可以安排发布");
-      const next = {
-        ...item, id: item.id || id(), projectId,
-        projectTitle: project.summary.title, chapterNumber: chapter.number, chapterTitle: chapter.title,
-      };
-      const index = project.schedule.findIndex((entry) => entry.id === next.id);
-      if (index >= 0) project.schedule[index] = next;
-      else project.schedule.push(next);
+      const index = project.schedule.findIndex(
+        (entry) => entry.id === plan.schedule.id,
+      );
+      if (index >= 0) project.schedule[index] = plan.schedule;
+      else project.schedule.push(plan.schedule);
+      project.summary.updatedAt = updatedAt;
       persist();
-      return next;
+      return plan.schedule;
     },
     async listRankings() {
       return structuredClone(state.rankings);

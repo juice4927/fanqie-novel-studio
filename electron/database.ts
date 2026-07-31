@@ -49,11 +49,11 @@ import {
   prepareQualityIssueSave,
   resolveQualityIssue,
 } from "../src/shared/quality-issue-service";
+import { prepareScheduleSave } from "../src/shared/schedule-service";
 import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
 import { prepareReviewExperiment } from "../src/shared/review-experiment-service";
 import {
   assertDashboardCutoff,
-  assertSchedulePublishAt,
   compareActiveAlerts,
   compareDueSchedules,
   deriveProjectRisk,
@@ -1037,33 +1037,30 @@ export class WorkspaceDatabase {
   }
 
   saveSchedule(id: string, item: ScheduleItem) {
-    assertSchedulePublishAt(item.publishAt);
     const db = this.projectDb(id);
     const project = this.getProjectSummary(id);
     db.exec("BEGIN IMMEDIATE");
     try {
       let chapter = this.projects.getChapter(db, item.chapterId);
-      if (!chapter) throw new Error("排期章节不存在");
-      const targetStatus = item.status === "已发布" ? "已发布" : item.status === "待发布" ? "待发布" : null;
-      if (targetStatus && chapter.status !== targetStatus) {
-        const issues = this.listRecords<QualityIssue>(db, "issues");
-        assertChapterTransition(chapter.status, targetStatus, chapter.id, issues);
-        chapter = this.persistChapterInTransaction(db, id, { ...chapter, status: targetStatus }, targetStatus);
-      }
-      if (!targetStatus && !["已定稿", "待发布"].includes(chapter.status))
-        throw new Error("只有已定稿或待发布章节可以安排发布");
-      const next: ScheduleItem = {
-        ...item,
-        id: item.id || randomUUID(),
+      const plan = prepareScheduleSave(item, {
+        scheduleId: item.id || randomUUID(),
         projectId: id,
         projectTitle: project.title,
-        chapterNumber: chapter.number,
-        chapterTitle: chapter.title,
-      };
-      this.saveRecord(db, "schedule", next.id, next);
+        chapter,
+        issues: this.listRecords<QualityIssue>(db, "issues"),
+      });
+      if (plan.transitionTo) {
+        chapter = this.persistChapterInTransaction(
+          db,
+          id,
+          { ...chapter!, status: plan.transitionTo },
+          plan.transitionTo,
+        );
+      }
+      this.saveRecord(db, "schedule", plan.schedule.id, plan.schedule);
       db.exec("COMMIT");
       this.touchProject(id);
-      return next;
+      return plan.schedule;
     } catch (error) {
       try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
       throw error;
