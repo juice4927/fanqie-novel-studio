@@ -53,7 +53,7 @@ import {
   visibleProjectSummaries,
 } from "../shared/dashboard-policy";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
-import { compileChapterContext } from "../shared/context-compiler";
+import { compileProjectChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
 import {
   assertChapterTransition,
@@ -382,33 +382,6 @@ function getProject(state: DemoState, projectId: string) {
 
 function browserPlanVersion(state: DemoState, plan: PlanNode) {
   return state.planVersions[plan.id] ?? (plan.status === "已批准" ? 2 : 1);
-}
-
-function compileBrowserContext(
-  project: ProjectDetail,
-  chapter: Chapter,
-): ContextPackage {
-  return compileChapterContext({
-    summary: project.summary,
-    contract: project.contract,
-    chapter,
-    plans: project.plans,
-    relevantFacts: project.facts,
-    constraintFacts: project.facts,
-    summaries: project.summaries,
-    expectations: project.expectations,
-    recentChapters: project.chapters,
-    styleSamples: project.chapters
-      .filter(
-        (item) =>
-          item.number < chapter.number &&
-          ["已定稿", "待发布", "已发布"].includes(item.status) &&
-          item.content,
-      )
-      .sort((left, right) => left.number - right.number)
-      .slice(-20)
-      .map((item) => item.content),
-  });
 }
 
 function browserRankingAnalytics(
@@ -790,7 +763,7 @@ export function createBrowserApi(): AppApi {
     async compileContext(projectId, chapterId): Promise<ContextPackage> {
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((item) => item.id === chapterId)!;
-      return compileBrowserContext(project, chapter);
+      return compileProjectChapterContext(project, chapter);
     },
     async searchProject(projectId, query, offset = 0, limit = 50) {
       return getProject(state, projectId)
@@ -1064,7 +1037,8 @@ export function createBrowserApi(): AppApi {
         project,
         state.settings,
         chapterId,
-        (chapter) => compileBrowserContext(project, chapter).estimatedTokens,
+        (chapter) =>
+          compileProjectChapterContext(project, chapter).estimatedTokens,
       );
     },
     async generateChapterBatch() {

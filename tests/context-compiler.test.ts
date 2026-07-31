@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { compileChapterContext, type ContextCompilerInput } from "../src/shared/context-compiler";
-import type { Chapter, LedgerFact, PlanNode, StoryContract } from "../src/shared/types";
+import {
+  buildProjectContextInput,
+  compileChapterContext,
+  compileProjectChapterContext,
+  type ContextCompilerInput,
+} from "../src/shared/context-compiler";
+import type {
+  Chapter,
+  LedgerFact,
+  PlanNode,
+  ProjectDetail,
+  StoryContract,
+} from "../src/shared/types";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 
@@ -149,5 +160,53 @@ describe("context compiler", () => {
     expect(context.recentSummary.indexOf("第7章")).toBeLessThan(context.recentSummary.indexOf("第8章"));
     expect(context.authorStyle).toContain("平均句长");
     expect(context.authorStyle).not.toContain("未来正文不得出现");
+  });
+
+  it("builds project context input with relevant facts and eligible style samples", () => {
+    const current = chapter(30);
+    const allFacts = [fact("constraint")];
+    const relevantFacts = [fact("relevant")];
+    const eligibleChapters = Array.from({ length: 22 }, (_, index) =>
+      chapter(index + 1, {
+        content: `样本-${index + 1}`,
+        status: index % 2 ? "待发布" : "已定稿",
+      }),
+    );
+    const project = {
+      summary: {
+        genre: "都市脑洞",
+        currentWords: 20_000,
+        targetWords: 1_000_000,
+      },
+      contract,
+      plans: [],
+      chapters: [
+        ...eligibleChapters.reverse(),
+        chapter(23, { content: "草稿不得采样", status: "草稿" }),
+        chapter(31, { content: "未来不得采样", status: "已发布" }),
+      ],
+      facts: allFacts,
+      summaries: [],
+      expectations: [],
+    } as unknown as ProjectDetail;
+
+    const projectInput = buildProjectContextInput(
+      project,
+      current,
+      relevantFacts,
+    );
+
+    expect(projectInput.relevantFacts).toBe(relevantFacts);
+    expect(projectInput.constraintFacts).toBe(allFacts);
+    expect(projectInput.recentChapters).toBe(project.chapters);
+    expect(projectInput.styleSamples).toHaveLength(20);
+    expect(projectInput.styleSamples[0]).toBe("样本-3");
+    expect(projectInput.styleSamples.at(-1)).toBe("样本-22");
+    expect(projectInput.styleSamples).not.toContain("草稿不得采样");
+    expect(projectInput.styleSamples).not.toContain("未来不得采样");
+    expect(
+      compileProjectChapterContext(project, current, relevantFacts)
+        .estimatedTokens,
+    ).toBeGreaterThan(0);
   });
 });

@@ -4,6 +4,7 @@ import type {
   ExpectationEntry,
   LedgerFact,
   PlanNode,
+  ProjectDetail,
   ProjectSummary,
   StoryContract,
   StorySummary,
@@ -33,6 +34,61 @@ export interface ContextCompilerInput {
   expectations: readonly ExpectationEntry[];
   recentChapters: readonly ContextChapterExcerpt[];
   styleSamples: readonly string[];
+}
+
+export type ProjectContextSource = Pick<
+  ProjectDetail,
+  | "summary"
+  | "contract"
+  | "plans"
+  | "chapters"
+  | "facts"
+  | "summaries"
+  | "expectations"
+>;
+
+const styleSampleStatuses = new Set<Chapter["status"]>([
+  "已定稿",
+  "待发布",
+  "已发布",
+]);
+
+export function buildProjectContextInput(
+  project: ProjectContextSource,
+  chapter: Chapter,
+  relevantFacts: readonly LedgerFact[] = project.facts,
+): ContextCompilerInput {
+  return {
+    summary: project.summary,
+    contract: project.contract,
+    chapter,
+    plans: project.plans,
+    relevantFacts,
+    constraintFacts: project.facts,
+    summaries: project.summaries,
+    expectations: project.expectations,
+    recentChapters: project.chapters,
+    styleSamples: project.chapters
+      .filter(
+        (item) =>
+          item.number < chapter.number &&
+          styleSampleStatuses.has(item.status) &&
+          item.content,
+      )
+      .sort((left, right) => left.number - right.number)
+      .slice(-20)
+      .map((item) => item.content),
+  };
+}
+
+export function compileProjectChapterContext(
+  project: ProjectContextSource,
+  chapter: Chapter,
+  relevantFacts: readonly LedgerFact[] = project.facts,
+): ContextPackage {
+  return compileChapterContext(
+    buildProjectContextInput(project, chapter, relevantFacts),
+  );
 }
 
 export function compileChapterContext(input: ContextCompilerInput): ContextPackage {

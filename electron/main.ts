@@ -6,7 +6,6 @@ import type {
   Chapter,
   ChapterDraftStreamEvent,
   ChapterFactsExtractionEvent,
-  ContextPackage,
   MetricSnapshot,
   ProjectDetail,
 } from "../src/shared/types";
@@ -16,7 +15,7 @@ import { AiService, type AiCachePolicy } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
 import { readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
-import { compileChapterContext } from "../src/shared/context-compiler";
+import { compileProjectChapterContext } from "../src/shared/context-compiler";
 import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
 import {
   createChapterGenerationGuard,
@@ -72,7 +71,7 @@ function previewChapterBatch(
     project,
     settings,
     chapterId,
-    (chapter) => compileContext(project, chapter).estimatedTokens,
+    (chapter) => compileProjectChapterContext(project, chapter).estimatedTokens,
   );
 }
 
@@ -95,7 +94,7 @@ function startOneChapter(
   try {
     const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
     const generationGuard = createChapterGenerationGuard(chapter);
-    const task = ai.startDraftChapter(id, chapter, compileContext(project, chapter, facts), {
+    const task = ai.startDraftChapter(id, chapter, compileProjectChapterContext(project, chapter, facts), {
       retryContext: serializeChapterAiRetryContext("chapter", id, chapter),
       onStream,
       cachePolicy,
@@ -134,7 +133,7 @@ async function generateChapterBatchFrom(id: string, chapterId: string) {
       const draft = await ai.draftChapter(
         id,
         chapter,
-        compileContext(currentProject, chapter, facts),
+        compileProjectChapterContext(currentProject, chapter, facts),
         serializeChapterAiRetryContext("batch", id, chapter),
       );
       generated.push(database.saveGeneratedChapter(id, draft, generationGuard));
@@ -177,33 +176,6 @@ async function extractFinalizedChapterFacts(
       message: error instanceof Error ? error.message : String(error),
     };
   }
-}
-
-function compileContext(
-  project: ProjectDetail,
-  chapter: Chapter,
-  relevantFacts: ReadonlyArray<ProjectDetail["facts"][number]> = project.facts,
-): ContextPackage {
-  return compileChapterContext({
-    summary: project.summary,
-    contract: project.contract,
-    chapter,
-    plans: project.plans,
-    relevantFacts,
-    constraintFacts: project.facts,
-    summaries: project.summaries,
-    expectations: project.expectations,
-    recentChapters: project.chapters,
-    styleSamples: project.chapters
-      .filter((item) =>
-        item.number < chapter.number &&
-        ["已定稿", "待发布", "已发布"].includes(item.status) &&
-        item.content,
-      )
-      .sort((left, right) => left.number - right.number)
-      .slice(-20)
-      .map((item) => item.content),
-  });
 }
 
 function registerHandlers() {
@@ -297,7 +269,7 @@ function registerHandlers() {
     register: handle,
     database,
     ai,
-    compileContext,
+    compileContext: compileProjectChapterContext,
     generateChapterDraft: generateOneChapter,
     sendChapterDraftStream: (streamId, event) => {
       mainWindow?.webContents.send("studio:chapter-draft-stream", {
