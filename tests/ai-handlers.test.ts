@@ -202,6 +202,27 @@ function createDependencies(
   }));
   const logRetryFailure = vi.fn();
   const queueFinalizedFactExtraction = vi.fn();
+  const generateChapterDraft = vi.fn(
+    async (
+      _projectId: string,
+      _chapterId: string,
+      onStream?: (event: { type: "delta"; attempt: number; delta: string }) => void,
+    ) => {
+      onStream?.({ type: "delta", attempt: 1, delta: "生成片段" });
+      return chapter;
+    },
+  );
+  const sendChapterDraftStream = vi.fn();
+  const batchPreview = {
+    chapters: [{ id: chapter.id, number: chapter.number, title: chapter.title }],
+    inputTokens: 100,
+    outputTokens: 2_000,
+    estimatedCost: 0.01,
+    canRun: true,
+    blockingReason: null,
+  };
+  const previewChapterBatch = vi.fn(() => batchPreview);
+  const generateChapterBatch = vi.fn(async () => [chapter]);
   const dependencies = {
     register,
     database,
@@ -215,6 +236,10 @@ function createDependencies(
     compileContext: vi.fn(
       () => ({ estimatedTokens: 123 }) as ContextPackage,
     ),
+    generateChapterDraft,
+    sendChapterDraftStream,
+    previewChapterBatch,
+    generateChapterBatch,
     getApiKey: () => apiKey,
     saveApiKey,
     queueFinalizedFactExtraction,
@@ -227,6 +252,11 @@ function createDependencies(
     database,
     ai: dependencies.ai,
     compileContext: dependencies.compileContext,
+    generateChapterDraft,
+    sendChapterDraftStream,
+    previewChapterBatch,
+    generateChapterBatch,
+    batchPreview,
     saveApiKey,
     startChapterRetry,
     logRetryFailure,
@@ -245,15 +275,65 @@ describe("AI handlers", () => {
       "cancelAiJob",
       "compileContext",
       "extractChapterFacts",
+      "generateChapterBatch",
+      "generateChapterDraft",
       "generateConcepts",
       "generatePlanningDraft",
       "getAiSettings",
       "listAiJobs",
+      "previewChapterBatch",
       "retryAiJob",
       "reviewPlanning",
       "saveAiSettings",
       "transitionChapter",
     ]);
+  });
+
+  it("routes chapter generation streams and batch operations through runtime adapters", async () => {
+    const {
+      dependencies,
+      handlers,
+      generateChapterDraft,
+      sendChapterDraftStream,
+      previewChapterBatch,
+      generateChapterBatch,
+      batchPreview,
+    } = createDependencies();
+    registerAiHandlers(dependencies);
+
+    await expect(
+      handlers.get("generateChapterDraft")!(
+        "project-1",
+        chapter.id,
+        "stream-1",
+      ),
+    ).resolves.toBe(chapter);
+    expect(generateChapterDraft).toHaveBeenCalledWith(
+      "project-1",
+      chapter.id,
+      expect.any(Function),
+    );
+    expect(sendChapterDraftStream).toHaveBeenCalledWith("stream-1", {
+      type: "delta",
+      attempt: 1,
+      delta: "生成片段",
+    });
+
+    expect(
+      handlers.get("previewChapterBatch")!("project-1", chapter.id),
+    ).toBe(batchPreview);
+    expect(previewChapterBatch).toHaveBeenCalledWith(
+      planningProject,
+      { ...settings, hasApiKey: false },
+      chapter.id,
+    );
+    await expect(
+      handlers.get("generateChapterBatch")!("project-1", chapter.id),
+    ).resolves.toEqual([chapter]);
+    expect(generateChapterBatch).toHaveBeenCalledWith(
+      "project-1",
+      chapter.id,
+    );
   });
 
   it("returns chapter transitions immediately and queues finalized fact extraction", async () => {

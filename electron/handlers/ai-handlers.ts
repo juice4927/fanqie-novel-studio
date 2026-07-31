@@ -1,5 +1,7 @@
 import type {
+  BatchGenerationPreview,
   Chapter,
+  ChapterDraftStreamEvent,
   ContextPackage,
   PlanningGenerationResult,
   PlanningRepairInput,
@@ -57,6 +59,24 @@ export interface AiHandlerDependencies {
     chapter: Chapter,
     relevantFacts?: ReadonlyArray<ProjectDetail["facts"][number]>,
   ) => ContextPackage;
+  generateChapterDraft: (
+    projectId: string,
+    chapterId: string,
+    onStream?: (event: ChapterDraftStreamEvent) => void,
+  ) => Promise<Chapter>;
+  sendChapterDraftStream: (
+    streamId: string,
+    event: ChapterDraftStreamEvent,
+  ) => void;
+  previewChapterBatch: (
+    project: ProjectDetail,
+    settings: ReturnType<WorkspaceDatabase["getAiSettings"]>,
+    chapterId: string,
+  ) => BatchGenerationPreview;
+  generateChapterBatch: (
+    projectId: string,
+    chapterId: string,
+  ) => Promise<Chapter[]>;
   getApiKey: () => string;
   saveApiKey: (apiKey: string) => Promise<void>;
   queueFinalizedFactExtraction: (
@@ -75,12 +95,35 @@ export function registerAiHandlers({
   database,
   ai,
   compileContext,
+  generateChapterDraft,
+  sendChapterDraftStream,
+  previewChapterBatch,
+  generateChapterBatch,
   getApiKey,
   saveApiKey,
   queueFinalizedFactExtraction,
   startChapterRetry,
   logRetryFailure,
 }: AiHandlerDependencies): void {
+  register("generateChapterDraft", (id, chapterId, streamId) =>
+    generateChapterDraft(
+      id,
+      chapterId,
+      streamId
+        ? (event) => sendChapterDraftStream(streamId, event)
+        : undefined,
+    ),
+  );
+  register("previewChapterBatch", (id, chapterId) =>
+    previewChapterBatch(
+      database.getProject(id),
+      database.getAiSettings(),
+      chapterId,
+    ),
+  );
+  register("generateChapterBatch", (id, chapterId) =>
+    generateChapterBatch(id, chapterId),
+  );
   register("transitionChapter", (id, chapterId, status) => {
     const saved = database.transitionChapter(id, chapterId, status);
     if (status !== "已定稿") {

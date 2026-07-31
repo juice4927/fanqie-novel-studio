@@ -379,6 +379,15 @@ function registerHandlers() {
     database,
     ai,
     compileContext,
+    generateChapterDraft: generateOneChapter,
+    sendChapterDraftStream: (streamId, event) => {
+      mainWindow?.webContents.send("studio:chapter-draft-stream", {
+        streamId,
+        event,
+      });
+    },
+    previewChapterBatch,
+    generateChapterBatch: generateChapterBatchFrom,
     getApiKey,
     saveApiKey: async (apiKey) => {
       await writeApiCredential(apiKey);
@@ -535,17 +544,6 @@ function registerHandlers() {
       activeGenerationProjects.delete(id);
     }
   });
-  handle("generateChapterDraft", (id, chapterId, streamId) => generateOneChapter(id, chapterId, streamId
-    ? (event) => mainWindow?.webContents.send("studio:chapter-draft-stream", { streamId, event })
-    : undefined));
-  handle("previewChapterBatch", (id, chapterId) =>
-    previewChapterBatch(
-      database.getProject(id),
-      database.getAiSettings(),
-      chapterId,
-    ),
-  );
-  handle("generateChapterBatch", generateChapterBatchFrom);
   handle("exportProject", (id, format) => exportProject(id, format));
 }
 
