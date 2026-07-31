@@ -34,7 +34,13 @@ import {
   findApprovedContractChange,
   prepareContractUpdate,
 } from "../shared/contract-service";
+import {
+  decideChangeRequest as decideChangeRequestDraft,
+  prepareChangeRequest,
+  resolveChangeTargetVersion,
+} from "../shared/change-request-service";
 import { prepareFactSave } from "../shared/fact-service";
+import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { compileChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
@@ -48,6 +54,7 @@ import {
 
 interface DemoState {
   projects: ProjectDetail[];
+  planVersions: Record<string, number>;
   rankings: RankingSnapshot[];
   books: ResearchBook[];
   insights: InsightPack[];
@@ -235,6 +242,7 @@ function seedProject(): ProjectDetail {
 function seed(): DemoState {
   return {
     projects: [seedProject()],
+    planVersions: { "plan-1": 2, "plan-2": 2 },
     rankings: [
       {
         id: "demo-ranking",
@@ -331,7 +339,14 @@ function seed(): DemoState {
 function load(): DemoState {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as DemoState) : seed();
+    const state = raw ? (JSON.parse(raw) as DemoState) : seed();
+    state.planVersions ??= {};
+    for (const project of state.projects) {
+      for (const plan of project.plans) {
+        state.planVersions[plan.id] ??= plan.status === "已批准" ? 2 : 1;
+      }
+    }
+    return state;
   } catch {
     return seed();
   }
@@ -351,6 +366,10 @@ function getProject(state: DemoState, projectId: string) {
   });
   project.summary = summary(project);
   return project;
+}
+
+function browserPlanVersion(state: DemoState, plan: PlanNode) {
+  return state.planVersions[plan.id] ?? (plan.status === "已批准" ? 2 : 1);
 }
 
 function compileBrowserContext(
@@ -553,6 +572,7 @@ export function createBrowserApi(): AppApi {
       if (project.summary.title !== confirmationTitle.trim())
         throw new Error("输入的书名与作品名不一致");
       state.projects = state.projects.filter((item) => item.summary.id !== projectId);
+      for (const plan of project.plans) delete state.planVersions[plan.id];
       persist();
       return "浏览器预览作品已从 localStorage 移除";
     },
@@ -607,45 +627,37 @@ export function createBrowserApi(): AppApi {
       const project = getProject(state, projectId);
       const index = project.plans.findIndex((item) => item.id === plan.id);
       const previous = index >= 0 ? project.plans[index] : undefined;
-      const next = {
-        ...plan,
-        id: plan.id || id(),
-        status:
-          previous?.status ?? (plan.status === "待审批" ? "待审批" : "草稿"),
-      } as PlanNode;
-      if (
-        previous?.status === "已批准" &&
-        JSON.stringify(previous) !== JSON.stringify(next)
-      ) {
-        const version =
-          project.changes.filter(
-            (item) =>
-              item.targetKind === "规划" &&
-              item.targetId === previous.id &&
-              item.status === "已应用",
-          ).length + 1;
-        const approval = project.changes.find(
-          (item) =>
-            item.status === "已批准" &&
-            item.targetKind === "规划" &&
-            item.targetId === previous.id &&
-            item.baseVersion === version,
+      const prepared = preparePlanSave(previous, plan, plan.id || id());
+      if (prepared.noOp) return previous!;
+      if (prepared.protectedEdit) {
+        const approval = findMatchingApproval(
+          project.changes,
+          "规划",
+          previous!.id,
+          browserPlanVersion(state, previous!),
         );
         if (!approval)
           throw new Error("已批准规划只能通过匹配的已批准变更单修改");
         approval.status = "已应用";
-        next.status = "待审批";
       }
+      const next = prepared.plan;
       if (index >= 0) project.plans[index] = next;
       else project.plans.push(next);
+      state.planVersions[next.id] = previous
+        ? browserPlanVersion(state, previous) + 1
+        : 1;
+      project.summary.updatedAt = now();
       persist();
       return next;
     },
     async approvePlan(projectId, planId) {
       const project = getProject(state, projectId);
-      if (!project.contract.approved) throw new Error("必须先审批创作契约");
-      const plan = project.plans.find((item) => item.id === planId);
-      if (plan) plan.status = "已批准";
+      const planIndex = project.plans.findIndex((item) => item.id === planId);
+      const plan = project.plans[planIndex];
+      const approved = approvePlanDraft(plan, project.contract);
+      project.plans[planIndex] = approved;
+      state.planVersions[planId] = browserPlanVersion(state, approved) + 1;
+      project.summary.updatedAt = now();
       persist();
     },
     async generatePlanningDraft() {
@@ -875,35 +887,36 @@ export function createBrowserApi(): AppApi {
     },
     async saveChangeRequest(projectId, change: ChangeRequest) {
       const project = getProject(state, projectId);
-      const baseVersion =
-        change.targetKind === "创作契约"
-          ? project.contract.version
-          : change.targetKind === "章节"
-            ? project.chapters.find((item) => item.id === change.targetId)
-                ?.revision
-            : project.changes.filter(
-                (item) =>
-                  item.targetKind === "规划" &&
-                  item.targetId === change.targetId &&
-                  item.status === "已应用",
-              ).length + 1;
-      if (!baseVersion) throw new Error("变更目标不存在");
-      const next = {
-        ...change,
+      const baseVersion = resolveChangeTargetVersion(
+        change.targetKind,
+        change.targetId,
+        {
+          contractVersion: project.contract.version,
+          planVersion: (targetId) => {
+            const plan = project.plans.find((item) => item.id === targetId);
+            return plan ? browserPlanVersion(state, plan) : undefined;
+          },
+          chapterVersion: (targetId) =>
+            project.chapters.find((item) => item.id === targetId)?.revision,
+        },
+      );
+      const next = prepareChangeRequest(change, {
         id: id(),
         baseVersion,
-        status: "待审批" as const,
         createdAt: now(),
-      };
+      });
       project.changes.unshift(next);
       persist();
       return next;
     },
     async decideChangeRequest(projectId, changeId, decision) {
-      const change = getProject(state, projectId).changes.find(
-        (item) => item.id === changeId,
+      const project = getProject(state, projectId);
+      const changeIndex = project.changes.findIndex((item) => item.id === changeId);
+      const next = decideChangeRequestDraft(
+        project.changes[changeIndex],
+        decision,
       );
-      if (change) change.status = decision === "批准" ? "已批准" : "已拒绝";
+      project.changes[changeIndex] = next;
       persist();
     },
     async saveSchedule(projectId, item: ScheduleItem) {

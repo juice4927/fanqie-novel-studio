@@ -602,4 +602,30 @@ describe("approval gates", () => {
     database.saveContract(project.id, { ...database.getProject(project.id).contract, premise: "主角进入陌生城池", readerPromise: "持续探索真相", ending: "主角作出最终选择" });
     expect(() => database.approveContract(project.id)).toThrow(/开局机制.*成长载体.*核心回报.*长篇发动机/);
   });
+
+  it("binds planning changes to the current persisted plan version", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "规划版本", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    database.saveContract(project.id, {
+      ...database.getProject(project.id).contract,
+      premise: "主角追查异常事故", readerPromise: "持续调查并兑现线索", ending: "公开真相", ...completeNarrativeEngine,
+    });
+    database.approveContract(project.id);
+    const plan = database.savePlan(project.id, {
+      id: "", kind: "分卷", title: "第一卷", ordinal: 1, goal: "建立规则", conflict: "资源有限",
+      outcome: "完成阶段目标", targetWords: 150000, status: "待审批", parentId: null,
+    });
+    database.approvePlan(project.id, plan.id);
+    const request = database.saveChangeRequest(project.id, {
+      id: "", targetKind: "规划", targetId: plan.id, baseVersion: 0, title: "调整阶段目标", reason: "复盘",
+      beforeValue: plan.goal, afterValue: "建立并验证规则", impact: "第一卷", rollback: "恢复旧目标",
+      status: "待审批", createdAt: now(),
+    });
+    expect(request.baseVersion).toBe(2);
+    database.decideChangeRequest(project.id, request.id, "批准");
+    expect(database.savePlan(project.id, { ...plan, goal: "建立并验证规则" }).status).toBe("待审批");
+    expect(database.saveChangeRequest(project.id, { ...request, id: "" }).baseVersion).toBe(3);
+    expect(() => database.saveChangeRequest(project.id, { ...request, targetId: "missing" })).toThrow("变更目标规划不存在");
+    expect(() => database.decideChangeRequest(project.id, "missing", "批准")).toThrow("变更单不存在");
+  });
 });

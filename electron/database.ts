@@ -38,7 +38,13 @@ import {
   approveContractDraft,
   prepareContractUpdate,
 } from "../src/shared/contract-service";
+import {
+  decideChangeRequest as decideChangeRequestDraft,
+  prepareChangeRequest,
+  resolveChangeTargetVersion,
+} from "../src/shared/change-request-service";
 import { prepareFactSave } from "../src/shared/fact-service";
+import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
 import {
   cosineSimilarity,
   HASH_BIGRAM_PROVIDER_ID,
@@ -654,30 +660,24 @@ export class WorkspaceDatabase {
     const previous = plan.id
       ? this.getRecord<PlanNode>(db, "plans", plan.id)
       : undefined;
-    const next = {
-      ...plan,
-      id: plan.id || randomUUID(),
-      status:
-        previous?.status ?? (plan.status === "待审批" ? "待审批" : "草稿"),
-    };
-    const changed =
-      previous &&
-      JSON.stringify({ ...next, status: undefined }) !==
-        JSON.stringify({ ...previous, status: undefined });
+    const prepared = preparePlanSave(
+      previous,
+      plan,
+      plan.id || randomUUID(),
+    );
+    if (prepared.noOp) return previous!;
     if (
-      previous?.status === "已批准" &&
-      changed &&
+      prepared.protectedEdit &&
       !this.consumeApprovedChange(
         db,
         "规划",
-        previous.id,
-        this.entityVersion(db, "plans", previous.id),
+        previous!.id,
+        this.entityVersion(db, "plans", previous!.id),
       )
     ) {
       throw new Error("已批准规划只能通过已批准的改纲变更单修改");
     }
-    if (previous?.status === "已批准" && !changed) return previous;
-    if (previous?.status === "已批准" && changed) next.status = "待审批";
+    const next = prepared.plan;
     this.saveRecord(db, "plans", next.id, next);
     this.touchProject(id);
     return next;
@@ -686,10 +686,8 @@ export class WorkspaceDatabase {
   approvePlan(id: string, planId: string) {
     const db = this.projectDb(id);
     const plan = this.getRecord<PlanNode>(db, "plans", planId);
-    if (!plan) throw new Error("规划节点不存在");
     const contract = this.getState<StoryContract>(db, "contract");
-    if (!contract.approved) throw new Error("必须先审批创作契约");
-    this.saveRecord(db, "plans", planId, { ...plan, status: "已批准" });
+    this.saveRecord(db, "plans", planId, approvePlanDraft(plan, contract));
     this.touchProject(id);
   }
 
@@ -1006,18 +1004,24 @@ export class WorkspaceDatabase {
 
   saveChangeRequest(id: string, change: ChangeRequest) {
     const db = this.projectDb(id);
-    const baseVersion = this.targetVersion(
-      db,
+    const baseVersion = resolveChangeTargetVersion(
       change.targetKind,
       change.targetId,
+      {
+        contractVersion: this.getState<StoryContract>(db, "contract").version,
+        planVersion: (targetId) =>
+          this.getRecord<PlanNode>(db, "plans", targetId)
+            ? this.entityVersion(db, "plans", targetId)
+            : undefined,
+        chapterVersion: (targetId) =>
+          this.projects.getChapter(db, targetId)?.revision,
+      },
     );
-    const next = {
-      ...change,
+    const next = prepareChangeRequest(change, {
       id: randomUUID(),
       baseVersion,
       createdAt: now(),
-      status: "待审批" as const,
-    };
+    });
     this.saveRecord(db, "changes", next.id, next);
     return next;
   }
@@ -1025,11 +1029,12 @@ export class WorkspaceDatabase {
   decideChangeRequest(id: string, changeId: string, decision: "批准" | "拒绝") {
     const db = this.projectDb(id);
     const change = this.getRecord<ChangeRequest>(db, "changes", changeId);
-    if (!change) throw new Error("变更单不存在");
-    this.saveRecord(db, "changes", changeId, {
-      ...change,
-      status: decision === "批准" ? "已批准" : "已拒绝",
-    });
+    this.saveRecord(
+      db,
+      "changes",
+      changeId,
+      decideChangeRequestDraft(change, decision),
+    );
   }
 
   saveSchedule(id: string, item: ScheduleItem) {
@@ -1469,25 +1474,6 @@ export class WorkspaceDatabase {
       )
       .get(collection, entityId) as { revision: number | null };
     return (row.revision ?? 0) + 1;
-  }
-
-  private targetVersion(
-    db: DatabaseSync,
-    targetKind: ChangeRequest["targetKind"],
-    targetId: string,
-  ) {
-    if (targetKind === "创作契约") {
-      if (targetId !== "contract") throw new Error("创作契约目标无效");
-      return this.getState<StoryContract>(db, "contract").version;
-    }
-    if (targetKind === "规划") {
-      if (!this.getRecord<PlanNode>(db, "plans", targetId))
-        throw new Error("变更目标规划不存在");
-      return this.entityVersion(db, "plans", targetId);
-    }
-    const chapter = this.projects.getChapter(db, targetId);
-    if (!chapter) throw new Error("变更目标章节不存在");
-    return chapter.revision;
   }
 
   projectPath(id: string) {
