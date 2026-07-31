@@ -1,4 +1,8 @@
-import type { Chapter } from "../../src/shared/types";
+import type {
+  Chapter,
+  PlanningGenerationResult,
+  PlanningRepairInput,
+} from "../../src/shared/types";
 import {
   assertChapterRetrySnapshot,
   validateChapterAiRetrySource,
@@ -13,8 +17,11 @@ type AiDatabase = Pick<
   | "getAiJobRetryContext"
   | "getAiSettings"
   | "getChapter"
+  | "getProject"
   | "listAiJobs"
+  | "saveChapter"
   | "saveAiSettings"
+  | "savePlan"
 >;
 
 interface RetryFailureDetails {
@@ -28,7 +35,7 @@ interface RetryFailureDetails {
 export interface AiHandlerDependencies {
   register: RegisterHandler;
   database: AiDatabase;
-  ai: Pick<AiService, "cancelJob">;
+  ai: Pick<AiService, "cancelJob" | "generatePlanning" | "reviewPlanning">;
   getApiKey: () => string;
   saveApiKey: (apiKey: string) => Promise<void>;
   startChapterRetry: (
@@ -47,6 +54,139 @@ export function registerAiHandlers({
   startChapterRetry,
   logRetryFailure,
 }: AiHandlerDependencies): void {
+  register("generatePlanningDraft", async (id, input) => {
+    const project = database.getProject(id);
+    if (!project.contract.approved) throw new Error("必须先审批创作契约");
+    if (
+      input.mode === "全书结构" &&
+      project.plans.some(
+        (plan) => plan.kind === "宏观阶段" || plan.kind === "分卷",
+      )
+    ) {
+      throw new Error("当前已有宏观阶段或分卷；为避免重复，AI 不会覆盖现有结构");
+    }
+    const fromChapter =
+      input.fromChapter ??
+      Math.max(
+        1,
+        ...project.chapters.map((chapter) => chapter.number + 1),
+      );
+    const count = input.mode === "后续章纲" ? input.chapterCount ?? 10 : 0;
+    if (
+      input.mode === "后续章纲" &&
+      project.chapters.some(
+        (chapter) =>
+          chapter.number >= fromChapter &&
+          chapter.number < fromChapter + count,
+      )
+    ) {
+      throw new Error(
+        `第${fromChapter}–${fromChapter + count - 1}章范围内已有章节，AI 不会覆盖`,
+      );
+    }
+    const savedPlans: PlanningGenerationResult["plans"] = [];
+    const savedChapters: PlanningGenerationResult["chapters"] = [];
+    try {
+      const generated = await ai.generatePlanning(
+        project,
+        { ...input, fromChapter },
+        (batch) => {
+          const latest = database.getProject(id);
+          if (
+            batch.chapters.some((chapter) =>
+              latest.chapters.some(
+                (existing) => existing.number === chapter.number,
+              ),
+            )
+          ) {
+            throw new Error(
+              "生成期间章节范围发生变化，本批结果未保存，请重新生成",
+            );
+          }
+          savedPlans.push(
+            ...batch.plans.map((plan) => database.savePlan(id, plan)),
+          );
+          savedChapters.push(
+            ...batch.chapters.map((chapter) =>
+              database.saveChapter(id, chapter),
+            ),
+          );
+        },
+      );
+      if (!generated.chapters.length) {
+        savedPlans.push(
+          ...generated.plans.map((plan) => database.savePlan(id, plan)),
+        );
+      }
+      return {
+        ...generated,
+        plans: savedPlans,
+        chapters: savedChapters,
+      };
+    } catch (error) {
+      if (!savedChapters.length) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `已保存第${savedChapters[0].number}–${savedChapters.at(-1)!.number}章；后续批次生成失败：${message}`,
+      );
+    }
+  });
+  register("reviewPlanning", (id, input) =>
+    ai.reviewPlanning(database.getProject(id), input),
+  );
+  register("applyPlanningRepairs", (id, input: PlanningRepairInput) => {
+    const project = database.getProject(id);
+    const plansById = new Map(project.plans.map((plan) => [plan.id, plan]));
+    const chaptersById = new Map(
+      project.chapters.map((chapter) => [chapter.id, chapter]),
+    );
+    if (!input.plans.length && !input.chapters.length) {
+      throw new Error("没有可应用的规划修复");
+    }
+    if (
+      new Set(input.plans.map((item) => item.targetId)).size !==
+        input.plans.length ||
+      new Set(input.chapters.map((item) => item.targetId)).size !==
+        input.chapters.length
+    ) {
+      throw new Error("修复提案包含重复目标");
+    }
+    for (const repair of input.plans) {
+      const current = plansById.get(repair.targetId);
+      if (!current) throw new Error(`规划修复目标不存在：${repair.targetId}`);
+      if (current.status === "已批准") {
+        throw new Error(
+          `规划“${current.title}”已经批准，需先建立并批准改纲变更单`,
+        );
+      }
+    }
+    for (const repair of input.chapters) {
+      const current = chaptersById.get(repair.targetId);
+      if (!current) throw new Error(`章节修复目标不存在：${repair.targetId}`);
+      if (["已定稿", "待发布", "已发布"].includes(current.status)) {
+        throw new Error(
+          `第${current.number}章已受保护，需先建立并批准章节变更单`,
+        );
+      }
+    }
+    const appliedPlanIds = input.plans.map(
+      (repair) =>
+        database.savePlan(id, {
+          ...plansById.get(repair.targetId)!,
+          ...repair.after,
+        }).id,
+    );
+    const appliedChapterIds = input.chapters.map((repair) => {
+      const definedAfter = Object.fromEntries(
+        Object.entries(repair.after).filter(([, value]) => value !== undefined),
+      );
+      return database.saveChapter(id, {
+        ...chaptersById.get(repair.targetId)!,
+        ...definedAfter,
+      }).id;
+    });
+    return { appliedPlanIds, appliedChapterIds };
+  });
   register("getAiSettings", () => ({
     ...database.getAiSettings(),
     hasApiKey: Boolean(getApiKey()),

@@ -9,6 +9,8 @@ import type {
   AiJobRecord,
   AiSettings,
   Chapter,
+  PlanNode,
+  ProjectDetail,
 } from "../src/shared/types";
 
 const chapter = {
@@ -60,6 +62,29 @@ const settings: Omit<AiSettings, "hasApiKey"> = {
   longTaskTimeoutMinutes: 5,
 };
 
+const plan = {
+  id: "plan-1",
+  kind: "粗纲",
+  title: "旧粗纲",
+  ordinal: 1,
+  goal: "旧目标",
+  conflict: "旧冲突",
+  outcome: "旧结果",
+  targetWords: 20_000,
+  status: "草稿",
+  parentId: null,
+} satisfies PlanNode;
+
+const planningProject = {
+  summary: {
+    id: "project-1",
+    title: "旧城回声",
+  },
+  contract: { approved: true },
+  plans: [plan],
+  chapters: [chapter],
+} as unknown as ProjectDetail;
+
 function createDependencies(
   completion: Promise<Chapter> = new Promise(() => {}),
 ) {
@@ -80,8 +105,11 @@ function createDependencies(
     ),
     getAiSettings: vi.fn(() => ({ ...settings, hasApiKey: false })),
     getChapter: vi.fn(() => chapter),
+    getProject: vi.fn(() => planningProject),
     listAiJobs: vi.fn(() => [sourceJob]),
+    saveChapter: vi.fn((_id, next: Chapter) => next),
     saveAiSettings: vi.fn((next) => ({ ...next, hasApiKey: false })),
+    savePlan: vi.fn((_id, next: PlanNode) => next),
   };
   const saveApiKey = vi.fn(async (next: string) => {
     apiKey = next;
@@ -95,7 +123,11 @@ function createDependencies(
   const dependencies = {
     register,
     database,
-    ai: { cancelJob: vi.fn(() => true) },
+    ai: {
+      cancelJob: vi.fn(() => true),
+      generatePlanning: vi.fn(),
+      reviewPlanning: vi.fn(),
+    },
     getApiKey: () => apiKey,
     saveApiKey,
     startChapterRetry,
@@ -105,6 +137,7 @@ function createDependencies(
     dependencies,
     handlers,
     database,
+    ai: dependencies.ai,
     saveApiKey,
     startChapterRetry,
     logRetryFailure,
@@ -113,17 +146,130 @@ function createDependencies(
 }
 
 describe("AI handlers", () => {
-  it("registers the settings and job lifecycle surface", () => {
+  it("registers the planning, settings, and job lifecycle surface", () => {
     const { dependencies, handlers } = createDependencies();
     registerAiHandlers(dependencies);
 
     expect([...handlers.keys()].sort()).toEqual([
+      "applyPlanningRepairs",
       "cancelAiJob",
+      "generatePlanningDraft",
       "getAiSettings",
       "listAiJobs",
       "retryAiJob",
+      "reviewPlanning",
       "saveAiSettings",
     ]);
+  });
+
+  it("persists streamed planning batches and returns their saved records", async () => {
+    const { dependencies, handlers, database, ai } = createDependencies();
+    registerAiHandlers(dependencies);
+    const generatedChapter = {
+      ...chapter,
+      id: "chapter-3",
+      number: 3,
+      title: "新章纲",
+    };
+    const generatedPlan = { ...plan, id: "plan-3", title: "新粗纲" };
+    ai.generatePlanning.mockImplementation(
+      async (_project, input, onChapterBatch) => {
+        expect(input).toEqual({
+          mode: "后续章纲",
+          chapterCount: 10,
+          fromChapter: 3,
+        });
+        const batch = {
+          startChapter: 3,
+          plans: [generatedPlan],
+          chapters: [generatedChapter],
+        };
+        await onChapterBatch?.(batch);
+        return batch;
+      },
+    );
+
+    const result = await handlers.get("generatePlanningDraft")!(
+      "project-1",
+      { mode: "后续章纲", chapterCount: 10 },
+    );
+
+    expect(database.savePlan).toHaveBeenCalledWith("project-1", generatedPlan);
+    expect(database.saveChapter).toHaveBeenCalledWith(
+      "project-1",
+      generatedChapter,
+    );
+    expect(result).toEqual({
+      startChapter: 3,
+      plans: [generatedPlan],
+      chapters: [generatedChapter],
+    });
+  });
+
+  it("rejects a planning range that would overwrite an existing chapter", async () => {
+    const { dependencies, handlers, ai } = createDependencies();
+    registerAiHandlers(dependencies);
+
+    await expect(
+      handlers.get("generatePlanningDraft")!("project-1", {
+        mode: "后续章纲",
+        fromChapter: 2,
+        chapterCount: 10,
+      }),
+    ).rejects.toThrow("第2–11章范围内已有章节");
+    expect(ai.generatePlanning).not.toHaveBeenCalled();
+  });
+
+  it("applies planning repairs without replacing fields with undefined", () => {
+    const { dependencies, handlers, database } = createDependencies();
+    registerAiHandlers(dependencies);
+
+    const result = handlers.get("applyPlanningRepairs")!("project-1", {
+      plans: [
+        {
+          targetId: plan.id,
+          after: {
+            title: "新粗纲",
+            goal: "新目标",
+            conflict: "新冲突",
+            outcome: "新结果",
+            targetWords: 25_000,
+          },
+        },
+      ],
+      chapters: [
+        {
+          targetId: chapter.id,
+          after: {
+            title: "新标题",
+            outline: "新章纲",
+            chapterFunction: undefined,
+            targetWords: 2_500,
+            chapterPromise: "承诺",
+            expectedPayoff: "回报",
+            crisis: "危机",
+            endingExpectation: "期待",
+            expectationTargetChapter: 5,
+          },
+        },
+      ],
+    });
+
+    expect(database.saveChapter).toHaveBeenCalledWith(
+      "project-1",
+      expect.objectContaining({
+        id: chapter.id,
+        title: "新标题",
+        batchMode: chapter.batchMode,
+      }),
+    );
+    expect(database.saveChapter.mock.calls[0][1]).not.toHaveProperty(
+      "chapterFunction",
+    );
+    expect(result).toEqual({
+      appliedPlanIds: [plan.id],
+      appliedChapterIds: [chapter.id],
+    });
   });
 
   it("persists a supplied credential before reporting masked settings", async () => {
