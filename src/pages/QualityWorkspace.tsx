@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Archive,
   ArrowLeft,
   BookMarked,
   BookOpenCheck,
   BrainCircuit,
   CalendarDays,
   Check,
+  CheckCircle2,
   ChevronRight,
   CircleDot,
   ClipboardCheck,
@@ -21,6 +23,7 @@ import {
   Save,
   Search,
   SearchCheck,
+  SlidersHorizontal,
   Send,
   ShieldCheck,
   Sparkles,
@@ -42,6 +45,7 @@ import type {
   PlanningGenerationInput,
   ProjectDetail,
   ProjectStatus,
+  QualityIssue,
   ScheduleItem,
   StoryContract,
   ReviewSuggestion,
@@ -86,7 +90,10 @@ function UploadIcon() { return <FileOutput size={16} />; }
 
 export function QualityPage({ project, api, reload, notify }: CommonProjectProps) {
   const [changeModal, setChangeModal] = useState(false);
-  const [reviewChapterId, setReviewChapterId] = useState("all");
+  const [reviewChapterId, setReviewChapterId] = useState("");
+  const [qualityView, setQualityView] = useState<"审稿队列" | "问题记录" | "改纲变更">("审稿队列");
+  const [issueScope, setIssueScope] = useState<"待处理" | "全部">("待处理");
+  const [issueSeverity, setIssueSeverity] = useState<"全部" | "硬性" | "警告" | "建议">("全部");
   const [chapterAction, setChapterAction] = useState<{ id: string; kind: "质检" | "修订" } | null>(null);
   const [change, setChange] = useState<ChangeRequest>({
     id: "",
@@ -174,161 +181,119 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
       chapter,
       issues: project.issues.filter((issue) => issue.chapterId === chapter.id && issue.status === "待处理"),
     }));
-  const displayedIssues = project.issues.filter((issue) => reviewChapterId === "all" || issue.chapterId === reviewChapterId);
+  const reviewQueueKey = reviewQueue.map(({ chapter }) => chapter.id).join("|");
+  useEffect(() => {
+    if (!reviewQueue.length) {
+      setReviewChapterId("");
+      return;
+    }
+    if (!reviewQueue.some(({ chapter }) => chapter.id === reviewChapterId)) {
+      setReviewChapterId(reviewQueue[0].chapter.id);
+    }
+  }, [reviewChapterId, reviewQueueKey]);
+  const selectedReview = reviewQueue.find(({ chapter }) => chapter.id === reviewChapterId) ?? reviewQueue[0];
+  const pendingIssues = project.issues.filter((issue) => issue.status === "待处理");
+  const hardIssueCount = pendingIssues.filter((issue) => issue.severity === "硬性").length;
+  const displayedIssues = project.issues.filter((issue) => {
+    const chapterMatches = qualityView === "问题记录" || issue.chapterId === selectedReview?.chapter.id;
+    const scopeMatches = issueScope === "全部" || issue.status === "待处理";
+    const severityMatches = issueSeverity === "全部" || issue.severity === issueSeverity;
+    return chapterMatches && scopeMatches && severityMatches;
+  });
+  const runChapterAction = async (chapter: Chapter, kind: "质检" | "修订") => {
+    setChapterAction({ id: chapter.id, kind });
+    try {
+      if (kind === "质检") {
+        await api.runQualityCheck(project.summary.id, chapter.id);
+        notify(`第${chapter.number}章质检已更新`);
+      } else {
+        const revised = await api.reviseChapterFromQuality(project.summary.id, chapter.id);
+        notify(`第${chapter.number}章 AI 修订已保存为 v${revised.revision}，请重新质检`);
+      }
+      await reload();
+      setReviewChapterId(chapter.id);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setChapterAction(null);
+    }
+  };
+  const updateIssue = async (issueId: string, status: "已忽略" | "已解决") => {
+    try {
+      await api.resolveIssue(project.summary.id, issueId, status);
+      await reload();
+      notify(status === "已解决" ? "问题已标记解决" : "问题已忽略");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  };
   return (
-    <div className="page project-page">
-      <header className="page-header">
+    <div className="page project-page quality-page">
+      <header className="page-header quality-header">
         <div>
-          <p className="eyebrow">质量与变更门禁</p>
+          <p className="eyebrow">质量门禁</p>
           <h1>质检中心</h1>
-          <p>硬性问题会阻止定稿；改纲只能通过可回滚的变更单生效。</p>
+          <p>{hardIssueCount ? `${hardIssueCount} 项硬性问题正在阻止定稿` : "当前没有阻止定稿的硬性问题"}</p>
         </div>
-        <Button
-          icon={<GitPullRequestArrow size={16} />}
-          onClick={() => setChangeModal(true)}
-        >
-          提交改纲单
-        </Button>
+        <Button icon={<GitPullRequestArrow size={16} />} variant="secondary" onClick={() => setChangeModal(true)}>提交改纲单</Button>
       </header>
-      <section className="debt-strip">
-        {debts.map((debt) => (
-          <div key={debt.label}>
-            <strong>{debt.count}</strong>
-            <span>{debt.label}</span>
-          </div>
-        ))}
+
+      <section className="quality-summary" aria-label="质检概览">
+        <div className={hardIssueCount ? "danger" : "clear"}><AlertTriangle size={18} /><span><strong>{hardIssueCount}</strong>硬性问题</span></div>
+        <div><ClipboardCheck size={18} /><span><strong>{reviewQueue.length}</strong>待审章节</span></div>
+        <div><CircleDot size={18} /><span><strong>{pendingIssues.length}</strong>待处理问题</span></div>
+        <div><GitPullRequestArrow size={18} /><span><strong>{project.changes.filter((item) => item.status === "待审批").length}</strong>待审批变更</span></div>
       </section>
-      <section className="section-band review-queue-band">
-        <div className="section-heading">
-          <div><h2>章节审稿队列</h2><p>{reviewQueue.length} 章等待质检或问题处理</p></div>
-          <Select value={reviewChapterId} onChange={(event) => setReviewChapterId(event.target.value)} aria-label="筛选审稿章节">
-            <option value="all">全部问题</option>
-            {reviewQueue.map(({ chapter }) => <option key={chapter.id} value={chapter.id}>第{chapter.number}章 · {chapter.title}</option>)}
-          </Select>
-        </div>
-        {reviewQueue.length ? (
-          <div className="review-queue">
-            {reviewQueue.map(({ chapter, issues }) => (
-              <article key={chapter.id} className={reviewChapterId === chapter.id ? "active" : ""}>
-                <button type="button" onClick={() => setReviewChapterId(chapter.id)}>
-                  <span>第 {chapter.number} 章</span><strong>{chapter.title || "未命名章"}</strong>
-                  <small>{chapter.status} · 硬性 {issues.filter((issue) => issue.severity === "硬性").length} · 其他 {issues.filter((issue) => issue.severity !== "硬性").length}</small>
-                </button>
-                <div className="review-queue-actions">
-                  <Button variant="secondary" disabled={Boolean(chapterAction)} onClick={async () => {
-                    setChapterAction({ id: chapter.id, kind: "质检" });
-                    try { await api.runQualityCheck(project.summary.id, chapter.id); await reload(); setReviewChapterId(chapter.id); notify(`第${chapter.number}章质检已更新`); }
-                    catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
-                    finally { setChapterAction(null); }
-                  }}>{chapterAction?.id === chapter.id && chapterAction.kind === "质检" ? "质检中" : "运行质检"}</Button>
-                  {issues.length > 0 && !["已定稿", "待发布", "已发布"].includes(chapter.status) && (
-                    <Button icon={<Sparkles size={14} />} disabled={Boolean(chapterAction)} onClick={async () => {
-                      setChapterAction({ id: chapter.id, kind: "修订" });
-                      try {
-                        const revised = await api.reviseChapterFromQuality(project.summary.id, chapter.id);
-                        await reload();
-                        setReviewChapterId(chapter.id);
-                        notify(`第${chapter.number}章 AI 修订已保存为 v${revised.revision}，请重新质检`);
-                      } catch (error) {
-                        notify(error instanceof Error ? error.message : String(error), "error");
-                      } finally {
-                        setChapterAction(null);
-                      }
-                    }}>{chapterAction?.id === chapter.id && chapterAction.kind === "修订" ? "修订中" : "AI 修订"}</Button>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : <p className="muted-line">当前没有等待审稿的章节。</p>}
-      </section>
-      <section className="two-column quality-columns">
-        <div className="section-band">
-          <div className="section-heading">
-            <div>
-              <h2>质检问题</h2>
-              <p>
-                {
-                  project.issues.filter((issue) => issue.status === "待处理")
-                    .length
-                }{" "}
-                项待处理
-              </p>
+
+      <nav className="quality-tabs" aria-label="质检中心视图">
+        <button className={qualityView === "审稿队列" ? "active" : ""} onClick={() => setQualityView("审稿队列")}><ClipboardCheck size={16} />审稿队列<span>{reviewQueue.length}</span></button>
+        <button className={qualityView === "问题记录" ? "active" : ""} onClick={() => setQualityView("问题记录")}><Archive size={16} />问题记录<span>{project.issues.length}</span></button>
+        <button className={qualityView === "改纲变更" ? "active" : ""} onClick={() => setQualityView("改纲变更")}><GitPullRequestArrow size={16} />改纲变更<span>{project.changes.length}</span></button>
+      </nav>
+
+      {qualityView === "审稿队列" && (reviewQueue.length ? (
+        <section className="quality-workbench">
+          <aside className="quality-queue-panel">
+            <header><div><h2>待审章节</h2><p>按章节逐一处理</p></div><Badge tone={hardIssueCount ? "danger" : "neutral"}>{reviewQueue.length}</Badge></header>
+            <Select className="select quality-chapter-select" value={selectedReview?.chapter.id ?? ""} onChange={(event) => setReviewChapterId(event.target.value)} aria-label="筛选审稿章节">
+              {reviewQueue.map(({ chapter }) => <option key={chapter.id} value={chapter.id}>第{chapter.number}章 · {chapter.title || "未命名章"}</option>)}
+            </Select>
+            <div className="quality-queue-list">
+              {reviewQueue.map(({ chapter, issues }) => {
+                const hard = issues.filter((issue) => issue.severity === "硬性").length;
+                return <button type="button" key={chapter.id} className={selectedReview?.chapter.id === chapter.id ? "active" : ""} onClick={() => setReviewChapterId(chapter.id)}>
+                  <span className="chapter-number">{chapter.number}</span>
+                  <span className="chapter-label"><strong>{chapter.title || "未命名章"}</strong><small>{chapter.status} · {issues.length ? `${issues.length} 项待处理` : "等待质检"}</small></span>
+                  {hard > 0 ? <Badge tone="danger">{hard} 硬性</Badge> : <ChevronRight size={16} />}
+                </button>;
+              })}
             </div>
-          </div>
-          {displayedIssues.length ? (
-            <div className="issue-list">
-              {displayedIssues.map((issue) => (
-                <article
-                  key={issue.id}
-                  className={issue.status !== "待处理" ? "resolved" : ""}
-                >
-                  <div className="issue-marker">
-                    <AlertTriangle size={17} />
-                  </div>
-                  <div>
-                    <div>
-                      <Badge tone={issueTone(issue.severity)}>
-                        {issue.severity}
-                      </Badge>
-                      <strong>{issue.category}</strong>
-                    </div>
-                    <p>{issue.message}</p>
-                    {issue.evidence && (
-                      <blockquote>{issue.evidence}</blockquote>
-                    )}
-                    <small>{formatDate(issue.createdAt, true)}</small>
-                  </div>
-                  {issue.status === "待处理" ? (
-                    <div className="issue-actions">
-                      {issue.severity !== "硬性" && (
-                        <Button
-                          variant="ghost"
-                          onClick={async () => {
-                            await api.resolveIssue(
-                              project.summary.id,
-                              issue.id,
-                              "已忽略",
-                            );
-                            await reload();
-                          }}
-                        >
-                          忽略
-                        </Button>
-                      )}
-                      <Button
-                        variant="secondary"
-                        onClick={async () => {
-                          await api.resolveIssue(
-                            project.summary.id,
-                            issue.id,
-                            "已解决",
-                          );
-                          await reload();
-                        }}
-                      >
-                        标记解决
-                      </Button>
-                    </div>
-                  ) : (
-                    <Badge>{issue.status}</Badge>
-                  )}
-                </article>
-              ))}
+          </aside>
+
+          <div className="quality-review-panel">
+            <header className="quality-review-header">
+              <div><p>第 {selectedReview.chapter.number} 章 · {selectedReview.chapter.status}</p><h2>{selectedReview.chapter.title || "未命名章"}</h2><span>{selectedReview.chapter.wordCount.toLocaleString()} 字 · 修订 v{selectedReview.chapter.revision}</span></div>
+              <div className="quality-review-actions">
+                <Button variant="secondary" disabled={Boolean(chapterAction)} onClick={() => runChapterAction(selectedReview.chapter, "质检")}>{chapterAction?.kind === "质检" ? <><LoaderCircle className="spin" size={15} />质检中</> : <><SearchCheck size={15} />重新质检</>}</Button>
+                {selectedReview.issues.length > 0 && !["已定稿", "待发布", "已发布"].includes(selectedReview.chapter.status) && <Button disabled={Boolean(chapterAction)} onClick={() => runChapterAction(selectedReview.chapter, "修订")}>{chapterAction?.kind === "修订" ? <><LoaderCircle className="spin" size={15} />修订中</> : <><Sparkles size={15} />AI 修订</>}</Button>}
+              </div>
+            </header>
+            <div className="issue-toolbar">
+              <div><Segmented options={["待处理", "全部"] as const} value={issueScope} onChange={setIssueScope} /></div>
+              <Select value={issueSeverity} onChange={(event) => setIssueSeverity(event.target.value as typeof issueSeverity)} aria-label="筛选问题级别"><option>全部</option><option>硬性</option><option>警告</option><option>建议</option></Select>
             </div>
-          ) : (
-            <p className="muted-line">
-              还没有质检记录，请在写作台选择章节运行质检。
-            </p>
-          )}
-        </div>
-        <div className="section-band">
-          <div className="section-heading">
-            <div>
-              <h2>改纲变更单</h2>
-              <p>批准只改变状态，不会静默改写内容。</p>
-            </div>
+            <IssueList issues={displayedIssues} onUpdate={updateIssue} emptyMessage={issueScope === "待处理" ? "这一章没有待处理问题" : "这一章还没有质检记录"} />
           </div>
+        </section>
+      ) : <EmptyState icon={<CheckCircle2 size={24} />} title="审稿队列已清空" description="当前没有等待质检或问题处理的章节。" />)}
+
+      {qualityView === "问题记录" && <section className="section-band quality-records">
+        <div className="section-heading"><div><h2>问题记录</h2><p>查看跨章节问题与处理结果</p></div><div className="issue-record-filters"><Segmented options={["待处理", "全部"] as const} value={issueScope} onChange={setIssueScope} /><Select value={issueSeverity} onChange={(event) => setIssueSeverity(event.target.value as typeof issueSeverity)} aria-label="筛选问题级别"><option>全部</option><option>硬性</option><option>警告</option><option>建议</option></Select></div></div>
+        <IssueList issues={displayedIssues} onUpdate={updateIssue} emptyMessage="没有符合筛选条件的问题" showChapter chapters={project.chapters} />
+      </section>}
+
+      {qualityView === "改纲变更" && <section className="section-band quality-changes">
+        <div className="section-heading"><div><h2>改纲变更单</h2><p>批准只改变状态，不会静默改写内容。</p></div><Button icon={<Plus size={15} />} onClick={() => setChangeModal(true)}>提交改纲单</Button></div>
           {project.changes.length ? (
             <div className="change-list">
               {project.changes.map((item) => (
@@ -393,8 +358,9 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
           ) : (
             <p className="muted-line">没有待审改纲单</p>
           )}
-        </div>
-      </section>
+        </section>}
+
+      <details className="quality-debts"><summary><span><SlidersHorizontal size={16} />长期质量信号</span><small>{debts.reduce((sum, debt) => sum + debt.count, 0)} 个信号</small></summary><div className="debt-strip">{debts.map((debt) => <div key={debt.label}><strong>{debt.count}</strong><span>{debt.label}</span></div>)}</div></details>
       {changeModal && (
         <Modal title="提交改纲变更单" onClose={() => setChangeModal(false)}>
           <div className="form-stack">
@@ -528,4 +494,34 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
       )}
     </div>
   );
+}
+
+function IssueList({ issues, onUpdate, emptyMessage, showChapter = false, chapters = [] }: {
+  issues: QualityIssue[];
+  onUpdate: (issueId: string, status: "已忽略" | "已解决") => Promise<void>;
+  emptyMessage: string;
+  showChapter?: boolean;
+  chapters?: Chapter[];
+}) {
+  if (!issues.length) {
+    return <div className="quality-empty"><CheckCircle2 size={24} /><strong>{emptyMessage}</strong><span>调整筛选条件，或从左侧选择其他章节。</span></div>;
+  }
+  return <div className="issue-list quality-issue-list">
+    {issues.map((issue) => {
+      const chapter = showChapter ? chapters.find((item) => item.id === issue.chapterId) : undefined;
+      return <article key={issue.id} className={issue.status !== "待处理" ? "resolved" : ""}>
+        <div className="issue-marker">{issue.status === "待处理" ? <AlertTriangle size={17} /> : <Check size={17} />}</div>
+        <div className="issue-content">
+          <div className="issue-meta"><Badge tone={issueTone(issue.severity)}>{issue.severity}</Badge><strong>{issue.category}</strong>{chapter && <span>第 {chapter.number} 章 · {chapter.title || "未命名章"}</span>}</div>
+          <p>{issue.message}</p>
+          {issue.evidence && <blockquote>{issue.evidence}</blockquote>}
+          <small>{formatDate(issue.createdAt, true)}</small>
+        </div>
+        {issue.status === "待处理" ? <div className="issue-actions">
+          {issue.severity !== "硬性" && <Button variant="ghost" onClick={() => onUpdate(issue.id, "已忽略")}>忽略</Button>}
+          <Button variant="secondary" icon={<Check size={14} />} onClick={() => onUpdate(issue.id, "已解决")}>解决</Button>
+        </div> : <Badge tone="neutral">{issue.status}</Badge>}
+      </article>;
+    })}
+  </div>;
 }

@@ -238,15 +238,19 @@ test("traps modal focus, closes with Escape, and restores focus", async ({ page 
   await expect(trigger).toBeFocused();
 });
 
-test("reviews chapters through the quality queue", async ({ page }) => {
+test("reviews chapters through the quality queue", async ({ page }, testInfo) => {
   await page.locator(".project-row").filter({ hasText: "回声备忘录" }).click();
   await page.getByRole("button", { name: /质检中心/ }).click();
-  await expect(page.getByRole("heading", { name: "章节审稿队列" })).toBeVisible();
-  const queued = page.locator(".review-queue article").filter({ hasText: "停电后的第七分钟" });
-  await expect(queued).toContainText("其他 1");
-  await queued.getByRole("button", { name: /第 1 章/ }).click();
+  await expect(page.getByRole("button", { name: /审稿队列/ })).toBeVisible();
+  const queued = page.locator(".quality-queue-list button").filter({ hasText: "停电后的第七分钟" });
+  await expect(queued).toContainText("1 项待处理");
+  if (testInfo.project.name === "mobile") {
+    await page.getByLabel("筛选审稿章节").selectOption("demo-chapter-1");
+  } else {
+    await queued.click();
+  }
   await expect(page.getByLabel("筛选审稿章节")).toHaveValue("demo-chapter-1");
-  await queued.getByRole("button", { name: "运行质检" }).click();
+  await page.getByRole("button", { name: "重新质检" }).click();
   await expect(page.getByText("第1章质检已更新")).toBeVisible();
 });
 
