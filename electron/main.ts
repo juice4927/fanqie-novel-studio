@@ -384,26 +384,22 @@ function registerHandlers() {
       await writeApiCredential(apiKey);
       apiCredential = apiKey;
     },
+    queueFinalizedFactExtraction: (projectId, chapter) => {
+      setImmediate(() => {
+        void extractFinalizedChapterFacts(projectId, chapter).then((result) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(
+              "studio:chapter-facts-extracted",
+              result,
+            );
+          }
+        });
+      });
+    },
     startChapterRetry: (projectId, chapterId) =>
       startOneChapter(projectId, chapterId, undefined, "bypass"),
     logRetryFailure: (details) =>
       logger.write("error", "ai.retry.failed", { ...details }),
-  });
-  handle("transitionChapter", async (id, chapterId, status) => {
-    const saved = database.transitionChapter(id, chapterId, status);
-    if (status !== "已定稿") {
-      return { chapter: saved, ledgerExtraction: { status: "不适用", candidateCount: 0 } };
-    }
-    if (!getApiKey()) {
-      return { chapter: saved, ledgerExtraction: { status: "未配置", candidateCount: 0 } };
-    }
-    setImmediate(() => {
-      void extractFinalizedChapterFacts(id, saved).then((result) => {
-        if (mainWindow && !mainWindow.isDestroyed())
-          mainWindow.webContents.send("studio:chapter-facts-extracted", result);
-      });
-    });
-    return { chapter: saved, ledgerExtraction: { status: "排队中", candidateCount: 0 } };
   });
   handle("runQualityCheck", async (id, chapterId) => {
     const project = database.getProject(id);

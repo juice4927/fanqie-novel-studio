@@ -187,6 +187,10 @@ function createDependencies(
     saveAiSettings: vi.fn((next) => ({ ...next, hasApiKey: false })),
     savePlan: vi.fn((_id, next: PlanNode) => next),
     searchRelevantFacts: vi.fn(() => [existingFact]),
+    transitionChapter: vi.fn((_id, _chapterId, status) => ({
+      ...chapter,
+      status,
+    })),
   };
   const saveApiKey = vi.fn(async (next: string) => {
     apiKey = next;
@@ -197,6 +201,7 @@ function createDependencies(
     completion,
   }));
   const logRetryFailure = vi.fn();
+  const queueFinalizedFactExtraction = vi.fn();
   const dependencies = {
     register,
     database,
@@ -212,6 +217,7 @@ function createDependencies(
     ),
     getApiKey: () => apiKey,
     saveApiKey,
+    queueFinalizedFactExtraction,
     startChapterRetry,
     logRetryFailure,
   } as unknown as AiHandlerDependencies;
@@ -224,6 +230,7 @@ function createDependencies(
     saveApiKey,
     startChapterRetry,
     logRetryFailure,
+    queueFinalizedFactExtraction,
     retryJob,
   };
 }
@@ -245,7 +252,42 @@ describe("AI handlers", () => {
       "retryAiJob",
       "reviewPlanning",
       "saveAiSettings",
+      "transitionChapter",
     ]);
+  });
+
+  it("returns chapter transitions immediately and queues finalized fact extraction", async () => {
+    const {
+      dependencies,
+      handlers,
+      saveApiKey,
+      queueFinalizedFactExtraction,
+    } = createDependencies();
+    registerAiHandlers(dependencies);
+
+    expect(
+      handlers.get("transitionChapter")!("project-1", chapter.id, "草稿"),
+    ).toMatchObject({ ledgerExtraction: { status: "不适用" } });
+    expect(
+      handlers.get("transitionChapter")!("project-1", chapter.id, "已定稿"),
+    ).toMatchObject({ ledgerExtraction: { status: "未配置" } });
+    expect(queueFinalizedFactExtraction).not.toHaveBeenCalled();
+
+    await saveApiKey("secret");
+    const finalized = handlers.get("transitionChapter")!(
+      "project-1",
+      chapter.id,
+      "已定稿",
+    );
+
+    expect(finalized).toMatchObject({
+      chapter: { id: chapter.id, status: "已定稿" },
+      ledgerExtraction: { status: "排队中", candidateCount: 0 },
+    });
+    expect(queueFinalizedFactExtraction).toHaveBeenCalledWith(
+      "project-1",
+      expect.objectContaining({ id: chapter.id, status: "已定稿" }),
+    );
   });
 
   it("compiles chapter context with relevant facts from the database", () => {

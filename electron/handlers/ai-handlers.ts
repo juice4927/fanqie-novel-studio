@@ -30,6 +30,7 @@ type AiDatabase = Pick<
   | "savePlan"
   | "saveFact"
   | "searchRelevantFacts"
+  | "transitionChapter"
 >;
 
 interface RetryFailureDetails {
@@ -58,6 +59,10 @@ export interface AiHandlerDependencies {
   ) => ContextPackage;
   getApiKey: () => string;
   saveApiKey: (apiKey: string) => Promise<void>;
+  queueFinalizedFactExtraction: (
+    projectId: string,
+    chapter: Chapter,
+  ) => void;
   startChapterRetry: (
     projectId: string,
     chapterId: string,
@@ -72,9 +77,30 @@ export function registerAiHandlers({
   compileContext,
   getApiKey,
   saveApiKey,
+  queueFinalizedFactExtraction,
   startChapterRetry,
   logRetryFailure,
 }: AiHandlerDependencies): void {
+  register("transitionChapter", (id, chapterId, status) => {
+    const saved = database.transitionChapter(id, chapterId, status);
+    if (status !== "已定稿") {
+      return {
+        chapter: saved,
+        ledgerExtraction: { status: "不适用", candidateCount: 0 },
+      };
+    }
+    if (!getApiKey()) {
+      return {
+        chapter: saved,
+        ledgerExtraction: { status: "未配置", candidateCount: 0 },
+      };
+    }
+    queueFinalizedFactExtraction(id, saved);
+    return {
+      chapter: saved,
+      ledgerExtraction: { status: "排队中", candidateCount: 0 },
+    };
+  });
   register("compileContext", (id, chapterId) => {
     const project = database.getProject(id);
     const chapter = project.chapters.find((item) => item.id === chapterId);
