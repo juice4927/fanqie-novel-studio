@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import JSZip from "jszip";
 import type {
   HealthCheckTask,
+  ProjectDetail,
   SystemHealthReport,
 } from "../../src/shared/types";
 import {
@@ -28,6 +30,8 @@ type SystemDatabase = Pick<
   | "checkpointAll"
   | "finishAutoBackup"
   | "getAutoBackupSettings"
+  | "getChapter"
+  | "getProjectOverview"
   | "rebuildSearchIndexes"
   | "root"
   | "runSystemHealthCheck"
@@ -54,12 +58,117 @@ export interface SystemHandlerDependencies {
   chooseDiagnosticDestination: (
     defaultFileName: string,
   ) => Promise<string | null>;
+  chooseProjectExportDestination: (
+    defaultFileName: string,
+    format: "txt" | "md" | "docx",
+  ) => Promise<string | null>;
 }
 
 export interface SystemHandlerRuntime {
   runAutomaticBackup: (force?: boolean) => Promise<
     ReturnType<SystemDatabase["getAutoBackupSettings"]>
   >;
+}
+
+const exportableChapterStatuses = new Set(["已定稿", "待发布", "已发布"]);
+
+async function exportProject(
+  database: Pick<SystemDatabase, "getChapter" | "getProjectOverview">,
+  projectId: string,
+  format: "txt" | "md" | "docx",
+  chooseDestination: SystemHandlerDependencies["chooseProjectExportDestination"],
+) {
+  const project = database.getProjectOverview(projectId);
+  const chapterMetadata = project.chapters.filter((chapter) =>
+    exportableChapterStatuses.has(chapter.status),
+  );
+  if (!chapterMetadata.length) throw new Error("没有可导出的已定稿章节");
+  const destination = await chooseDestination(
+    `${project.summary.title}-发布包.${format}`,
+    format,
+  );
+  if (!destination) return null;
+  const chapters = chapterMetadata.map((chapter) =>
+    database.getChapter(projectId, chapter.id),
+  );
+  if (format === "docx") {
+    const document = new Document({
+      sections: [
+        {
+          children: [
+            new Paragraph({
+              text: project.summary.title,
+              heading: HeadingLevel.TITLE,
+            }),
+            ...chapters.flatMap((chapter) => [
+              new Paragraph({
+                text: `第${chapter.number}章 ${chapter.title}`,
+                heading: HeadingLevel.HEADING_1,
+              }),
+              ...chapter.content
+                .split(/\n+/)
+                .filter(Boolean)
+                .map((line) => new Paragraph({ text: line })),
+            ]),
+          ],
+        },
+      ],
+    });
+    await writeFile(destination, await Packer.toBuffer(document));
+  } else {
+    const text = chapters
+      .map((chapter) =>
+        format === "md"
+          ? `# 第${chapter.number}章 ${chapter.title}\n\n${chapter.content}`
+          : `第${chapter.number}章 ${chapter.title}\n\n${chapter.content}`,
+      )
+      .join("\n\n");
+    await writeFile(destination, text, "utf8");
+  }
+  await writeFile(
+    `${destination.slice(0, -path.extname(destination).length)}-检查报告.md`,
+    buildPublishingReport(project, chapters.length),
+    "utf8",
+  );
+  return destination;
+}
+
+function buildPublishingReport(project: ProjectDetail, chapterCount: number) {
+  const pending = project.issues.filter((issue) => issue.status === "待处理");
+  const conflicts = project.facts.filter(
+    (fact) => fact.confidence === "有冲突",
+  );
+  return [
+    `# ${project.summary.title} 发布前检查报告`,
+    "",
+    `- 生成时间：${new Date().toLocaleString("zh-CN")}`,
+    `- 导出章节：${chapterCount} 章`,
+    `- 创作契约：${project.contract.approved ? `已审批 v${project.contract.version}` : "未审批"}`,
+    `- 已批准卷纲：${project.plans.filter((plan) => plan.kind === "分卷" && plan.status === "已批准").length}`,
+    `- 未处理硬性问题：${pending.filter((issue) => issue.severity === "硬性").length}`,
+    `- 其他待处理问题：${pending.filter((issue) => issue.severity !== "硬性").length}`,
+    `- 冲突事实：${conflicts.length}`,
+    "",
+    "## 待处理问题",
+    "",
+    ...(pending.length
+      ? pending.map(
+          (issue) =>
+            `- [${issue.severity}] ${issue.category}：${issue.message}`,
+        )
+      : ["- 无"]),
+    "",
+    "## 冲突事实",
+    "",
+    ...(conflicts.length
+      ? conflicts.map(
+          (fact) =>
+            `- ${fact.subject} / ${fact.predicate}：${fact.value}（证据第${fact.evidenceChapter}章）`,
+        )
+      : ["- 无"]),
+    "",
+    "> 本报告只辅助人工发布检查，不代表平台审核结论。",
+  ].join("\n");
 }
 
 export function registerSystemHandlers({
@@ -71,6 +180,7 @@ export function registerSystemHandlers({
   chooseBackupDestination,
   chooseBackupSource,
   chooseDiagnosticDestination,
+  chooseProjectExportDestination,
 }: SystemHandlerDependencies): SystemHandlerRuntime {
   let autoBackupRunning = false;
   const healthTasks = new Map<string, HealthCheckTask>();
@@ -277,6 +387,14 @@ export function registerSystemHandlers({
     );
     return destination;
   });
+  register("exportProject", (projectId, format) =>
+    exportProject(
+      database,
+      projectId,
+      format,
+      chooseProjectExportDestination,
+    ),
+  );
   register("getWorkspacePath", () => database.root);
 
   return { runAutomaticBackup };
