@@ -34,6 +34,7 @@ import { findCurrentVolume } from "../shared/planning";
 import { compileCommercialGuidance, resolveStoryStage } from "../shared/commercial-knowledge";
 import { buildContextDiagnostics } from "../shared/context-diagnostics";
 import { buildLongTermMemory } from "../shared/summaries";
+import { hasMajorStateChange } from "../shared/major-state-change";
 import {
   assertChapterTransition,
   deriveChapterStatus,
@@ -145,6 +146,7 @@ function seedProject(): ProjectDetail {
         "每次主动改变结果都会丢失等量近期记忆",
       ],
       prohibitedPatterns: ["无代价升级", "用梦境撤销已发生剧情"],
+      majorStateChanges: { include: [], exclude: [] },
       aestheticProfile: normalizeAestheticProfile(),
       version: 2,
       approved: true,
@@ -427,7 +429,8 @@ export function createBrowserApi(): AppApi {
         secondaryGenres: input.secondaryGenres ?? [], genreElements: input.genreElements ?? [],
         customGenreDirection: input.customGenreDirection ?? "", protagonistDesire: "",
         readerPromise: "", coreEmotion: "", ending: "", immutableRules: [],
-        prohibitedPatterns: [], version: 1, approved: false, updatedAt: now(),
+        prohibitedPatterns: [], majorStateChanges: { include: [], exclude: [] },
+        version: 1, approved: false, updatedAt: now(),
         aestheticProfile: normalizeAestheticProfile(),
       },
       plans: [], chapters: [], facts: [], issues: [], changes: [], schedule: [], metrics: [], experiments: [],
@@ -696,6 +699,8 @@ export function createBrowserApi(): AppApi {
         revision: previous ? previous.revision + (mode === "version" ? 1 : 0) : 1,
         updatedAt: now(),
       } as Chapter;
+      if (hasMajorStateChange(next.outline, project.summary.genre, project.contract.majorStateChanges))
+        next.batchMode = "逐章";
       if (existing >= 0) project.chapters[existing] = next;
       else project.chapters.push(next);
       persist();
@@ -1126,7 +1131,14 @@ export function createBrowserApi(): AppApi {
               title: chapter.title,
             }))
         : [];
-      const canRun = chapters.length === 5 && start?.batchMode === "五章批次";
+      const majorChapter = start && project.chapters
+        .filter((chapter) => chapter.number >= start.number && chapter.number < start.number + 5)
+        .find((chapter) => hasMajorStateChange(
+          chapter.outline,
+          project.summary.genre,
+          project.contract.majorStateChanges,
+        ));
+      const canRun = chapters.length === 5 && start?.batchMode === "五章批次" && !majorChapter;
       return {
         chapters,
         inputTokens: chapters.length * 2200,
@@ -1135,6 +1147,8 @@ export function createBrowserApi(): AppApi {
         canRun,
         blockingReason: canRun
           ? null
+          : majorChapter
+            ? `第${majorChapter.number}章包含重大状态变化，必须逐章审批`
           : chapters.length === 5
             ? "请先保存“五章批次”模式"
             : "需要从当前章开始预先建立连续五章及其章纲",

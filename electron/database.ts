@@ -34,6 +34,7 @@ import type {
   SystemHealthReport,
 } from "../src/shared/types";
 import { normalizeAestheticProfile } from "../src/shared/aesthetic-profile";
+import { hasMajorStateChange } from "../src/shared/major-state-change";
 import { cosineSimilarity, localEmbedding } from "./semantic";
 import {
   aggregateStorySummaries,
@@ -358,6 +359,7 @@ export class WorkspaceDatabase {
       ending: "",
       immutableRules: [],
       prohibitedPatterns: [],
+      majorStateChanges: { include: [], exclude: [] },
       aestheticProfile: normalizeAestheticProfile(),
       version: 1,
       approved: false,
@@ -620,6 +622,7 @@ export class WorkspaceDatabase {
         ending: contract.ending,
         immutableRules: contract.immutableRules,
         prohibitedPatterns: contract.prohibitedPatterns,
+        majorStateChanges: contract.majorStateChanges ?? { include: [], exclude: [] },
         aestheticProfile: normalizeAestheticProfile(contract.aestheticProfile),
       }) !==
       JSON.stringify({
@@ -646,6 +649,7 @@ export class WorkspaceDatabase {
         ending: previous.ending,
         immutableRules: previous.immutableRules,
         prohibitedPatterns: previous.prohibitedPatterns,
+        majorStateChanges: previous.majorStateChanges ?? { include: [], exclude: [] },
         aestheticProfile: normalizeAestheticProfile(previous.aestheticProfile),
       });
     if (!changed) return previous;
@@ -823,6 +827,8 @@ export class WorkspaceDatabase {
       }, createRevision);
       endingExpectationId = savedExpectation.id;
     }
+    const genre = (this.catalog.prepare("SELECT genre FROM projects WHERE id = ?").get(id) as { genre: ProjectSummary["genre"] }).genre;
+    const contract = this.getState<StoryContract>(db, "contract");
     const next: Chapter = {
       ...chapter,
       endingExpectationId,
@@ -836,7 +842,7 @@ export class WorkspaceDatabase {
         hasFactConflict ||
         hasHardIssue ||
         isVolumeBoundary ||
-        majorStateChange.test(chapter.outline)
+        hasMajorStateChange(chapter.outline, genre, contract.majorStateChanges)
           ? "逐章"
           : chapter.batchMode,
       updatedAt: now(),
@@ -1734,6 +1740,3 @@ function textWindows(text: string, step: number) {
 function hashText(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
-
-const majorStateChange =
-  /死亡|牺牲|突破|晋级|身份揭露|身份暴露|决裂|成婚|离婚|重生|穿越|失忆|叛变|真相揭晓|终局/;

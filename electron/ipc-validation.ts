@@ -81,6 +81,10 @@ const contract = z.object({
   ending: mediumText,
   immutableRules: z.array(shortText).max(100),
   prohibitedPatterns: z.array(shortText).max(100),
+  majorStateChanges: z.object({
+    include: z.array(shortText).max(100),
+    exclude: z.array(shortText).max(100),
+  }).strict().optional(),
   aestheticProfile: z.object({
     narrativeDistance: z.enum(["贴身", "适中", "远距"]),
     emotionalTemperature: z.enum(["冷峻", "克制", "均衡", "热烈"]),

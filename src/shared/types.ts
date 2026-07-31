@@ -211,6 +211,7 @@ export interface StoryContract extends GenreComposition {
   ending: string;
   immutableRules: string[];
   prohibitedPatterns: string[];
+  majorStateChanges?: MajorStateChangeRules;
   aestheticProfile?: AestheticProfile;
   version: number;
   approved: boolean;
@@ -306,6 +307,11 @@ export interface ChapterTransitionResult {
     candidateCount: number;
     message?: string;
   };
+}
+
+export interface MajorStateChangeRules {
+  include: string[];
+  exclude: string[];
 }
 
 export interface ChapterFactsExtractionEvent {

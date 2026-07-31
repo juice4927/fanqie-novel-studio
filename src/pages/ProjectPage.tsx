@@ -686,6 +686,7 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
     worldRules: value.worldRules ?? [],
     majorForces: value.majorForces ?? [],
     timelineAnchors: value.timelineAnchors ?? [],
+    majorStateChanges: value.majorStateChanges ?? { include: [], exclude: [] },
     aestheticProfile: normalizeAestheticProfile(value.aestheticProfile),
   });
   const [contract, setContract] = useState<StoryContract>(() => normalizeContract(project.contract));
@@ -1103,6 +1104,28 @@ function StoryBiblePage({ project, api, reload, notify }: CommonProjectProps) {
               onChange={(event) =>
                 set("prohibitedPatterns", splitLines(event.target.value))
               }
+            />
+          </Field>
+        </div>
+        <div className="form-grid two">
+          <Field label="重大状态追加词" hint="每行一条；命中章纲时强制逐章审批">
+            <Textarea
+              rows={5}
+              value={contract.majorStateChanges!.include.join("\n")}
+              onChange={(event) => setContract((current) => ({
+                ...current,
+                majorStateChanges: { ...current.majorStateChanges!, include: splitLines(event.target.value) },
+              }))}
+            />
+          </Field>
+          <Field label="重大状态忽略词" hint="每行一条；用于移除主题材默认词">
+            <Textarea
+              rows={5}
+              value={contract.majorStateChanges!.exclude.join("\n")}
+              onChange={(event) => setContract((current) => ({
+                ...current,
+                majorStateChanges: { ...current.majorStateChanges!, exclude: splitLines(event.target.value) },
+              }))}
             />
           </Field>
         </div>

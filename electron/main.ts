@@ -41,6 +41,7 @@ import { buildContextDiagnostics } from "../src/shared/context-diagnostics";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { buildLongTermMemory } from "../src/shared/summaries";
 import { analyzeProseTemperature } from "../src/shared/prose-temperature";
+import { hasMajorStateChange } from "../src/shared/major-state-change";
 import { compileAestheticGuidance } from "../src/shared/aesthetic-profile";
 import { completeRankingSchedule, failRankingSchedule, nextRankingRun } from "../src/shared/ranking-schedule";
 import { validateIpcArgs } from "./ipc-validation";
@@ -113,9 +114,6 @@ async function runAutomaticBackup(force = false) {
   }
 }
 
-const majorStateChange =
-  /死亡|牺牲|突破|晋级|身份揭露|身份暴露|决裂|成婚|离婚|重生|穿越|失忆|叛变|真相揭晓|终局/;
-
 function previewChapterBatch(
   project: ProjectDetail,
   settings: ReturnType<WorkspaceDatabase["getAiSettings"]>,
@@ -172,7 +170,7 @@ function previewChapterBatch(
         `第${chapter.number}章位于卷首或卷末，必须逐章审批`,
         summary,
       );
-    if (majorStateChange.test(chapter.outline))
+    if (hasMajorStateChange(chapter.outline, project.summary.genre, project.contract.majorStateChanges))
       return blocked(
         `第${chapter.number}章包含重大状态变化，必须逐章审批`,
         summary,
