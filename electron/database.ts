@@ -35,7 +35,13 @@ import type {
 } from "../src/shared/types";
 import { normalizeAestheticProfile } from "../src/shared/aesthetic-profile";
 import { hasMajorStateChange } from "../src/shared/major-state-change";
-import { cosineSimilarity, localEmbedding } from "./semantic";
+import {
+  cosineSimilarity,
+  HASH_BIGRAM_PROVIDER_ID,
+  HashBigramEmbeddingProvider,
+  validateEmbeddingVector,
+  type EmbeddingProvider,
+} from "./semantic";
 import {
   aggregateStorySummaries,
   buildChapterSummary,
@@ -108,9 +114,14 @@ export class WorkspaceDatabase {
   private readonly researchData: ResearchRepository;
   private readonly revisions = new RevisionRepository();
   private readonly search = new SearchRepository();
+  private readonly embeddingProvider: EmbeddingProvider;
 
-  constructor(root: string) {
+  constructor(root: string, embeddingProvider: EmbeddingProvider = new HashBigramEmbeddingProvider()) {
+    if (!embeddingProvider.id.trim()) throw new Error("嵌入 provider id 不能为空");
+    if (!Number.isInteger(embeddingProvider.dimensions) || embeddingProvider.dimensions <= 0)
+      throw new Error("嵌入向量维度必须是正整数");
     this.root = root;
+    this.embeddingProvider = embeddingProvider;
     this.projectsRoot = path.join(root, "projects");
     this.researchRoot = path.join(root, "research");
     this.backupRoot = path.join(root, "backups");
@@ -300,6 +311,13 @@ export class WorkspaceDatabase {
       FROM records WHERE collection = 'chapters';
       DELETE FROM records WHERE collection = 'chapters';
       `),
+      (database) => {
+        if (!hasColumn(database, "embeddings", "provider_id"))
+          database.exec(`ALTER TABLE embeddings ADD COLUMN provider_id TEXT NOT NULL DEFAULT '${HASH_BIGRAM_PROVIDER_ID}'`);
+        if (!hasColumn(database, "embeddings", "dimensions"))
+          database.exec("ALTER TABLE embeddings ADD COLUMN dimensions INTEGER NOT NULL DEFAULT 192");
+        database.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_provider ON embeddings(source_type, provider_id, dimensions)");
+      },
     ]);
   }
 
@@ -967,7 +985,7 @@ export class WorkspaceDatabase {
         db,
         "facts",
         next.id,
-        `${next.kind} ${next.genreDimension ?? ""} ${next.subject} ${next.predicate} ${next.value} ${next.knowledgeScope}`,
+        factEmbeddingText(next),
       );
       db.exec("COMMIT");
       this.touchProject(id);
@@ -988,12 +1006,30 @@ export class WorkspaceDatabase {
     const facts = new Map(
       this.listRecords<LedgerFact>(db, "facts").map((fact) => [fact.id, fact]),
     );
-    const query = localEmbedding(queryText);
+    const storedRows = db.prepare(
+      "SELECT source_id, content_hash, provider_id, dimensions FROM embeddings WHERE source_type = 'facts'",
+    ).all() as Array<{ source_id: string; content_hash: string; provider_id: string; dimensions: number }>;
+    const storedById = new Map(storedRows.map((row) => [row.source_id, row]));
+    const staleEmbeddings: Array<{ sourceId: string; text: string }> = [];
+    for (const fact of facts.values()) {
+      const text = factEmbeddingText(fact);
+      const stored = storedById.get(fact.id);
+      if (
+        !stored ||
+        stored.content_hash !== hashText(text) ||
+        stored.provider_id !== this.embeddingProvider.id ||
+        Number(stored.dimensions) !== this.embeddingProvider.dimensions
+      ) {
+        staleEmbeddings.push({ sourceId: fact.id, text });
+      }
+    }
+    this.saveEmbeddings(db, "facts", staleEmbeddings);
+    const query = this.embedText(queryText);
     const rows = db
       .prepare(
-        "SELECT source_id, vector FROM embeddings WHERE source_type = 'facts'",
+        "SELECT source_id, vector FROM embeddings WHERE source_type = 'facts' AND provider_id = ? AND dimensions = ?",
       )
-      .all() as Array<{ source_id: string; vector: string }>;
+      .all(this.embeddingProvider.id, this.embeddingProvider.dimensions) as Array<{ source_id: string; vector: string }>;
     return rows
       .map((row) => ({
         fact: facts.get(row.source_id),
@@ -1615,16 +1651,41 @@ export class WorkspaceDatabase {
     sourceId: string,
     text: string,
   ) {
-    db.prepare(
-      "INSERT OR REPLACE INTO embeddings(id, source_type, source_id, content_hash, vector, updated_at) VALUES(?, ?, ?, ?, ?, ?)",
-    ).run(
-      `${sourceType}:${sourceId}`,
-      sourceType,
-      sourceId,
-      hashText(text),
-      JSON.stringify(localEmbedding(text)),
-      now(),
+    this.saveEmbeddings(db, sourceType, [{ sourceId, text }]);
+  }
+
+  private saveEmbeddings(
+    db: DatabaseSync,
+    sourceType: string,
+    entries: Array<{ sourceId: string; text: string }>,
+  ) {
+    if (!entries.length) return;
+    const vectors = this.embedTexts(entries.map((entry) => entry.text));
+    const insert = db.prepare(
+      "INSERT OR REPLACE INTO embeddings(id, source_type, source_id, content_hash, vector, provider_id, dimensions, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
     );
+    entries.forEach((entry, index) => insert.run(
+      `${sourceType}:${entry.sourceId}`,
+      sourceType,
+      entry.sourceId,
+      hashText(entry.text),
+      JSON.stringify(vectors[index]),
+      this.embeddingProvider.id,
+      this.embeddingProvider.dimensions,
+      now(),
+    ));
+  }
+
+  private embedText(text: string) {
+    return this.embedTexts([text])[0];
+  }
+
+  private embedTexts(texts: readonly string[]) {
+    const vectors = this.embeddingProvider.embed(texts);
+    if (vectors.length !== texts.length)
+      throw new Error(`嵌入 provider ${this.embeddingProvider.id} 必须为每段文本返回一个向量`);
+    for (const vector of vectors) validateEmbeddingVector(this.embeddingProvider, vector);
+    return vectors;
   }
 
   private updateSummaries(projectId: string, chapter: Chapter) {
@@ -1749,6 +1810,10 @@ function textWindows(text: string, step: number) {
   for (let index = 0; index <= normalized.length - 24; index += step)
     windows.push(normalized.slice(index, index + 24));
   return windows;
+}
+
+function factEmbeddingText(fact: LedgerFact) {
+  return `${fact.kind} ${fact.genreDimension ?? ""} ${fact.subject} ${fact.predicate} ${fact.value} ${fact.knowledgeScope}`;
 }
 
 function hashText(value: string) {

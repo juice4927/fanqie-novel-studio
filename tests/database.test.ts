@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorkspaceDatabase, now } from "../electron/database";
 import { createChapterGenerationGuard } from "../electron/ai-retry";
+import type { EmbeddingProvider } from "../electron/semantic";
 import type { Chapter, LedgerFact, QualityIssue } from "../src/shared/types";
 
 const roots: string[] = [];
@@ -322,8 +323,10 @@ describe("per-book isolation and gates", () => {
     expect(reopened.getProjectOverview(project.id).chapters[0]).toMatchObject({ id: chapter.id, number: 3, content: "" });
     expect(reopened.getChapter(project.id, chapter.id).content).toBe(chapter.content);
     const migrated = new DatabaseSync(path.join(projectPath, "project.sqlite"));
-    expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
     expect((migrated.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count).toBe(0);
+    expect((migrated.prepare("PRAGMA table_info(embeddings)").all() as Array<{ name: string }>).map((column) => column.name))
+      .toEqual(expect.arrayContaining(["provider_id", "dimensions"]));
     migrated.close();
   });
 
@@ -393,6 +396,35 @@ describe("per-book isolation and gates", () => {
     database.saveFact(project.id, { id: "", kind: "人物", subject: "陆青", predicate: "武器", value: "长弓", validFromChapter: 1, validToChapter: null, evidenceChapter: 1, confidence: "已确认", knowledgeScope: "公开", updatedAt: now() });
     expect(conflict.confidence).toBe("有冲突");
     expect(database.searchRelevantFacts(project.id, "北仓控制方", 3, 2).some((fact) => fact.subject === "北仓")).toBe(true);
+  });
+
+  it("rebuilds fact vectors when the embedding provider changes", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "嵌入切换", genre: "历史/架空", targetWords: 3000000, updateCadence: "每日1章" });
+    database.saveFact(project.id, { id: "", kind: "地点", subject: "北仓", predicate: "控制方", value: "巡检司", validFromChapter: 1, validToChapter: null, evidenceChapter: 1, confidence: "已确认", knowledgeScope: "公开", updatedAt: now() });
+    database.saveFact(project.id, { id: "", kind: "人物", subject: "陆青", predicate: "武器", value: "长弓", validFromChapter: 1, validToChapter: null, evidenceChapter: 1, confidence: "已确认", knowledgeScope: "公开", updatedAt: now() });
+    const root = database.root;
+    database.close();
+    databases.splice(databases.indexOf(database), 1);
+    const batchSizes: number[] = [];
+    const provider: EmbeddingProvider = {
+      id: "test-keyword-v2",
+      dimensions: 3,
+      embed: (texts) => {
+        batchSizes.push(texts.length);
+        return texts.map((text) => text.includes("北仓") ? [1, 0, 0] : text.includes("长弓") ? [0, 1, 0] : [0, 0, 1]);
+      },
+    };
+    const reopened = new WorkspaceDatabase(root, provider);
+    databases.push(reopened);
+
+    expect(reopened.searchRelevantFacts(project.id, "查找北仓", 3, 1)[0]?.subject).toBe("北仓");
+    const inspection = new DatabaseSync(path.join(reopened.projectPath(project.id), "project.sqlite"));
+    const rows = inspection.prepare("SELECT provider_id, dimensions FROM embeddings WHERE source_type = 'facts'").all() as Array<{ provider_id: string; dimensions: number }>;
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.provider_id === provider.id && row.dimensions === provider.dimensions)).toBe(true);
+    expect(batchSizes).toEqual([2, 1]);
+    inspection.close();
   });
 
   it("atomically ends the previous state when a replacement candidate is confirmed", () => {
