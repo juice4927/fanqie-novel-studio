@@ -31,14 +31,10 @@ import { AiService, type AiCachePolicy } from "./ai-service";
 import { autoBackupFileName, createEncryptedBackup, nextAutoBackupAt, pruneAutoBackups, restoreEncryptedBackup } from "./backup";
 import { analyzeRankings, captureFanqieOpeningSample, capturePublicRankingPage } from "./ranking-service";
 import { analyzeMetrics, parseMetricsCsv } from "../src/shared/metrics";
-import {
-  volumeBoundaryChapters,
-} from "../src/shared/planning";
 import { deleteAutoBackupCredential, readApiCredential, readAutoBackupCredential, writeApiCredential, writeAutoBackupCredential } from "./credential-store";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
-import { hasMajorStateChange } from "../src/shared/major-state-change";
 import { compileChapterContext } from "../src/shared/context-compiler";
-import { estimateChapterOutputTokens } from "../src/shared/token-estimator";
+import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
 import {
   assertChapterRetrySnapshot,
   createChapterGenerationGuard,
@@ -121,95 +117,12 @@ function previewChapterBatch(
   settings: ReturnType<WorkspaceDatabase["getAiSettings"]>,
   chapterId: string,
 ): BatchGenerationPreview {
-  const start = project.chapters.find((chapter) => chapter.id === chapterId);
-  const blocked = (
-    reason: string,
-    chapters: BatchGenerationPreview["chapters"] = [],
-  ): BatchGenerationPreview => ({
-    chapters,
-    inputTokens: 0,
-    outputTokens: 0,
-    estimatedCost: 0,
-    canRun: false,
-    blockingReason: reason,
-  });
-  if (!start) return blocked("章节不存在");
-  if (start.batchMode !== "五章批次") return blocked("请先保存“五章批次”模式");
-  if (!project.contract.approved) return blocked("创作契约审批后才能生成正文");
-  if (project.facts.some((fact) => fact.confidence === "有冲突"))
-    return blocked("状态账本存在冲突事实，已自动恢复逐章模式");
-
-  const ordered = project.chapters
-    .filter(
-      (chapter) =>
-        chapter.number >= start.number && chapter.number < start.number + 5,
-    )
-    .sort((a, b) => a.number - b.number);
-  if (
-    ordered.length !== 5 ||
-    ordered.some((chapter, index) => chapter.number !== start.number + index)
-  ) {
-    return blocked("需要从当前章开始预先建立连续五章及其章纲");
-  }
-  const boundaries = volumeBoundaryChapters(project.plans);
-  const activeHardIssues = new Set(
-    project.issues
-      .filter((issue) => issue.severity === "硬性" && issue.status === "待处理")
-      .map((issue) => issue.chapterId),
+  return buildChapterBatchPreview(
+    project,
+    settings,
+    chapterId,
+    (chapter) => compileContext(project, chapter).estimatedTokens,
   );
-  for (const chapter of ordered) {
-    const summary = ordered.map((item) => ({
-      id: item.id,
-      number: item.number,
-      title: item.title,
-    }));
-    if (chapter.batchMode !== "五章批次")
-      return blocked(`第${chapter.number}章处于逐章模式`, summary);
-    if (chapter.isKeyChapter)
-      return blocked(`第${chapter.number}章是关键章，必须逐章审批`, summary);
-    if (boundaries.has(chapter.number))
-      return blocked(
-        `第${chapter.number}章位于卷首或卷末，必须逐章审批`,
-        summary,
-      );
-    if (hasMajorStateChange(chapter.outline, project.summary.genre, project.contract.majorStateChanges))
-      return blocked(
-        `第${chapter.number}章包含重大状态变化，必须逐章审批`,
-        summary,
-      );
-    if (activeHardIssues.has(chapter.id))
-      return blocked(`第${chapter.number}章有未解决的硬性告警`, summary);
-    if (!chapter.outline.trim())
-      return blocked(`第${chapter.number}章尚未填写章纲`, summary);
-    if (["已定稿", "待发布", "已发布"].includes(chapter.status))
-      return blocked(`第${chapter.number}章已经定稿或进入发布流程`, summary);
-    const hardConstraint = evaluateStoryConstraints(project.facts, chapter).find((finding) => finding.severity === "硬性");
-    if (hardConstraint) return blocked(`第${chapter.number}章写前约束失败：${hardConstraint.message}`, summary);
-  }
-
-  const inputTokens = ordered.reduce(
-    (sum, chapter) => sum + compileContext(project, chapter).estimatedTokens,
-    0,
-  );
-  const outputTokens = ordered.reduce(
-    (sum, chapter) => sum + estimateChapterOutputTokens(chapter.targetWords ?? 2300),
-    0,
-  );
-  const estimatedCost =
-    (inputTokens / 1_000_000) * settings.inputPricePerMillion +
-    (outputTokens / 1_000_000) * settings.outputPricePerMillion;
-  return {
-    chapters: ordered.map((chapter) => ({
-      id: chapter.id,
-      number: chapter.number,
-      title: chapter.title,
-    })),
-    inputTokens,
-    outputTokens,
-    estimatedCost,
-    canRun: true,
-    blockingReason: null,
-  };
 }
 
 function startOneChapter(

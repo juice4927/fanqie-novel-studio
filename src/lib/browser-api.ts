@@ -32,7 +32,7 @@ import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { hasMajorStateChange } from "../shared/major-state-change";
 import { compileChapterContext } from "../shared/context-compiler";
-import { estimateChapterOutputTokens } from "../shared/token-estimator";
+import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
 import {
   assertChapterTransition,
   deriveChapterStatus,
@@ -1080,59 +1080,12 @@ export function createBrowserApi(): AppApi {
     },
     async previewChapterBatch(projectId, chapterId) {
       const project = getProject(state, projectId);
-      const start = project.chapters.find(
-        (chapter) => chapter.id === chapterId,
+      return buildChapterBatchPreview(
+        project,
+        state.settings,
+        chapterId,
+        (chapter) => compileBrowserContext(project, chapter).estimatedTokens,
       );
-      const selectedChapters = start
-        ? project.chapters
-            .filter(
-              (chapter) =>
-                chapter.number >= start.number &&
-                chapter.number < start.number + 5,
-            )
-            .sort((left, right) => left.number - right.number)
-        : [];
-      const chapters = selectedChapters.map((chapter) => ({
-        id: chapter.id,
-        number: chapter.number,
-        title: chapter.title,
-      }));
-      const majorChapter = start && selectedChapters
-        .find((chapter) => hasMajorStateChange(
-          chapter.outline,
-          project.summary.genre,
-          project.contract.majorStateChanges,
-        ));
-      const canRun = chapters.length === 5 && start?.batchMode === "五章批次" && !majorChapter;
-      const inputTokens = selectedChapters.reduce(
-        (sum, chapter) =>
-          sum + compileBrowserContext(project, chapter).estimatedTokens,
-        0,
-      );
-      const outputTokens = selectedChapters.reduce(
-        (sum, chapter) =>
-          sum + estimateChapterOutputTokens(chapter.targetWords ?? 2300),
-        0,
-      );
-      const estimatedCost =
-        (inputTokens / 1_000_000) *
-          (state.settings.inputPricePerMillion ?? 0) +
-        (outputTokens / 1_000_000) *
-          (state.settings.outputPricePerMillion ?? 0);
-      return {
-        chapters,
-        inputTokens,
-        outputTokens,
-        estimatedCost,
-        canRun,
-        blockingReason: canRun
-          ? null
-          : majorChapter
-            ? `第${majorChapter.number}章包含重大状态变化，必须逐章审批`
-          : chapters.length === 5
-            ? "请先保存“五章批次”模式"
-            : "需要从当前章开始预先建立连续五章及其章纲",
-      };
     },
     async generateChapterBatch() {
       throw new Error("浏览器预览不调用云模型，请在桌面版运行五章批次");
