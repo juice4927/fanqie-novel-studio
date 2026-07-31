@@ -160,6 +160,22 @@ const gateCases: GateCase[] = [
     expectedReason: "第4章包含重大状态变化，必须逐章审批",
   },
   {
+    name: "blocks genre-specific major state changes",
+    mutate: (project) => {
+      project.summary.genre = "现言甜宠";
+      project.chapters[1].outline = "两人正式分手";
+    },
+    expectedReason: "第2章包含重大状态变化，必须逐章审批",
+  },
+  {
+    name: "blocks contract-defined major state changes",
+    mutate: (project) => {
+      project.contract.majorStateChanges.include = ["签订血契"];
+      project.chapters[2].outline = "主角签订血契";
+    },
+    expectedReason: "第3章包含重大状态变化，必须逐章审批",
+  },
+  {
     name: "blocks active hard issues",
     mutate: (project) => {
       project.issues = [{
@@ -243,5 +259,21 @@ describe("chapter batch service", () => {
     });
     expect(preview.estimatedCost).toBeCloseTo(0.0426);
     expect(estimateInputTokens).toHaveBeenCalledTimes(5);
+  });
+
+  it("allows contract exclusions to override major state keywords", () => {
+    const project = createProject();
+    project.contract.majorStateChanges.exclude = ["身份揭露"];
+    project.chapters[3].outline = "主角身份揭露";
+
+    const preview = buildChapterBatchPreview(
+      project,
+      { inputPricePerMillion: 2, outputPricePerMillion: 4 },
+      "chapter-1",
+      () => 100,
+    );
+
+    expect(preview.canRun).toBe(true);
+    expect(preview.blockingReason).toBeNull();
   });
 });
