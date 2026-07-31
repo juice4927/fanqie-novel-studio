@@ -483,6 +483,7 @@ describe("per-book isolation and gates", () => {
     const saved = database.saveReviewExperiment(project.id, draft);
     expect(database.getProject(project.id).experiments[0]).toMatchObject({ id: saved.id, status: "观察中", fromChapter: 10, toChapter: 15 });
     expect(database.getProject(project.id).changes).toEqual([]);
+    expect(() => database.saveReviewExperiment(project.id, { ...saved, baselineStart: "2026-07-08", baselineEnd: "2026-07-01" })).toThrow("观察日期范围无效");
     expect(() => database.saveReviewExperiment(project.id, { ...saved, status: "已结论", conclusion: "", decision: null })).toThrow("结论和处理决定");
   });
 });

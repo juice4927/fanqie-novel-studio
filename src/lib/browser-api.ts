@@ -41,6 +41,7 @@ import {
 } from "../shared/change-request-service";
 import { prepareFactSave } from "../shared/fact-service";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
+import { prepareReviewExperiment } from "../shared/review-experiment-service";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { compileChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
@@ -1145,12 +1146,14 @@ export function createBrowserApi(): AppApi {
     async saveReviewExperiment(projectId, experiment: ReviewExperiment) {
       const project = getProject(state, projectId);
       const existing = project.experiments.find((item) => item.id === experiment.id);
-      const next = { ...experiment, id: experiment.id || id(), createdAt: existing?.createdAt ?? experiment.createdAt ?? now(), updatedAt: now() };
-      if (!next.title.trim() || !next.hypothesis.trim()) throw new Error("实验标题和假设不能为空");
-      if (next.fromChapter > next.toChapter) throw new Error("影响起始章不能晚于结束章");
-      if (next.status === "已结论" && (!next.conclusion.trim() || !next.decision)) throw new Error("结束实验必须填写结论和处理决定");
+      const updatedAt = now();
+      const next = prepareReviewExperiment(existing, experiment, {
+        id: experiment.id || id(),
+        updatedAt,
+      });
       const index = project.experiments.findIndex((item) => item.id === next.id);
       if (index >= 0) project.experiments[index] = next; else project.experiments.unshift(next);
+      project.summary.updatedAt = updatedAt;
       persist();
       return next;
     },
