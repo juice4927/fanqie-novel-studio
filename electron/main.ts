@@ -2,25 +2,20 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
-  BatchGenerationPreview,
   Chapter,
-  ChapterDraftStreamEvent,
   ChapterFactsExtractionEvent,
   MetricSnapshot,
-  ProjectDetail,
 } from "../src/shared/types";
 import { WorkspaceDatabase, now } from "./database";
 import { BackgroundWorker } from "./worker-client";
-import { AiService, type AiCachePolicy } from "./ai-service";
+import { AiService } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
 import { readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
-import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { compileProjectChapterContext } from "../src/shared/context-compiler";
-import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
 import {
-  createChapterGenerationGuard,
-  serializeChapterAiRetryContext,
-} from "./ai-retry";
+  createChapterGenerationCoordinator,
+  type ChapterGenerationCoordinator,
+} from "./chapter-generation-service";
 import { validateIpcArgs } from "./ipc-validation";
 import { StructuredLogger } from "./structured-log";
 import { configureAutoUpdates } from "./update-service";
@@ -43,7 +38,7 @@ let database: WorkspaceDatabase;
 let worker: BackgroundWorker;
 let ai: AiService;
 let apiCredential = "";
-const activeGenerationProjects = new Set<string>();
+let chapterGeneration: ChapterGenerationCoordinator;
 let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
 let researchHandlers: ResearchHandlerRuntime;
 let autoBackupTimer: ReturnType<typeof setInterval> | null = null;
@@ -61,88 +56,6 @@ else if (!singleInstanceLockDisabled) app.on("second-instance", () => {
   mainWindow.show();
   mainWindow.focus();
 });
-
-function previewChapterBatch(
-  project: ProjectDetail,
-  settings: ReturnType<WorkspaceDatabase["getAiSettings"]>,
-  chapterId: string,
-): BatchGenerationPreview {
-  return buildChapterBatchPreview(
-    project,
-    settings,
-    chapterId,
-    (chapter) => compileProjectChapterContext(project, chapter).estimatedTokens,
-  );
-}
-
-function startOneChapter(
-  id: string,
-  chapterId: string,
-  onStream?: (event: ChapterDraftStreamEvent) => void,
-  cachePolicy: AiCachePolicy = "use",
-) {
-  if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
-  const project = database.getProject(id);
-  if (!project.contract.approved) throw new Error("创作契约审批后才能生成正文");
-  const chapter = project.chapters.find((item) => item.id === chapterId);
-  if (!chapter) throw new Error("章节不存在");
-  if (!chapter.outline.trim()) throw new Error("请先填写本章章纲");
-  if (["已定稿", "待发布", "已发布"].includes(chapter.status)) throw new Error("已定稿或进入发布流程的章节不能由 AI 覆写");
-  assertNoHardStoryConstraint(evaluateStoryConstraints(project.facts, chapter));
-  if (!getApiKey()) throw new Error("尚未配置 AI API 密钥");
-  activeGenerationProjects.add(id);
-  try {
-    const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
-    const generationGuard = createChapterGenerationGuard(chapter);
-    const task = ai.startDraftChapter(id, chapter, compileProjectChapterContext(project, chapter, facts), {
-      retryContext: serializeChapterAiRetryContext("chapter", id, chapter),
-      onStream,
-      cachePolicy,
-    });
-    return {
-      ...task,
-      completion: task.completion
-        .then((generated) => database.saveGeneratedChapter(id, generated, generationGuard))
-        .finally(() => activeGenerationProjects.delete(id)),
-    };
-  } catch (error) {
-    activeGenerationProjects.delete(id);
-    throw error;
-  }
-}
-
-async function generateOneChapter(id: string, chapterId: string, onStream?: (event: ChapterDraftStreamEvent) => void) {
-  return startOneChapter(id, chapterId, onStream).completion;
-}
-
-async function generateChapterBatchFrom(id: string, chapterId: string) {
-  if (activeGenerationProjects.has(id)) throw new Error("该作品已有正文生成任务正在运行");
-  const preview = previewChapterBatch(database.getProject(id), database.getAiSettings(), chapterId);
-  if (!preview.canRun) throw new Error(preview.blockingReason ?? "当前不能执行五章批次");
-  activeGenerationProjects.add(id);
-  try {
-    const generated: Chapter[] = [];
-    for (const candidate of preview.chapters) {
-      const currentProject = database.getProject(id);
-      const chapter = currentProject.chapters.find((item) => item.id === candidate.id);
-      if (!chapter) throw new Error(`第${candidate.number}章不存在`);
-      if (chapter.content.trim()) { generated.push(chapter); continue; }
-      assertNoHardStoryConstraint(evaluateStoryConstraints(currentProject.facts, chapter));
-      const facts = database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number);
-      const generationGuard = createChapterGenerationGuard(chapter);
-      const draft = await ai.draftChapter(
-        id,
-        chapter,
-        compileProjectChapterContext(currentProject, chapter, facts),
-        serializeChapterAiRetryContext("batch", id, chapter),
-      );
-      generated.push(database.saveGeneratedChapter(id, draft, generationGuard));
-    }
-    return generated;
-  } finally {
-    activeGenerationProjects.delete(id);
-  }
-}
 
 function getApiKey() {
   return apiCredential;
@@ -261,8 +174,7 @@ function registerHandlers() {
     register: handle,
     database,
     ai,
-    isGenerationActive: (projectId) =>
-      activeGenerationProjects.has(projectId),
+    isGenerationActive: chapterGeneration.isActive,
     currentDate: () => new Date(),
   });
   registerAiHandlers({
@@ -270,25 +182,22 @@ function registerHandlers() {
     database,
     ai,
     compileContext: compileProjectChapterContext,
-    generateChapterDraft: generateOneChapter,
+    generateChapterDraft: chapterGeneration.generateOne,
     sendChapterDraftStream: (streamId, event) => {
       mainWindow?.webContents.send("studio:chapter-draft-stream", {
         streamId,
         event,
       });
     },
-    previewChapterBatch,
-    generateChapterBatch: generateChapterBatchFrom,
+    previewChapterBatch: chapterGeneration.previewBatch,
+    generateChapterBatch: chapterGeneration.generateBatch,
     runLocalQualityCheck: (input) =>
       worker.run("quality-check", input),
     createId: randomUUID,
     currentTimestamp: now,
-    isGenerationActive: (projectId) =>
-      activeGenerationProjects.has(projectId),
-    markGenerationActive: (projectId) =>
-      activeGenerationProjects.add(projectId),
-    markGenerationIdle: (projectId) =>
-      activeGenerationProjects.delete(projectId),
+    isGenerationActive: chapterGeneration.isActive,
+    markGenerationActive: chapterGeneration.markActive,
+    markGenerationIdle: chapterGeneration.markIdle,
     getApiKey,
     saveApiKey: async (apiKey) => {
       await writeApiCredential(apiKey);
@@ -307,7 +216,7 @@ function registerHandlers() {
       });
     },
     startChapterRetry: (projectId, chapterId) =>
-      startOneChapter(projectId, chapterId, undefined, "bypass"),
+      chapterGeneration.startOne(projectId, chapterId, undefined, "bypass"),
     logRetryFailure: (details) =>
       logger.write("error", "ai.retry.failed", { ...details }),
   });
@@ -369,6 +278,12 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
   logger.write("info", "application.started", { version: app.getVersion(), workspace: workspaceRoot });
   worker = new BackgroundWorker();
   ai = new AiService(database, getApiKey, 120_000, 0, (level, event, data) => logger.write(level, event, data));
+  chapterGeneration = createChapterGenerationCoordinator({
+    database,
+    ai,
+    getApiKey,
+    compileContext: compileProjectChapterContext,
+  });
   registerHandlers();
   void researchHandlers.runDueRankingSchedules();
   void systemHandlers.runAutomaticBackup();
