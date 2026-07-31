@@ -173,6 +173,101 @@ describe("AI provider routing", () => {
     expect(body).not.toHaveProperty("response_format");
   });
 
+  it("accumulates usage and cost when structured validation retries succeed", async () => {
+    const finishAiJob = vi.fn();
+    const log = vi.fn();
+    const database = {
+      getAiSettings: () => ({
+        baseUrl: "https://api.example.com/v1", model: "gpt-5.1", embeddingModel: "test", hasApiKey: true,
+        inputPricePerMillion: 2, outputPricePerMillion: 5,
+      }),
+      findAiJob: () => undefined, startAiJob: () => "job-usage-retry", finishAiJob,
+    } as unknown as WorkspaceDatabase;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({ issues: "invalid" }),
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({ issues: [] }),
+        usage: { input_tokens: 40, output_tokens: 10 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new AiService(database, () => "secret", 120_000, 0, log).reviewChapter(project, chapter, context))
+      .resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(finishAiJob).toHaveBeenCalledOnce();
+    expect(finishAiJob.mock.calls[0][3]).toMatchObject({ inputTokens: 140, outputTokens: 30, attemptCount: 2 });
+    expect(finishAiJob.mock.calls[0][3].actualCost).toBeCloseTo(0.00043);
+    expect(log).toHaveBeenCalledWith("error", "ai.request.attempt_failed", expect.objectContaining({
+      attemptInputTokens: 100, attemptOutputTokens: 20, cumulativeInputTokens: 100, cumulativeOutputTokens: 20,
+    }));
+    expect(log).toHaveBeenCalledWith("info", "ai.request.attempt_completed", expect.objectContaining({
+      attemptInputTokens: 40, attemptOutputTokens: 10, cumulativeInputTokens: 140, cumulativeOutputTokens: 30,
+    }));
+  });
+
+  it("keeps cumulative usage and cost when every structured response fails", async () => {
+    const finishAiJob = vi.fn();
+    const database = {
+      getAiSettings: () => ({
+        baseUrl: "https://api.example.com/v1", model: "gpt-5.1", embeddingModel: "test", hasApiKey: true,
+        inputPricePerMillion: 3, outputPricePerMillion: 7,
+      }),
+      findAiJob: () => undefined, startAiJob: () => "job-usage-failed", finishAiJob,
+    } as unknown as WorkspaceDatabase;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      output_text: JSON.stringify({ issues: "invalid" }),
+      usage: { input_tokens: 10, output_tokens: 4 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    await expect(new AiService(database, () => "secret").reviewChapter(project, chapter, context))
+      .rejects.toThrow();
+
+    expect(finishAiJob).toHaveBeenCalledOnce();
+    expect(finishAiJob.mock.calls[0][3]).toMatchObject({
+      status: "失败", inputTokens: 30, outputTokens: 12, attemptCount: 3,
+    });
+    expect(finishAiJob.mock.calls[0][3].actualCost).toBeCloseTo(0.000174);
+  });
+
+  it("preserves prior attempt usage when a structured retry is cancelled", async () => {
+    const finishAiJob = vi.fn();
+    const database = {
+      getAiSettings: () => ({
+        baseUrl: "https://api.example.com/v1", model: "gpt-5.1", embeddingModel: "test", hasApiKey: true,
+        inputPricePerMillion: 4, outputPricePerMillion: 6,
+      }),
+      findAiJob: () => undefined, startAiJob: () => "job-usage-cancelled", finishAiJob,
+    } as unknown as WorkspaceDatabase;
+    let requestCount = 0;
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      requestCount += 1;
+      if (requestCount === 1) return Promise.resolve(new Response(JSON.stringify({
+        output_text: JSON.stringify({ issues: "invalid" }),
+        usage: { input_tokens: 25, output_tokens: 5 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new AiService(database, () => "secret");
+
+    const running = service.reviewChapter(project, chapter, context);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(service.cancelJob("job-usage-cancelled")).toBe(true);
+    await expect(running).rejects.toThrow("任务已取消");
+
+    expect(finishAiJob).toHaveBeenCalledOnce();
+    expect(finishAiJob.mock.calls[0][3]).toMatchObject({
+      status: "已取消", inputTokens: 25, outputTokens: 5, attemptCount: 2,
+    });
+    expect(finishAiJob.mock.calls[0][3].actualCost).toBeCloseTo(0.00013);
+  });
+
   it("builds an aesthetic proposal from only the current project's contract, plans, and finalized prose", async () => {
     const suggestion = {
       profile: {

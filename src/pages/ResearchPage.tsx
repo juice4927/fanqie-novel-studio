@@ -49,6 +49,10 @@ import {
 } from "../shared/commercial-knowledge";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import { FANQIE_CATEGORY_PROFILES } from "../shared/fanqie-taxonomy";
+import {
+  estimateCjkTextTokens,
+  TOKEN_ESTIMATE_WARNING,
+} from "../shared/token-estimator";
 
 type ResearchTab = "榜单快照" | "样本拆书" | "脱敏洞察" | "商业知识";
 
@@ -1054,7 +1058,9 @@ export function ResearchPage({
       {pendingDeconstruct &&
         aiSettings &&
         (() => {
-          const inputTokens = Math.ceil(pendingDeconstruct.wordCount / 1.7);
+          const inputTokens = estimateCjkTextTokens(
+            pendingDeconstruct.wordCount,
+          );
           const outputTokens =
             pendingDeconstruct.chapterCount * 500 +
             Math.ceil(pendingDeconstruct.chapterCount / 10) * 900 +
@@ -1094,7 +1100,7 @@ export function ResearchPage({
                 </div>
               </div>
               <p className="inline-warning">
-                任务按章脱敏，分十章阶段、分卷和全书逐层汇总。实际用量由模型分词与输出长度决定，不设强制费用上限。
+                {TOKEN_ESTIMATE_WARNING}。任务按章脱敏，分十章阶段、分卷和全书逐层汇总。实际用量由模型分词与输出长度决定，不设强制费用上限。
               </p>
               <div className="modal-actions">
                 <Button

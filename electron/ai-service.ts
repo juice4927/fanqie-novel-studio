@@ -457,7 +457,7 @@ export class AiService {
     let useJsonMode = !useResponses && inferProviderCapabilities(settings.baseUrl).jsonMode;
     let useStreaming = options.stream ?? false;
     let includeStreamUsage = useStreaming;
-    let usage = { inputTokens: 0, outputTokens: 0 };
+    let cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     let headersAt: string | null = null;
     let firstTokenAt: string | null = null;
     let chunkCount = 0;
@@ -477,8 +477,8 @@ export class AiService {
     })() : null;
     this.activeRequests.set(jobId, controller);
     const telemetry = (status?: "失败" | "已取消") => ({
-      ...usage,
-      actualCost: usage.inputTokens / 1_000_000 * settings.inputPricePerMillion + usage.outputTokens / 1_000_000 * settings.outputPricePerMillion,
+      ...cumulativeUsage,
+      actualCost: cumulativeUsage.inputTokens / 1_000_000 * settings.inputPricePerMillion + cumulativeUsage.outputTokens / 1_000_000 * settings.outputPricePerMillion,
       durationMs: Date.now() - startedAt,
       status,
       headersAt,
@@ -490,6 +490,7 @@ export class AiService {
     const persistLiveTelemetry = () => this.database.updateAiJobTelemetry?.(jobId, { headersAt, firstTokenAt, chunkCount, attemptCount });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       let attemptStartedAt = Date.now();
+      let attemptUsage = { inputTokens: 0, outputTokens: 0 };
       try {
         const endpoint = aiEndpoint(settings.baseUrl, settings.model);
         const remainingMs = deadline - Date.now();
@@ -588,18 +589,25 @@ export class AiService {
               ? await readResponsesStream(response, onActivity, onContent)
               : await readChatCompletionStream(response, onActivity, onContent);
             raw = streamed.content;
-            usage = streamed.usage;
+            attemptUsage = streamed.usage;
           } else {
             const body = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }>; choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } };
-            usage = parseProviderUsage(body);
+            attemptUsage = parseProviderUsage(body);
             raw = useResponses ? parseResponsesOutput(body) : body.choices?.[0]?.message?.content ?? "";
           }
+          cumulativeUsage = {
+            inputTokens: cumulativeUsage.inputTokens + attemptUsage.inputTokens,
+            outputTokens: cumulativeUsage.outputTokens + attemptUsage.outputTokens,
+          };
           if (!raw) throw new Error("模型没有返回内容");
           const parsed = options.schema.parse(JSON.parse(stripCodeFence(raw)));
           this.database.finishAiJob(jobId, JSON.stringify(parsed), undefined, telemetry());
           this.log("info", "ai.request.attempt_completed", {
             jobId, taskType: options.taskType, attempt: httpAttempt, durationMs: Date.now() - attemptStartedAt,
-            chunkCount: attemptChunkCount, totalChunkCount: chunkCount, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+            chunkCount: attemptChunkCount, totalChunkCount: chunkCount,
+            inputTokens: attemptUsage.inputTokens, outputTokens: attemptUsage.outputTokens,
+            attemptInputTokens: attemptUsage.inputTokens, attemptOutputTokens: attemptUsage.outputTokens,
+            cumulativeInputTokens: cumulativeUsage.inputTokens, cumulativeOutputTokens: cumulativeUsage.outputTokens,
           });
           this.activeRequests.delete(jobId);
           return parsed;
@@ -618,20 +626,22 @@ export class AiService {
         this.log("error", "ai.request.attempt_failed", {
           jobId, taskType: options.taskType, attempt: attemptCount, durationMs: Date.now() - startedAt, error: lastError,
           attemptDurationMs: Date.now() - attemptStartedAt,
+          attemptInputTokens: attemptUsage.inputTokens, attemptOutputTokens: attemptUsage.outputTokens,
+          cumulativeInputTokens: cumulativeUsage.inputTokens, cumulativeOutputTokens: cumulativeUsage.outputTokens,
         });
         if (lastError === "任务已取消") {
-          this.database.finishAiJob(jobId, "", lastError, { ...telemetry("已取消"), actualCost: 0 });
+          this.database.finishAiJob(jobId, "", lastError, telemetry("已取消"));
           this.cancelledJobs.delete(jobId);
           this.activeRequests.delete(jobId);
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型请求超时")) {
-          this.database.finishAiJob(jobId, "", lastError, { ...telemetry("失败"), actualCost: 0 });
+          this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
           this.activeRequests.delete(jobId);
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型接口返回")) {
-          this.database.finishAiJob(jobId, "", lastError, { ...telemetry("失败"), actualCost: 0 });
+          this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
           this.activeRequests.delete(jobId);
           throw new Error(lastError);
         }
@@ -643,7 +653,7 @@ export class AiService {
             await abortableDelay(delayMs, controller.signal);
           } catch {
             lastError = "任务已取消";
-            this.database.finishAiJob(jobId, "", lastError, { ...telemetry("已取消"), actualCost: 0 });
+            this.database.finishAiJob(jobId, "", lastError, telemetry("已取消"));
             this.cancelledJobs.delete(jobId);
             this.activeRequests.delete(jobId);
             throw new Error(lastError);
@@ -654,7 +664,7 @@ export class AiService {
         repairInstruction = `\n上一次输出校验失败：${lastError}。请修复结构并重新输出完整 JSON。`;
       }
     }
-    this.database.finishAiJob(jobId, "", lastError, { ...telemetry("失败"), actualCost: 0 });
+    this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
     this.activeRequests.delete(jobId);
     throw new Error(lastError);
   }

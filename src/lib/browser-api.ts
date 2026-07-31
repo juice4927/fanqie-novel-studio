@@ -32,6 +32,7 @@ import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { hasMajorStateChange } from "../shared/major-state-change";
 import { compileChapterContext } from "../shared/context-compiler";
+import { estimateChapterOutputTokens } from "../shared/token-estimator";
 import {
   assertChapterTransition,
   deriveChapterStatus,
@@ -345,6 +346,33 @@ function getProject(state: DemoState, projectId: string) {
   });
   project.summary = summary(project);
   return project;
+}
+
+function compileBrowserContext(
+  project: ProjectDetail,
+  chapter: Chapter,
+): ContextPackage {
+  return compileChapterContext({
+    summary: project.summary,
+    contract: project.contract,
+    chapter,
+    plans: project.plans,
+    relevantFacts: project.facts,
+    constraintFacts: project.facts,
+    summaries: project.summaries,
+    expectations: project.expectations,
+    recentChapters: project.chapters,
+    styleSamples: project.chapters
+      .filter(
+        (item) =>
+          item.number < chapter.number &&
+          ["已定稿", "待发布", "已发布"].includes(item.status) &&
+          item.content,
+      )
+      .sort((left, right) => left.number - right.number)
+      .slice(-20)
+      .map((item) => item.content),
+  });
 }
 
 function browserRankingAnalytics(
@@ -752,20 +780,7 @@ export function createBrowserApi(): AppApi {
     async compileContext(projectId, chapterId): Promise<ContextPackage> {
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((item) => item.id === chapterId)!;
-      return compileChapterContext({
-        summary: project.summary,
-        contract: project.contract,
-        chapter,
-        plans: project.plans,
-        relevantFacts: project.facts,
-        constraintFacts: project.facts,
-        summaries: project.summaries,
-        expectations: project.expectations,
-        recentChapters: project.chapters,
-        styleSamples: project.chapters
-          .filter((item) => item.number < chapter.number && ["已定稿", "待发布", "已发布"].includes(item.status))
-          .map((item) => item.content),
-      });
+      return compileBrowserContext(project, chapter);
     },
     async searchProject(projectId, query, offset = 0, limit = 50) {
       return getProject(state, projectId)
@@ -1068,32 +1083,47 @@ export function createBrowserApi(): AppApi {
       const start = project.chapters.find(
         (chapter) => chapter.id === chapterId,
       );
-      const chapters = start
+      const selectedChapters = start
         ? project.chapters
             .filter(
               (chapter) =>
                 chapter.number >= start.number &&
                 chapter.number < start.number + 5,
             )
-            .map((chapter) => ({
-              id: chapter.id,
-              number: chapter.number,
-              title: chapter.title,
-            }))
+            .sort((left, right) => left.number - right.number)
         : [];
-      const majorChapter = start && project.chapters
-        .filter((chapter) => chapter.number >= start.number && chapter.number < start.number + 5)
+      const chapters = selectedChapters.map((chapter) => ({
+        id: chapter.id,
+        number: chapter.number,
+        title: chapter.title,
+      }));
+      const majorChapter = start && selectedChapters
         .find((chapter) => hasMajorStateChange(
           chapter.outline,
           project.summary.genre,
           project.contract.majorStateChanges,
         ));
       const canRun = chapters.length === 5 && start?.batchMode === "五章批次" && !majorChapter;
+      const inputTokens = selectedChapters.reduce(
+        (sum, chapter) =>
+          sum + compileBrowserContext(project, chapter).estimatedTokens,
+        0,
+      );
+      const outputTokens = selectedChapters.reduce(
+        (sum, chapter) =>
+          sum + estimateChapterOutputTokens(chapter.targetWords ?? 2300),
+        0,
+      );
+      const estimatedCost =
+        (inputTokens / 1_000_000) *
+          (state.settings.inputPricePerMillion ?? 0) +
+        (outputTokens / 1_000_000) *
+          (state.settings.outputPricePerMillion ?? 0);
       return {
         chapters,
-        inputTokens: chapters.length * 2200,
-        outputTokens: chapters.length * 1530,
-        estimatedCost: 0,
+        inputTokens,
+        outputTokens,
+        estimatedCost,
         canRun,
         blockingReason: canRun
           ? null

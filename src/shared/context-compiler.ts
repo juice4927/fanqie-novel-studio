@@ -11,6 +11,7 @@ import type {
 import { compileAestheticGuidance } from "./aesthetic-profile";
 import { compileCommercialGuidance, resolveStoryStage } from "./commercial-knowledge";
 import { buildContextDiagnostics } from "./context-diagnostics";
+import { estimateStructuredRequestTokens } from "./token-estimator";
 import { findCurrentVolume } from "./planning";
 import { analyzeProseTemperature } from "./prose-temperature";
 import { evaluateStoryConstraints } from "./story-constraints";
@@ -147,7 +148,11 @@ export function compileChapterContext(input: ContextCompilerInput): ContextPacka
       : "尚无本项目已定稿正文，不加载任何样本文风。",
     estimatedTokens: 0,
   };
-  context.estimatedTokens = Math.ceil(contextText(context).length / 1.8);
+  context.estimatedTokens = estimateStructuredRequestTokens([
+    contextText(context),
+    chapter.outline,
+    chapter.chapterFunction ?? "行动",
+  ]);
 
   const confirmedConflicts = input.constraintFacts.filter((fact) => fact.confidence === "有冲突");
   const constraintFindings = evaluateStoryConstraints(input.constraintFacts, chapter);

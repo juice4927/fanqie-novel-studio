@@ -53,6 +53,7 @@ import { AutosaveCoordinator, chapterDraftSignature, clearRecoveredChapter, read
 import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
 import type { GenrePluginDefinition } from "../shared/genre-plugins";
 import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
+import { TOKEN_ESTIMATE_WARNING } from "../shared/token-estimator";
 import {
   Badge,
   Button,
@@ -771,6 +772,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             <span>
               <strong>上下文包</strong>
               <small>约 {context.estimatedTokens} tokens</small>
+              <small>{TOKEN_ESTIMATE_WARNING}</small>
             </span>
             <IconButton label="关闭上下文" onClick={() => setContext(null)}>
               <Trash2 size={16} />
@@ -907,6 +909,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                 </strong>
               </div>
             </div>
+            <p className="inline-warning">{TOKEN_ESTIMATE_WARNING}</p>
             {batchPreview.blockingReason && (
               <p className="inline-warning">{batchPreview.blockingReason}</p>
             )}

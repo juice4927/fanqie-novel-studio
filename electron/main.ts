@@ -38,6 +38,7 @@ import { deleteAutoBackupCredential, readApiCredential, readAutoBackupCredential
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import { hasMajorStateChange } from "../src/shared/major-state-change";
 import { compileChapterContext } from "../src/shared/context-compiler";
+import { estimateChapterOutputTokens } from "../src/shared/token-estimator";
 import {
   assertChapterRetrySnapshot,
   createChapterGenerationGuard,
@@ -190,7 +191,10 @@ function previewChapterBatch(
     (sum, chapter) => sum + compileContext(project, chapter).estimatedTokens,
     0,
   );
-  const outputTokens = ordered.length * Math.ceil(2600 / 1.7);
+  const outputTokens = ordered.reduce(
+    (sum, chapter) => sum + estimateChapterOutputTokens(chapter.targetWords ?? 2300),
+    0,
+  );
   const estimatedCost =
     (inputTokens / 1_000_000) * settings.inputPricePerMillion +
     (outputTokens / 1_000_000) * settings.outputPricePerMillion;
