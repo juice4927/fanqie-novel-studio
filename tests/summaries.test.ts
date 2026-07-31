@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { aggregateStorySummaries, buildChapterSummary, buildLongTermMemory } from "../src/shared/summaries";
+import {
+  aggregateStorySummaries,
+  buildChapterSummary,
+  buildLongTermMemory,
+  prepareFinalizedChapterSummaries,
+} from "../src/shared/summaries";
 import type { Chapter, StorySummary } from "../src/shared/types";
 
 function chapter(content: string): Chapter {
@@ -51,5 +56,81 @@ describe("structured story summaries", () => {
     expect(result).toContain("近期阶段 491-500");
     expect(result).not.toContain("近期阶段 11-20");
     expect(result.length).toBeLessThanOrEqual(12000);
+  });
+
+  it("prepares versioned layered summaries without mutating project state", () => {
+    const current = chapter(
+      "林舟获得门禁卡。\n\n真正的密码仍未找到，巡逻队即将抵达！",
+    );
+    const existing: StorySummary[] = [
+      {
+        id: `chapter:${current.id}`,
+        layer: "章节",
+        title: "旧章节摘要",
+        fromChapter: 1,
+        toChapter: 1,
+        content: "旧内容",
+        version: 2,
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      },
+      {
+        id: "stage:1",
+        layer: "十章阶段",
+        title: "旧阶段摘要",
+        fromChapter: 1,
+        toChapter: 1,
+        content: "旧内容",
+        version: 4,
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      },
+      {
+        id: "book",
+        layer: "全书",
+        title: "旧全书摘要",
+        fromChapter: 1,
+        toChapter: 1,
+        content: "旧内容",
+        version: 7,
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      },
+    ];
+    const project = {
+      chapters: [current],
+      plans: [{
+        id: "volume-1",
+        kind: "分卷" as const,
+        title: "第一卷",
+        ordinal: 1,
+        goal: "取得第一份证据",
+        conflict: "封锁升级",
+        outcome: "进入旧城",
+        targetWords: 150_000,
+        status: "已批准" as const,
+        parentId: null,
+      }],
+      summaries: existing,
+    };
+    const snapshot = structuredClone(project);
+
+    const updates = prepareFinalizedChapterSummaries(
+      project,
+      current,
+      "2026-07-31T00:00:00.000Z",
+    );
+
+    expect(updates.map((item) => item.layer)).toEqual([
+      "场景",
+      "场景",
+      "章节",
+      "十章阶段",
+      "分卷",
+      "全书",
+    ]);
+    expect(updates.find((item) => item.layer === "章节")?.version).toBe(3);
+    expect(updates.find((item) => item.layer === "十章阶段")?.version).toBe(5);
+    expect(updates.find((item) => item.layer === "全书")?.version).toBe(8);
+    expect(updates.find((item) => item.layer === "分卷")?.content)
+      .toContain("取得第一份证据");
+    expect(project).toEqual(snapshot);
   });
 });

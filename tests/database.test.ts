@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceDatabase, now } from "../electron/database";
 import { createChapterGenerationGuard } from "../electron/ai-retry";
 import type { EmbeddingProvider } from "../electron/semantic";
@@ -301,6 +301,24 @@ describe("per-book isolation and gates", () => {
     expect((inspection.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count).toBe(0);
     expect((inspection.prepare("SELECT content FROM chapter_contents WHERE chapter_id = ?").get(saved.id) as { content: string }).content).toBe(body);
     inspection.close();
+  });
+
+  it("builds finalized summaries without loading every chapter body", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "轻量定稿", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    let chapter = database.saveChapter(project.id, createChapter(1, "林舟发现新线索。真正的密码仍未找到。"));
+    chapter = database.transitionChapter(project.id, chapter.id, "待质检");
+    chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
+    const fullProjectRead = vi.spyOn(database, "getProject").mockImplementation(() => {
+      throw new Error("不应全量读取项目正文");
+    });
+
+    expect(() => database.transitionChapter(project.id, chapter.id, "已定稿"))
+      .not.toThrow();
+    expect(fullProjectRead).not.toHaveBeenCalled();
+    fullProjectRead.mockRestore();
+    expect(database.getProjectOverview(project.id).summaries.map((item) => item.layer))
+      .toEqual(expect.arrayContaining(["场景", "章节", "十章阶段", "全书"]));
   });
 
   it("migrates legacy chapter records into indexed metadata and separate content", () => {

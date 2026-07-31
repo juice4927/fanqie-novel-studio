@@ -62,5 +62,22 @@ describe("browser chapter workflow", () => {
       updatedAt: transitionedAt,
     });
     expect(afterTransition.summary.updatedAt).toBe(transitionedAt);
+
+    await api.transitionChapter(summary.id, chapter.id, "待定稿");
+    const finalizedAt = "2026-08-02T03:00:00.000Z";
+    vi.setSystemTime(finalizedAt);
+    await api.transitionChapter(summary.id, chapter.id, "已定稿");
+    const finalized = await api.getProject(summary.id);
+
+    expect(finalized.summaries.map((item) => item.layer)).toEqual(
+      expect.arrayContaining(["场景", "章节", "十章阶段", "分卷", "全书"]),
+    );
+    expect(
+      finalized.summaries.find((item) => item.layer === "章节"),
+    ).toMatchObject({
+      id: `chapter:${chapter.id}`,
+      version: 1,
+      updatedAt: finalizedAt,
+    });
   });
 });

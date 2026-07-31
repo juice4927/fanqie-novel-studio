@@ -1,4 +1,4 @@
-import type { Chapter, StorySummary } from "./types";
+import type { Chapter, PlanNode, StorySummary } from "./types";
 
 const CHANGE_WORDS = /死亡|牺牲|受伤|恢复|突破|晋级|获得|失去|交出|夺回|离开|抵达|加入|退出|决裂|和解|暴露|揭露|发现|得知|承诺|约定|怀疑|决定|失败|成功/;
 const OPEN_WORDS = /尚未|仍未|还没|必须|需要|准备|即将|等待|寻找|追查|怀疑|秘密|伏笔|承诺|约定|危机|威胁|问题|线索/;
@@ -59,6 +59,129 @@ export function aggregateStorySummaries(items: StorySummary[], maxCharacters: nu
     used += line.length + 1;
   }
   return result.join("\n");
+}
+
+interface FinalizedChapterSummaryProject {
+  chapters: readonly Chapter[];
+  plans: readonly PlanNode[];
+  summaries: readonly StorySummary[];
+}
+
+export function prepareFinalizedChapterSummaries(
+  project: FinalizedChapterSummaryProject,
+  chapter: Chapter,
+  updatedAt: string,
+): StorySummary[] {
+  const summaries = new Map(
+    project.summaries.map((summary) => [summary.id, summary]),
+  );
+  const updates: StorySummary[] = [];
+  const save = (summary: Omit<StorySummary, "version" | "updatedAt">) => {
+    const previous = summaries.get(summary.id);
+    const next: StorySummary = {
+      ...summary,
+      version: (previous?.version ?? 0) + 1,
+      updatedAt,
+    };
+    summaries.set(next.id, next);
+    updates.push(next);
+  };
+  const chapters = project.chapters.some((item) => item.id === chapter.id)
+    ? project.chapters.map((item) => item.id === chapter.id ? chapter : item)
+    : [...project.chapters, chapter];
+  const finalized = chapters.filter((item) =>
+    ["已定稿", "待发布", "已发布"].includes(item.status),
+  );
+
+  chapter.content
+    .split(/\n\s*\n/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+    .forEach((scene, index) =>
+      save({
+        id: `scene:${chapter.id}:${index + 1}`,
+        layer: "场景",
+        title: `第${chapter.number}章·场景${index + 1}`,
+        fromChapter: chapter.number,
+        toChapter: chapter.number,
+        content: scene.slice(0, 220),
+      }),
+    );
+  save({
+    id: `chapter:${chapter.id}`,
+    layer: "章节",
+    title: `第${chapter.number}章 ${chapter.title}`,
+    fromChapter: chapter.number,
+    toChapter: chapter.number,
+    content: buildChapterSummary(chapter),
+  });
+
+  const stageStart = Math.floor((chapter.number - 1) / 10) * 10 + 1;
+  const stageEnd = stageStart + 9;
+  const stageItems = [...summaries.values()].filter(
+    (item) =>
+      item.layer === "章节" &&
+      item.fromChapter >= stageStart &&
+      item.fromChapter <= stageEnd,
+  );
+  save({
+    id: `stage:${stageStart}`,
+    layer: "十章阶段",
+    title: `第${stageStart}–${stageEnd}章`,
+    fromChapter: stageStart,
+    toChapter: Math.max(
+      ...stageItems.map((item) => item.toChapter),
+      chapter.number,
+    ),
+    content: aggregateStorySummaries(stageItems, 6000),
+  });
+
+  const volumes = project.plans
+    .filter((plan) => plan.kind === "分卷" && plan.status === "已批准")
+    .sort((left, right) => left.ordinal - right.ordinal);
+  let cursor = 1;
+  for (const volume of volumes) {
+    const estimatedChapters = Math.max(
+      1,
+      Math.ceil(volume.targetWords / 2500),
+    );
+    const end = cursor + estimatedChapters - 1;
+    if (chapter.number >= cursor && chapter.number <= end) {
+      const items = [...summaries.values()].filter(
+        (item) =>
+          item.layer === "十章阶段" &&
+          item.fromChapter >= cursor &&
+          item.fromChapter <= end,
+      );
+      save({
+        id: `volume:${volume.id}`,
+        layer: "分卷",
+        title: volume.title,
+        fromChapter: cursor,
+        toChapter: Math.min(
+          end,
+          Math.max(...finalized.map((item) => item.number)),
+        ),
+        content: `分卷目标：${volume.goal}\n${aggregateStorySummaries(items, 10000 - volume.goal.length - 6)}`,
+      });
+      break;
+    }
+    cursor = end + 1;
+  }
+
+  const stages = [...summaries.values()].filter(
+    (item) => item.layer === "十章阶段",
+  );
+  save({
+    id: "book",
+    layer: "全书",
+    title: "全书进展摘要",
+    fromChapter: 1,
+    toChapter: Math.max(...finalized.map((item) => item.number)),
+    content: aggregateStorySummaries(stages, 16000),
+  });
+  return updates;
 }
 
 export function buildLongTermMemory(

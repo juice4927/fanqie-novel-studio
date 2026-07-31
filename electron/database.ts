@@ -66,8 +66,7 @@ import {
   type EmbeddingProvider,
 } from "./semantic";
 import {
-  aggregateStorySummaries,
-  buildChapterSummary,
+  prepareFinalizedChapterSummaries,
 } from "../src/shared/summaries";
 import {
   assertChapterTransition,
@@ -1565,13 +1564,13 @@ export class WorkspaceDatabase {
 
   private updateSummaries(projectId: string, chapter: Chapter) {
     const db = this.projectDb(projectId);
-    const project = this.getProject(projectId);
-    const finalized = project.chapters.filter((item) =>
-      ["已定稿", "待发布", "已发布"].includes(item.status),
+    const project = this.getProjectOverview(projectId);
+    const updates = prepareFinalizedChapterSummaries(
+      project,
+      chapter,
+      now(),
     );
-    const saveSummary = (
-      summary: Omit<StorySummary, "version" | "updatedAt">,
-    ) => {
+    for (const summary of updates) {
       const previous = this.getRecord<StorySummary>(
         db,
         "summaries",
@@ -1581,95 +1580,10 @@ export class WorkspaceDatabase {
         db,
         "summaries",
         summary.id,
-        { ...summary, version: (previous?.version ?? 0) + 1, updatedAt: now() },
+        summary,
         previous?.version,
       );
-    };
-    const scenes = chapter.content
-      .split(/\n\s*\n/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .slice(0, 20);
-    scenes.forEach((scene, index) =>
-      saveSummary({
-        id: `scene:${chapter.id}:${index + 1}`,
-        layer: "场景",
-        title: `第${chapter.number}章·场景${index + 1}`,
-        fromChapter: chapter.number,
-        toChapter: chapter.number,
-        content: scene.slice(0, 220),
-      }),
-    );
-    saveSummary({
-      id: `chapter:${chapter.id}`,
-      layer: "章节",
-      title: `第${chapter.number}章 ${chapter.title}`,
-      fromChapter: chapter.number,
-      toChapter: chapter.number,
-      content: buildChapterSummary(chapter),
-    });
-    const stageStart = Math.floor((chapter.number - 1) / 10) * 10 + 1;
-    const stageEnd = stageStart + 9;
-    const stageItems = this.listRecords<StorySummary>(db, "summaries").filter(
-      (item) =>
-        item.layer === "章节" &&
-        item.fromChapter >= stageStart &&
-        item.fromChapter <= stageEnd,
-    );
-    saveSummary({
-      id: `stage:${stageStart}`,
-      layer: "十章阶段",
-      title: `第${stageStart}–${stageEnd}章`,
-      fromChapter: stageStart,
-      toChapter: Math.max(
-        ...stageItems.map((item) => item.toChapter),
-        chapter.number,
-      ),
-      content: aggregateStorySummaries(stageItems, 6000),
-    });
-    const volumes = project.plans
-      .filter((plan) => plan.kind === "分卷" && plan.status === "已批准")
-      .sort((a, b) => a.ordinal - b.ordinal);
-    let cursor = 1;
-    for (const volume of volumes) {
-      const estimatedChapters = Math.max(
-        1,
-        Math.ceil(volume.targetWords / 2500),
-      );
-      const end = cursor + estimatedChapters - 1;
-      if (chapter.number >= cursor && chapter.number <= end) {
-        const items = this.listRecords<StorySummary>(db, "summaries").filter(
-          (item) =>
-            item.layer === "十章阶段" &&
-            item.fromChapter >= cursor &&
-            item.fromChapter <= end,
-        );
-        saveSummary({
-          id: `volume:${volume.id}`,
-          layer: "分卷",
-          title: volume.title,
-          fromChapter: cursor,
-          toChapter: Math.min(
-            end,
-            Math.max(...finalized.map((item) => item.number)),
-          ),
-          content: `分卷目标：${volume.goal}\n${aggregateStorySummaries(items, 10000 - volume.goal.length - 6)}`,
-        });
-        break;
-      }
-      cursor = end + 1;
     }
-    const stages = this.listRecords<StorySummary>(db, "summaries").filter(
-      (item) => item.layer === "十章阶段",
-    );
-    saveSummary({
-      id: "book",
-      layer: "全书",
-      title: "全书进展摘要",
-      fromChapter: 1,
-      toChapter: Math.max(...finalized.map((item) => item.number)),
-      content: aggregateStorySummaries(stages, 16000),
-    });
   }
 }
 

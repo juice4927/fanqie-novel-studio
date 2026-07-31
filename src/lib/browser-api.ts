@@ -60,6 +60,7 @@ import {
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import { compileProjectChapterContext } from "../shared/context-compiler";
 import { buildChapterBatchPreview } from "../shared/chapter-batch-service";
+import { prepareFinalizedChapterSummaries } from "../shared/summaries";
 import {
   assertChapterTransition,
   deriveChapterBatchMode,
@@ -743,6 +744,19 @@ export function createBrowserApi(): AppApi {
         updatedAt,
       });
       project.chapters[project.chapters.indexOf(chapter)] = next;
+      if (status === "已定稿" && chapter.status !== "已定稿") {
+        for (const summary of prepareFinalizedChapterSummaries(
+          project,
+          next,
+          updatedAt,
+        )) {
+          const summaryIndex = project.summaries.findIndex(
+            (item) => item.id === summary.id,
+          );
+          if (summaryIndex >= 0) project.summaries[summaryIndex] = summary;
+          else project.summaries.push(summary);
+        }
+      }
       project.summary.updatedAt = updatedAt;
       persist();
       return {
