@@ -151,8 +151,8 @@ describe("AI provider routing", () => {
   } satisfies Chapter;
   const project = { summary: { id: "project-routing", genre: "都市脑洞" } } as unknown as ProjectDetail;
   const context = { contract: "", commercialGuidance: "", chapterIntent: "", expectationLedger: "", longTermMemory: "", volumeGoal: "", rollingOutline: "", recentSummary: "", relevantFacts: "", forbiddenKnowledge: "", authorStyle: "", estimatedTokens: 10 } satisfies ContextPackage;
-  const databaseFor = (model: string) => ({
-    getAiSettings: () => ({ baseUrl: "https://api.example.com/v1", model, embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
+  const databaseFor = (model: string, protocol: "openai-compatible" | "anthropic-messages" = "openai-compatible", baseUrl = "https://api.example.com/v1") => ({
+    getAiSettings: () => ({ protocol, baseUrl, model, embeddingModel: "test", hasApiKey: true, inputPricePerMillion: 0, outputPricePerMillion: 0 }),
     findAiJob: () => undefined, startAiJob: () => `job-${model}`, finishAiJob: vi.fn(),
   } as unknown as WorkspaceDatabase);
 
@@ -171,6 +171,29 @@ describe("AI provider routing", () => {
     expect(body.text.format).toMatchObject({ type: "json_schema", name: "quality-review", strict: true, schema: { type: "object" } });
     expect(body).not.toHaveProperty("messages");
     expect(body).not.toHaveProperty("response_format");
+  });
+
+  it("falls back to chat completions when a GPT-compatible endpoint lacks Responses", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("unknown endpoint /responses", { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [] }) } }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new AiService(databaseFor("gpt-5.1"), () => "secret").reviewChapter(project, chapter, context)).resolves.toEqual([]);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.example.com/v1/responses",
+      "https://api.example.com/v1/chat/completions",
+    ]);
+  });
+
+  it("does not retry a paid model response when AI audit persistence fails", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [] }) } }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const database = databaseFor("test-model");
+    vi.mocked(database.finishAiJob).mockImplementation(() => { throw new Error("disk full"); });
+
+    await expect(new AiService(database, () => "secret").reviewChapter(project, chapter, context)).rejects.toThrow("审计落库失败");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("accumulates usage and cost when structured validation retries succeed", async () => {
@@ -321,6 +344,89 @@ describe("AI provider routing", () => {
     expect(body.messages).toHaveLength(2);
     expect(body.response_format).toEqual({ type: "json_object" });
     expect(body).not.toHaveProperty("instructions");
+  });
+
+  it("uses Anthropic Messages only when that protocol is selected", async () => {
+    const startAiJob = vi.fn((..._args: unknown[]) => "job-anthropic");
+    const finishAiJob = vi.fn();
+    const baseDatabase = databaseFor("claude-sonnet-4-20250514", "anthropic-messages", "https://api.anthropic.com/v1");
+    const database = {
+      ...baseDatabase,
+      getAiSettings: () => ({ ...baseDatabase.getAiSettings(), inputPricePerMillion: 2, outputPricePerMillion: 5 }),
+      startAiJob,
+      finishAiJob,
+    } as unknown as WorkspaceDatabase;
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({
+      content: [{ type: "text", text: JSON.stringify({ issues: [] }) }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 13, output_tokens: 4 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new AiService(database, () => "sk-ant-secret").reviewChapter(project, chapter, context))
+      .resolves.toEqual([]);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/messages");
+    const headers = fetchMock.mock.calls[0][1]?.headers as Record<string, string>;
+    expect(headers).toMatchObject({
+      "x-api-key": "sk-ant-secret",
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+    });
+    expect(headers).not.toHaveProperty("Authorization");
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 8192,
+      stream: true,
+      system: expect.stringContaining("只返回合法 JSON"),
+      messages: [{ role: "user", content: expect.any(String) }],
+    });
+    expect(body).not.toHaveProperty("response_format");
+    expect(body).not.toHaveProperty("stream_options");
+    expect(body).not.toHaveProperty("reasoning");
+    expect(startAiJob.mock.calls[0][4]).toBe("anthropic:https://api.anthropic.com/v1");
+    expect(startAiJob.mock.calls[0][5]).toBe("claude-sonnet-4-20250514");
+    expect(finishAiJob.mock.calls[0][3]).toMatchObject({ inputTokens: 13, outputTokens: 4 });
+    expect(finishAiJob.mock.calls[0][3].actualCost).toBeCloseTo(0.000046);
+  });
+
+  it("keeps Claude model names on Chat Completions behind compatible gateways", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ issues: [] }) } }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new AiService(databaseFor("claude-via-proxy"), () => "secret")
+      .reviewChapter(project, chapter, context);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.example.com/v1/chat/completions");
+  });
+
+  it("does not repay for an Anthropic response truncated at max_tokens", async () => {
+    const finishAiJob = vi.fn();
+    const database = {
+      ...databaseFor("claude-model", "anthropic-messages", "https://api.anthropic.com/v1"),
+      finishAiJob,
+    } as unknown as WorkspaceDatabase;
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({
+      content: [{ type: "text", text: '{"issues":[' }],
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 20, output_tokens: 8192 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new AiService(database, () => "secret").reviewChapter(project, chapter, context))
+      .rejects.toThrow("max_tokens");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(finishAiJob).toHaveBeenCalledOnce();
+    expect(finishAiJob.mock.calls[0][3]).toMatchObject({
+      status: "失败",
+      inputTokens: 20,
+      outputTokens: 8192,
+      attemptCount: 1,
+    });
   });
 
   it("does not retry permanent provider errors", async () => {

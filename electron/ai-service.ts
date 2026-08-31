@@ -27,7 +27,7 @@ import type {
 import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
 import { WorkspaceDatabase, now } from "./database";
 import { compileCommercialGuidance, compileDeconstructionFramework, resolveStoryStage } from "../src/shared/commercial-knowledge";
-import { aiEndpoint, inferProviderCapabilities, JsonStringFieldExtractor, normalizeProviderUrl, parseProviderUsage, parseResponsesOutput, providerError, readChatCompletionStream, readResponsesStream, rejectsJsonMode, rejectsStreaming, usesResponsesApi } from "./ai-provider";
+import { aiEndpoint, inferProviderCapabilities, JsonStringFieldExtractor, normalizeProviderUrl, parseAnthropicOutput, parseProviderUsage, parseResponsesOutput, providerError, readAnthropicStream, readChatCompletionStream, readResponsesStream, rejectsJsonMode, rejectsResponsesApi, rejectsStreaming, usesResponsesApi } from "./ai-provider";
 import { fetchPublicHttpResponse } from "./netguard";
 import { PROMPT_VERSION } from "../src/shared/prompt-version";
 import { contextForModel } from "../src/shared/context-diagnostics";
@@ -477,7 +477,9 @@ export class AiService {
     const settings = this.database.getAiSettings();
     const apiKey = this.getApiKey();
     if (!apiKey) throw new Error("尚未配置 AI API 密钥");
-    const provider = normalizeProviderUrl(settings.baseUrl);
+    const protocol = settings.protocol ?? "openai-compatible";
+    const providerBase = normalizeProviderUrl(settings.baseUrl);
+    const provider = protocol === "anthropic-messages" ? `anthropic:${providerBase}` : providerBase;
     const inputHash = hashInput(`${options.system}\n${options.user}`);
     const cached = options.cachePolicy === "bypass"
       ? null
@@ -494,8 +496,9 @@ export class AiService {
     const startedAt = Date.now();
     let lastError = "模型输出不符合结构要求";
     let repairInstruction = "";
-    const useResponses = usesResponsesApi(settings.model);
-    let useJsonMode = !useResponses && inferProviderCapabilities(settings.baseUrl).jsonMode;
+    const useAnthropic = protocol === "anthropic-messages";
+    let useResponses = !useAnthropic && usesResponsesApi(settings.model);
+    let useJsonMode = !useAnthropic && !useResponses && inferProviderCapabilities(settings.baseUrl).jsonMode;
     let useStreaming = options.stream ?? false;
     let includeStreamUsage = useStreaming;
     let cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -533,7 +536,7 @@ export class AiService {
       let attemptStartedAt = Date.now();
       let attemptUsage = { inputTokens: 0, outputTokens: 0 };
       try {
-        const endpoint = aiEndpoint(settings.baseUrl, settings.model);
+        const endpoint = aiEndpoint(settings.baseUrl, settings.model, useResponses, protocol);
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0) throw new Error(`模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`);
         let timeoutError = "";
@@ -560,8 +563,17 @@ export class AiService {
           const response = await fetchPublicHttpResponse(endpoint, {
             method: "POST",
             signal: controller.signal,
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify(useResponses ? {
+            headers: useAnthropic
+              ? { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+              : { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify(useAnthropic ? {
+              model: settings.model,
+              max_tokens: 8192,
+              temperature: options.taskType === "draft-chapter" ? 0.85 : 0.35,
+              ...(useStreaming ? { stream: true } : {}),
+              system: `${options.system}\n只返回合法 JSON，不使用 Markdown。`,
+              messages: [{ role: "user", content: `${options.user}${repairInstruction}` }],
+            } : useResponses ? {
               model: settings.model,
               reasoning: { effort: options.reasoningEffort ?? "medium" },
               ...(useStreaming ? { stream: true } : {}),
@@ -589,6 +601,13 @@ export class AiService {
           });
           if (!response.ok) {
             const detail = (await response.text()).slice(0, 300);
+            if (useResponses && rejectsResponsesApi(response.status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", { jobId, taskType: options.taskType, attempt: httpAttempt, reason: "Responses API unsupported" });
+              useResponses = false;
+              useJsonMode = inferProviderCapabilities(settings.baseUrl).jsonMode;
+              attempt -= 1;
+              continue;
+            }
             if (!useResponses && includeStreamUsage && response.status === 400 && /stream.?options|include.?usage/i.test(detail)) {
               this.log("warn", "ai.request.compatibility_retry", { jobId, taskType: options.taskType, attempt: httpAttempt, reason: "stream_options unsupported" });
               includeStreamUsage = false;
@@ -611,6 +630,7 @@ export class AiService {
             throw new Error(providerError(response.status, detail));
           }
           let raw: string;
+          let anthropicStopReason: string | null = null;
           if (useStreaming && /text\/event-stream/i.test(response.headers.get("content-type") ?? "")) {
             const onActivity = () => { chunkCount += 1; attemptChunkCount += 1; resetIdleTimeout(); };
             const onContent = (delta: string) => {
@@ -626,23 +646,39 @@ export class AiService {
               }
               contentExtractor?.push(delta);
             };
-            const streamed = useResponses
-              ? await readResponsesStream(response, onActivity, onContent)
-              : await readChatCompletionStream(response, onActivity, onContent);
+            const streamed = useAnthropic
+              ? await readAnthropicStream(response, onActivity, onContent)
+              : useResponses
+                ? await readResponsesStream(response, onActivity, onContent)
+                : await readChatCompletionStream(response, onActivity, onContent);
+            if (useAnthropic && "stopReason" in streamed)
+              anthropicStopReason = typeof streamed.stopReason === "string" ? streamed.stopReason : null;
             raw = streamed.content;
             attemptUsage = streamed.usage;
           } else {
-            const body = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }>; choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } };
+            const body = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }>; content?: Array<{ type?: string; text?: string }>; choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number }; stop_reason?: string };
             attemptUsage = parseProviderUsage(body);
-            raw = useResponses ? parseResponsesOutput(body) : body.choices?.[0]?.message?.content ?? "";
+            if (useAnthropic) anthropicStopReason = body.stop_reason ?? null;
+            raw = useAnthropic
+              ? parseAnthropicOutput(body)
+              : useResponses
+                ? parseResponsesOutput(body)
+                : body.choices?.[0]?.message?.content ?? "";
           }
           cumulativeUsage = {
             inputTokens: cumulativeUsage.inputTokens + attemptUsage.inputTokens,
             outputTokens: cumulativeUsage.outputTokens + attemptUsage.outputTokens,
           };
+          if (anthropicStopReason === "max_tokens")
+            throw new Error("模型输出达到 Anthropic max_tokens 上限，结果已截断");
           if (!raw) throw new Error("模型没有返回内容");
           const parsed = options.schema.parse(JSON.parse(stripCodeFence(raw)));
-          this.database.finishAiJob(jobId, JSON.stringify(parsed), undefined, telemetry());
+          try {
+            this.database.finishAiJob(jobId, JSON.stringify(parsed), undefined, telemetry());
+          } catch (error) {
+            this.activeRequests.delete(jobId);
+            throw new Error(`AI 任务审计落库失败：${error instanceof Error ? error.message : String(error)}`);
+          }
           this.log("info", "ai.request.attempt_completed", {
             jobId, taskType: options.taskType, attempt: httpAttempt, durationMs: Date.now() - attemptStartedAt,
             chunkCount: attemptChunkCount, totalChunkCount: chunkCount,
@@ -651,6 +687,7 @@ export class AiService {
             cumulativeInputTokens: cumulativeUsage.inputTokens, cumulativeOutputTokens: cumulativeUsage.outputTokens,
           });
           this.activeRequests.delete(jobId);
+          this.cancelledJobs.delete(jobId);
           return parsed;
         } catch (error) {
           if (controller.signal.aborted) {
@@ -664,6 +701,7 @@ export class AiService {
         }
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
+        if (lastError.startsWith("AI 任务审计落库失败")) throw error;
         this.log("error", "ai.request.attempt_failed", {
           jobId, taskType: options.taskType, attempt: attemptCount, durationMs: Date.now() - startedAt, error: lastError,
           attemptDurationMs: Date.now() - attemptStartedAt,
@@ -671,19 +709,23 @@ export class AiService {
           cumulativeInputTokens: cumulativeUsage.inputTokens, cumulativeOutputTokens: cumulativeUsage.outputTokens,
         });
         if (lastError === "任务已取消") {
-          this.database.finishAiJob(jobId, "", lastError, telemetry("已取消"));
-          this.cancelledJobs.delete(jobId);
-          this.activeRequests.delete(jobId);
+          try { this.database.finishAiJob(jobId, "", lastError, telemetry("已取消")); }
+          finally { this.cancelledJobs.delete(jobId); this.activeRequests.delete(jobId); }
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型请求超时")) {
-          this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
-          this.activeRequests.delete(jobId);
+          try { this.database.finishAiJob(jobId, "", lastError, telemetry("失败")); }
+          finally { this.activeRequests.delete(jobId); this.cancelledJobs.delete(jobId); }
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型接口返回")) {
-          this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
-          this.activeRequests.delete(jobId);
+          try { this.database.finishAiJob(jobId, "", lastError, telemetry("失败")); }
+          finally { this.activeRequests.delete(jobId); this.cancelledJobs.delete(jobId); }
+          throw new Error(lastError);
+        }
+        if (lastError.startsWith("模型输出达到 Anthropic max_tokens")) {
+          try { this.database.finishAiJob(jobId, "", lastError, telemetry("失败")); }
+          finally { this.activeRequests.delete(jobId); this.cancelledJobs.delete(jobId); }
           throw new Error(lastError);
         }
         if (lastError.startsWith("模型服务暂时不可用") && attempt < 2) {
@@ -694,9 +736,8 @@ export class AiService {
             await abortableDelay(delayMs, controller.signal);
           } catch {
             lastError = "任务已取消";
-            this.database.finishAiJob(jobId, "", lastError, telemetry("已取消"));
-            this.cancelledJobs.delete(jobId);
-            this.activeRequests.delete(jobId);
+            try { this.database.finishAiJob(jobId, "", lastError, telemetry("已取消")); }
+            finally { this.cancelledJobs.delete(jobId); this.activeRequests.delete(jobId); }
             throw new Error(lastError);
           }
         }
@@ -705,8 +746,12 @@ export class AiService {
         repairInstruction = `\n上一次输出校验失败：${lastError}。请修复结构并重新输出完整 JSON。`;
       }
     }
-    this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
-    this.activeRequests.delete(jobId);
+    try {
+      this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
+    } finally {
+      this.activeRequests.delete(jobId);
+      this.cancelledJobs.delete(jobId);
+    }
     throw new Error(lastError);
   }
 
@@ -1168,7 +1213,9 @@ export class AiService {
     const minimumCharacters = Math.max(900, Math.round(targetCharacters * 0.68));
     const maximumCharacters = Math.min(4800, Math.round(targetCharacters * 1.35));
     const chapterFunction = chapter.chapterFunction ?? "行动";
-    const result = await this.runJson({
+    let result: z.infer<ReturnType<typeof chapterDraftSchema>>;
+    try {
+      result = await this.runJson({
       projectId,
       taskType: "draft-chapter",
       inputSummary: `第${chapter.number}章 ${chapter.title || "未命名"}`,
@@ -1183,7 +1230,11 @@ export class AiService {
       onCacheHit: lifecycle.onCacheHit,
       onAttempt: (attempt) => { currentAttempt = attempt; options.onStream?.({ type: "attempt-start", attempt }); },
       onDelta: (delta, attempt) => options.onStream?.({ type: "delta", attempt, delta }),
-    });
+      });
+    } catch (error) {
+      options.onStream?.({ type: "failed", attempt: currentAttempt, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
     options.onStream?.({ type: "complete", attempt: currentAttempt });
     return { ...chapter, title: result.title, content: result.content, status: "待质检", updatedAt: now() };
   }

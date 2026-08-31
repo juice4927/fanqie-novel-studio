@@ -12,6 +12,7 @@ import type {
 } from "../src/shared/types";
 
 const settings: AiSettings = {
+  protocol: "openai-compatible",
   baseUrl: "https://model.invalid/v1",
   model: "test-model",
   embeddingModel: "local",
@@ -66,6 +67,39 @@ function createJob(
 }
 
 describe("settings AI task center", () => {
+  it("saves the Anthropic protocol, endpoint, model, and API key", async () => {
+    const saveAiSettings = vi.fn(async (input, apiKey) => ({
+      ...input,
+      hasApiKey: Boolean(apiKey),
+    }));
+    const notify = vi.fn();
+    const api = {
+      getAiSettings: vi.fn().mockResolvedValue(settings),
+      getWorkspacePath: vi.fn().mockResolvedValue("C:\\workspace"),
+      getAutoBackupSettings: vi.fn().mockResolvedValue(autoBackup),
+      listAiJobs: vi.fn().mockResolvedValue([]),
+      saveAiSettings,
+    } as unknown as AppApi;
+
+    render(<SettingsPage api={api} notify={notify} />);
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: /接口协议/ }), "anthropic-messages");
+    const modelInput = screen.getByRole("textbox", { name: /创作与分析模型/ });
+    await userEvent.clear(modelInput);
+    await userEvent.type(modelInput, "claude-current-model");
+    await userEvent.type(screen.getByLabelText(/Anthropic API 密钥/), "sk-ant-test");
+    await userEvent.click(screen.getByRole("button", { name: "保存模型设置" }));
+
+    await waitFor(() => expect(saveAiSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com/v1",
+        model: "claude-current-model",
+      }),
+      "sk-ant-test",
+    ));
+    expect(notify).toHaveBeenCalledWith("模型设置已保存");
+  });
+
   it("uses the returned retry record without reloading the job list", async () => {
     const source = createJob("job-source", "原失败任务");
     const staleRetry = createJob("job-retry", "旧重试记录");

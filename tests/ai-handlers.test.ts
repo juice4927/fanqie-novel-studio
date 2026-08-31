@@ -59,6 +59,7 @@ function job(id: string): AiJobRecord {
 }
 
 const settings: Omit<AiSettings, "hasApiKey"> = {
+  protocol: "openai-compatible",
   baseUrl: "https://example.com/v1",
   model: "test-model",
   embeddingModel: "test-embedding",
@@ -792,6 +793,17 @@ describe("AI handlers", () => {
     registerAiHandlers(dependencies);
 
     await handlers.get("saveAiSettings")!({ ...settings, baseUrl: "https://other.example/v1" });
+
+    expect(clearApiKey).toHaveBeenCalledTimes(1);
+    expect(handlers.get("getAiSettings")!()).toMatchObject({ hasApiKey: false });
+  });
+
+  it("clears a credential when the API protocol changes on the same origin", async () => {
+    const { dependencies, handlers, clearApiKey, saveApiKey } = createDependencies();
+    await saveApiKey("secret");
+    registerAiHandlers(dependencies);
+
+    await handlers.get("saveAiSettings")!({ ...settings, protocol: "anthropic-messages" });
 
     expect(clearApiKey).toHaveBeenCalledTimes(1);
     expect(handlers.get("getAiSettings")!()).toMatchObject({ hasApiKey: false });

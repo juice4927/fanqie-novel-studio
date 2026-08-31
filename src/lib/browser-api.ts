@@ -430,6 +430,7 @@ function seed(): DemoState {
       },
     ],
     settings: {
+      protocol: "openai-compatible",
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4.1",
       embeddingModel: "text-embedding-3-small",
@@ -445,6 +446,7 @@ function load(): DemoState {
   try {
     const raw = localStorage.getItem(key);
     const state = raw ? (JSON.parse(raw) as DemoState) : seed();
+    state.settings.protocol ??= "openai-compatible";
     state.planVersions ??= {};
     for (const project of state.projects) {
       for (const plan of project.plans) {
@@ -1298,7 +1300,8 @@ export function createBrowserApi(): AppApi {
       return state.settings;
     },
     async saveAiSettings(settings, apiKey) {
-      const providerChanged = new URL(state.settings.baseUrl).origin !== new URL(settings.baseUrl).origin;
+      const providerChanged = state.settings.protocol !== settings.protocol ||
+        new URL(state.settings.baseUrl).origin !== new URL(settings.baseUrl).origin;
       state.settings = {
         ...settings,
         hasApiKey: Boolean(apiKey) || (!providerChanged && state.settings.hasApiKey),

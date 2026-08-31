@@ -3,7 +3,8 @@ import { CHAPTER_FUNCTIONS, GENRES, NOVEL_CONTRACT_FIELDS } from "../src/shared/
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import type { AppApi } from "../src/shared/types";
 
-const id = z.string().trim().min(1).max(200);
+const id = z.string().trim().min(1).max(200)
+  .regex(/^[\p{Letter}\p{Number}][\p{Letter}\p{Number}._:-]*$/u, "ID 只能包含字母、数字、点、下划线、冒号和连字符");
 const shortText = z.string().max(500);
 const mediumText = z.string().max(10_000);
 const longText = z.string().max(200_000);
@@ -300,7 +301,7 @@ const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
   previewChapterBatch: projectEntity,
   generateChapterBatch: projectEntity,
   getAiSettings: noArgs,
-  saveAiSettings: z.tuple([z.object({ baseUrl: modelBaseUrl, model: z.string().trim().min(1).max(200), embeddingModel: z.string().trim().min(1).max(200), inputPricePerMillion: z.number().min(0).max(1_000_000), outputPricePerMillion: z.number().min(0).max(1_000_000), longTaskTimeoutMinutes: z.number().int().min(5).max(15) }).strict(), z.string().max(10_000).optional()]),
+  saveAiSettings: z.tuple([z.object({ protocol: z.enum(["openai-compatible", "anthropic-messages"]), baseUrl: modelBaseUrl, model: z.string().trim().min(1).max(200), embeddingModel: z.string().trim().min(1).max(200), inputPricePerMillion: z.number().min(0).max(1_000_000), outputPricePerMillion: z.number().min(0).max(1_000_000), longTaskTimeoutMinutes: z.number().int().min(5).max(15) }).strict(), z.string().max(10_000).optional()]),
   listAiJobs: z.tuple([id.optional()]),
   cancelAiJob: z.tuple([id]),
   retryAiJob: z.tuple([id]),

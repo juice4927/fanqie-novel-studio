@@ -509,10 +509,14 @@ export function registerAiHandlers({
     hasApiKey: Boolean(getApiKey()),
   }));
   register("saveAiSettings", async (settings, apiKey) => {
-    const previousOrigin = new URL(database.getAiSettings().baseUrl).origin;
+    const previousSettings = database.getAiSettings();
+    const previousOrigin = new URL(previousSettings.baseUrl).origin;
     const nextOrigin = new URL(settings.baseUrl).origin;
     if (apiKey) await saveApiKey(apiKey);
-    else if (previousOrigin !== nextOrigin && getApiKey()) await clearApiKey();
+    else if (
+      (previousSettings.protocol !== settings.protocol || previousOrigin !== nextOrigin) &&
+      getApiKey()
+    ) await clearApiKey();
     return {
       ...database.saveAiSettings(settings),
       hasApiKey: Boolean(getApiKey()),

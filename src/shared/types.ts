@@ -419,7 +419,10 @@ export interface StorySummary {
   updatedAt: string;
 }
 
+export type AiProtocol = "openai-compatible" | "anthropic-messages";
+
 export interface AiSettings {
+  protocol: AiProtocol;
   baseUrl: string;
   model: string;
   embeddingModel: string;
@@ -458,7 +461,8 @@ export interface AiJobRecord {
 export type ChapterDraftStreamEvent =
   | { type: "attempt-start"; attempt: number }
   | { type: "delta"; attempt: number; delta: string }
-  | { type: "complete"; attempt: number };
+  | { type: "complete"; attempt: number }
+  | { type: "failed"; attempt: number; error: string };
 
 export interface ProjectDetail {
   summary: ProjectSummary;

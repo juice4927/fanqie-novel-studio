@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { aiEndpoint, JsonStringFieldExtractor, parseResponsesOutput, readChatCompletionStream, readResponsesStream, rejectsStreaming, usesResponsesApi } from "../electron/ai-provider";
+import { aiEndpoint, JsonStringFieldExtractor, parseAnthropicOutput, parseResponsesOutput, providerError, readAnthropicStream, readChatCompletionStream, readResponsesStream, rejectsResponsesApi, rejectsStreaming, usesResponsesApi } from "../electron/ai-provider";
 
 describe("OpenAI-compatible streaming", () => {
   it("extracts and decodes a JSON content string across arbitrary deltas", () => {
@@ -30,9 +30,69 @@ describe("OpenAI-compatible streaming", () => {
     expect(activity).toHaveBeenCalledTimes(3);
   });
 
+  it("accepts multiple complete data lines in one SSE event", async () => {
+    const response = new Response([
+      'data: {"choices":[{"delta":{"content":"{\\"ok\\":"}}]}',
+      'data: {"choices":[{"delta":{"content":"true}"}}]}',
+      "",
+      "",
+    ].join("\n"));
+
+    await expect(readChatCompletionStream(response, vi.fn())).resolves.toMatchObject({
+      content: '{"ok":true}',
+    });
+  });
+
   it("recognizes providers that explicitly reject streaming", () => {
     expect(rejectsStreaming(400, "stream is not supported by this model")).toBe(true);
     expect(rejectsStreaming(500, "stream is not supported")).toBe(false);
+  });
+});
+
+describe("Anthropic Messages API", () => {
+  it("builds the messages endpoint without inferring from the model name", () => {
+    expect(aiEndpoint("https://api.anthropic.com/v1", "claude-sonnet", false, "anthropic-messages"))
+      .toBe("https://api.anthropic.com/v1/messages");
+    expect(aiEndpoint("https://api.anthropic.com", "claude-sonnet", false, "anthropic-messages"))
+      .toBe("https://api.anthropic.com/v1/messages");
+    expect(aiEndpoint("https://proxy.invalid/v1", "claude-sonnet", false, "openai-compatible"))
+      .toBe("https://proxy.invalid/v1/chat/completions");
+  });
+
+  it("reads all text blocks from a non-streaming message", () => {
+    expect(parseAnthropicOutput({ content: [
+      { type: "text", text: '{"ok":' },
+      { type: "tool_use", id: "ignored" },
+      { type: "text", text: "true}" },
+    ] })).toBe('{"ok":true}');
+  });
+
+  it("reassembles text deltas and combines input/output usage", async () => {
+    const encoder = new TextEncoder();
+    const parts = [
+      'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"ok\\":"}}\n',
+      '\nevent: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"true}"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}\n\n',
+    ];
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        for (const part of parts) controller.enqueue(encoder.encode(part));
+        controller.close();
+      },
+    }));
+
+    await expect(readAnthropicStream(response, vi.fn())).resolves.toEqual({
+      content: '{"ok":true}',
+      usage: { inputTokens: 12, outputTokens: 5 },
+      stopReason: "end_turn",
+    });
+  });
+
+  it("surfaces Anthropic error events and treats overload status as retryable", async () => {
+    const response = new Response('event: error\ndata: {"type":"error","error":{"message":"overloaded"}}\n\n');
+    await expect(readAnthropicStream(response, vi.fn())).rejects.toThrow("overloaded");
+    expect(providerError(529, "overloaded_error")).toContain("暂时不可用");
   });
 });
 
@@ -43,6 +103,12 @@ describe("Responses API", () => {
     expect(usesResponsesApi("deepseek-chat")).toBe(false);
     expect(aiEndpoint("https://api.openai.com/v1/", "gpt-5.1")).toBe("https://api.openai.com/v1/responses");
     expect(aiEndpoint("https://model.invalid/v1", "deepseek-chat")).toBe("https://model.invalid/v1/chat/completions");
+  });
+
+  it("recognizes endpoints that do not implement the Responses API", () => {
+    expect(rejectsResponsesApi(404, "unknown endpoint /responses")).toBe(true);
+    expect(rejectsResponsesApi(500, "temporary failure")).toBe(false);
+    expect(aiEndpoint("https://model.invalid/v1", "gpt-5.1", false)).toBe("https://model.invalid/v1/chat/completions");
   });
 
   it("reads output text from a non-streaming response", () => {
