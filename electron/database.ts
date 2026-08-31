@@ -1032,7 +1032,8 @@ export class WorkspaceDatabase {
         if (chapter && chapter.batchMode !== "逐章")
           this.persistChapterInTransaction(db, id, { ...chapter, batchMode: "逐章" });
       }
-      db.exec("COMMIT");
+      injectFault("power-loss-before-commit");
+db.exec("COMMIT");
       this.touchProject(id);
     } catch (error) {
       try {
@@ -1114,7 +1115,8 @@ export class WorkspaceDatabase {
     db.exec("BEGIN IMMEDIATE");
     try {
       for (const metric of metrics) this.saveRecord(db, "metrics", metric.id, metric);
-      db.exec("COMMIT");
+      injectFault("power-loss-before-commit");
+db.exec("COMMIT");
       this.touchProject(id);
     } catch (error) {
       try {
@@ -1199,7 +1201,8 @@ export class WorkspaceDatabase {
           entry.officialReaderUrl ?? null,
           entry.platform ?? null,
         );
-      this.research.exec("COMMIT");
+      injectFault("power-loss-before-commit");
+this.research.exec("COMMIT");
     } catch (error) {
       try {
         this.research.exec("ROLLBACK");

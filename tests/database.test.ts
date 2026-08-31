@@ -1391,3 +1391,79 @@ describe("approval gates", () => {
     expect(() => database.decideChangeRequest(project.id, "missing", "批准")).toThrow("变更单不存在");
   });
 });
+
+describe("transaction rollback for batch writes", () => {
+  it("rolls back saveIssues when interrupted before commit", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "事务测试",
+      genre: "都市脑洞",
+      targetWords: 100000,
+      updateCadence: "每日1章",
+    });
+    process.env.NOVEL_STUDIO_FAULTS = "power-loss-before-commit";
+    expect(() =>
+      database.saveIssues(project.id, "chapter-1", [
+        {
+          id: "issue-1",
+          projectId: project.id,
+          chapterId: "chapter-1",
+          severity: "硬性",
+          category: "测试",
+          message: "问题",
+          evidence: "证据",
+          status: "待处理",
+          createdAt: now(),
+        },
+      ]),
+    ).toThrow("power loss");
+    delete process.env.NOVEL_STUDIO_FAULTS;
+    expect(database.getProject(project.id).issues).toHaveLength(0);
+  });
+
+  it("rolls back saveMetrics when interrupted before commit", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "事务测试",
+      genre: "都市脑洞",
+      targetWords: 100000,
+      updateCadence: "每日1章",
+    });
+    process.env.NOVEL_STUDIO_FAULTS = "power-loss-before-commit";
+    expect(() =>
+      database.saveMetrics(project.id, [
+        {
+          id: "metric-1",
+          chapterNumber: 1,
+          recordedAt: now(),
+          exposure: 100,
+          reads: 50,
+          retention: 0.5,
+          follows: 5,
+          revenue: 0,
+          comments: "",
+        },
+      ]),
+    ).toThrow("power loss");
+    delete process.env.NOVEL_STUDIO_FAULTS;
+    expect(database.getProject(project.id).metrics).toHaveLength(0);
+  });
+
+  it("rolls back saveRanking when interrupted before commit", () => {
+    const database = createDatabase();
+    process.env.NOVEL_STUDIO_FAULTS = "power-loss-before-commit";
+    expect(() =>
+      database.saveRanking({
+        id: "snap-1",
+        source: "手动",
+        listName: "测试榜单",
+        capturedAt: now(),
+        status: "成功",
+        error: null,
+        entries: [],
+      }),
+    ).toThrow("power loss");
+    delete process.env.NOVEL_STUDIO_FAULTS;
+    expect(database.listRankings()).toHaveLength(0);
+  });
+});
