@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   BrainCircuit,
   Check,
-  FileOutput,
   History,
   Layers3,
   LoaderCircle,
@@ -68,22 +67,6 @@ const EMPTY_CHAPTER = (number: number): Chapter => ({
   revision: 0,
   updatedAt: new Date().toISOString(),
 });
-const _splitLines = (value: string) =>
-  value
-    .split(/\n+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-const _issueTone = (value: string) => (value === "硬性" ? "danger" : value === "警告" ? "warning" : "neutral");
-function _LightbulbIcon() {
-  return (
-    <span className="mini-icon">
-      <Sparkles size={16} />
-    </span>
-  );
-}
-function _UploadIcon() {
-  return <FileOutput size={16} />;
-}
 
 export function WritingPage({
   project,

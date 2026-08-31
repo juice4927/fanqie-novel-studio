@@ -1692,17 +1692,6 @@ export class WorkspaceDatabase {
 
 export { now };
 
-function normalizeForFingerprint(text: string) {
-  return text.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
-}
-
-function _textWindows(text: string, step: number) {
-  const normalized = normalizeForFingerprint(text);
-  const windows: string[] = [];
-  for (let index = 0; index <= normalized.length - 24; index += step) windows.push(normalized.slice(index, index + 24));
-  return windows;
-}
-
 function factEmbeddingText(fact: LedgerFact) {
   return `${fact.kind} ${fact.genreDimension ?? ""} ${fact.subject} ${fact.predicate} ${fact.value} ${fact.knowledgeScope}`;
 }

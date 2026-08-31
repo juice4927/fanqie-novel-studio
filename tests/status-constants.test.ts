@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AI_JOB_STATUSES,
-  CHAPTER_STATUSES,
   CHANGE_REQUEST_STATUSES,
+  CHAPTER_STATUSES,
   CONTRACT_STATUSES,
   EXPECTATION_STATUSES,
   PLAN_STATUSES,
@@ -52,4 +52,3 @@ describe("status constants", () => {
     expect(QUALITY_SEVERITIES).toContain("硬性");
   });
 });
-

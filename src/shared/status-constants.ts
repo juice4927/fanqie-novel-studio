@@ -2,13 +2,19 @@
 // 避免裸中文字面量散落各处造成拼写不一致。类型由这些常量派生（见 types.ts）。
 
 export const PROJECT_STATUSES = [
-  "研究中", "候选立项", "设定中", "大纲审批", "连载准备", "连载中", "暂停", "完结", "归档",
+  "研究中",
+  "候选立项",
+  "设定中",
+  "大纲审批",
+  "连载准备",
+  "连载中",
+  "暂停",
+  "完结",
+  "归档",
 ] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
-export const CHAPTER_STATUSES = [
-  "章纲", "草稿", "待质检", "待定稿", "已定稿", "待发布", "已发布",
-] as const;
+export const CHAPTER_STATUSES = ["章纲", "草稿", "待质检", "待定稿", "已定稿", "待发布", "已发布"] as const;
 export type ChapterStatus = (typeof CHAPTER_STATUSES)[number];
 
 export const CONTRACT_STATUSES = ["草稿", "待审批", "已批准"] as const;
@@ -44,4 +50,3 @@ export type ResearchBookStatus = (typeof RESEARCH_BOOK_STATUSES)[number];
 export const PROMPT_RENDER_STATUSES = ["已包含", "已截断", "缺失"] as const;
 
 export const AI_TASK_STATUSES = ["不适用", "未配置", "排队中", "已完成", "失败"] as const;
-

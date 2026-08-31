@@ -1,50 +1,14 @@
-import { BrainCircuit, FileOutput, Plus, Sparkles, Trash2 } from "lucide-react";
+import { BrainCircuit, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, EmptyState, Field, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
-import type { AppApi, Chapter, ExpectationEntry, LedgerFact, LedgerKind, ProjectDetail } from "../shared/types";
+import type { AppApi, ExpectationEntry, LedgerFact, LedgerKind, ProjectDetail } from "../shared/types";
 
 export interface CommonProjectProps {
   project: ProjectDetail;
   api: AppApi;
   reload: () => Promise<void>;
   notify: (message: string, tone?: "success" | "error") => void;
-}
-const _EMPTY_CHAPTER = (number: number): Chapter => ({
-  id: "",
-  number,
-  title: "",
-  outline: "",
-  content: "",
-  wordCount: 0,
-  status: "章纲",
-  batchMode: "逐章",
-  isKeyChapter: false,
-  chapterPromise: "",
-  expectedPayoff: "",
-  crisis: "",
-  endingExpectation: "",
-  expectationTargetChapter: null,
-  endingExpectationId: null,
-  linkedExpectationIds: [],
-  revision: 0,
-  updatedAt: new Date().toISOString(),
-});
-const _splitLines = (value: string) =>
-  value
-    .split(/\n+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-const _issueTone = (value: string) => (value === "硬性" ? "danger" : value === "警告" ? "warning" : "neutral");
-function _LightbulbIcon() {
-  return (
-    <span className="mini-icon">
-      <Sparkles size={16} />
-    </span>
-  );
-}
-function _UploadIcon() {
-  return <FileOutput size={16} />;
 }
 
 export function LedgerPage({ project, api, reload, notify }: CommonProjectProps) {

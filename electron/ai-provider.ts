@@ -7,7 +7,6 @@ export interface ProviderUsage {
 
 export interface ProviderCapabilities {
   jsonMode: boolean;
-  usageShape: "openai" | "responses" | "unknown";
 }
 
 export function inferProviderCapabilities(baseUrl: string): ProviderCapabilities {
@@ -18,9 +17,8 @@ export function inferProviderCapabilities(baseUrl: string): ProviderCapabilities
       return "";
     }
   })();
-  if (host.endsWith("openai.com") || host.includes("deepseek") || host.includes("dashscope"))
-    return { jsonMode: true, usageShape: "openai" };
-  return { jsonMode: true, usageShape: "unknown" };
+  if (host.endsWith("openai.com") || host.includes("deepseek") || host.includes("dashscope")) return { jsonMode: true };
+  return { jsonMode: true };
 }
 
 export function parseProviderUsage(body: unknown): ProviderUsage {

@@ -1,6 +1,5 @@
 import type { GenreComposition, NarrativeGenre } from "./genre-composition";
-import type { ProjectStatus as ProjectStatusValue, ChapterStatus as ChapterStatusValue } from "./status-constants";
-import { AI_JOB_STATUSES, CHAPTER_STATUSES, CHANGE_REQUEST_STATUSES, CONTRACT_STATUSES, EXPECTATION_STATUSES, PLAN_STATUSES, PROJECT_STATUSES, QUALITY_SEVERITIES, QUALITY_STATUSES, RESEARCH_BOOK_STATUSES, REVIEW_EXPERIMENT_STATUSES, SCHEDULE_STATUSES } from "./status-constants";
+import type { CHAPTER_STATUSES, PROJECT_STATUSES } from "./status-constants";
 
 export const GENRES = ["都市脑洞", "玄幻/仙侠", "历史/架空", "现言甜宠", "古言宅斗", "年代重生"] as const;
 
