@@ -45,9 +45,10 @@ describe("browser fact workflow", () => {
       validFromChapter: 2,
       updatedAt: replacementAt,
     });
-    expect(
-      afterReplacement.facts.find((fact) => fact.id === current.id),
-    ).toMatchObject({ validToChapter: 1, updatedAt: replacementAt });
+    expect(afterReplacement.facts.find((fact) => fact.id === current.id)).toMatchObject({
+      validToChapter: 1,
+      updatedAt: replacementAt,
+    });
     expect(afterReplacement.summary.updatedAt).toBe(replacementAt);
 
     const historical = await api.saveFact(summary.id, {

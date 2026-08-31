@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  registerProjectHandlers,
-  type ProjectHandlerDependencies,
-} from "../electron/handlers/project-handlers";
+import { type ProjectHandlerDependencies, registerProjectHandlers } from "../electron/handlers/project-handlers";
 import type { RegisterHandler } from "../electron/handlers/types";
 import { localDayEndExclusive } from "../src/shared/dashboard-policy";
 import type {
@@ -69,6 +66,7 @@ const skeleton: BookConceptSkeleton = {
 };
 
 function createDependencies(activeProjectId = "") {
+  // biome-ignore lint/suspicious/noExplicitAny: 测试桩回调参数宽松
   const handlers = new Map<string, (...args: any[]) => unknown>();
   const register: RegisterHandler = (channel, callback) => {
     if (handlers.has(channel)) throw new Error(`重复注册：${channel}`);
@@ -169,20 +167,17 @@ describe("project handlers", () => {
     const experiment = { id: "experiment-1", title: "缩短开篇铺垫" };
 
     expect(handlers.get("importMetricsCsv")!(project.id, csv)).toBe(1);
-    expect(database.saveMetrics).toHaveBeenCalledWith(
-      project.id,
-      [
-        expect.objectContaining({
-          chapterNumber: 3,
-          exposure: 1000,
-          reads: 600,
-          retention: 42,
-          follows: 120,
-          revenue: 9.5,
-          comments: "第三章回落",
-        }),
-      ],
-    );
+    expect(database.saveMetrics).toHaveBeenCalledWith(project.id, [
+      expect.objectContaining({
+        chapterNumber: 3,
+        exposure: 1000,
+        reads: 600,
+        retention: 42,
+        follows: 120,
+        revenue: 9.5,
+        comments: "第三章回落",
+      }),
+    ]);
     expect(handlers.get("getReviewSuggestions")!(project.id)).toEqual([
       expect.objectContaining({
         id: "data-volume",
@@ -190,10 +185,7 @@ describe("project handlers", () => {
       }),
     ]);
     handlers.get("saveReviewExperiment")!(project.id, experiment);
-    expect(database.saveReviewExperiment).toHaveBeenCalledWith(
-      project.id,
-      experiment,
-    );
+    expect(database.saveReviewExperiment).toHaveBeenCalledWith(project.id, experiment);
   });
 
   it("forwards project records and revision operations without reshaping arguments", () => {
@@ -216,45 +208,26 @@ describe("project handlers", () => {
     handlers.get("saveSchedule")!(project.id, schedule);
     handlers.get("attachInsights")!(project.id, ["insight-1"]);
 
-    expect(database.saveChapter).toHaveBeenCalledWith(
-      project.id,
-      { id: "chapter-1" },
-      "manual",
-    );
+    expect(database.saveChapter).toHaveBeenCalledWith(project.id, { id: "chapter-1" }, "manual");
     expect(database.saveExpectation).toHaveBeenCalledWith(project.id, expectation);
     expect(database.searchProject).toHaveBeenCalledWith(project.id, "线索", 10, 20);
-    expect(database.listRevisions).toHaveBeenCalledWith(
-      project.id,
-      "chapters",
-      "chapter-1",
-    );
+    expect(database.listRevisions).toHaveBeenCalledWith(project.id, "chapters", "chapter-1");
     expect(database.restoreRevision).toHaveBeenCalledWith(project.id, "revision-1");
     expect(database.saveFact).toHaveBeenCalledWith(project.id, fact);
-    expect(database.resolveIssue).toHaveBeenCalledWith(
-      project.id,
-      "issue-1",
-      "已解决",
-    );
+    expect(database.resolveIssue).toHaveBeenCalledWith(project.id, "issue-1", "已解决");
     expect(database.saveChangeRequest).toHaveBeenCalledWith(project.id, change);
-    expect(database.decideChangeRequest).toHaveBeenCalledWith(
-      project.id,
-      "change-1",
-      "批准",
-    );
+    expect(database.decideChangeRequest).toHaveBeenCalledWith(project.id, "change-1", "批准");
     expect(database.saveSchedule).toHaveBeenCalledWith(project.id, schedule);
     expect(database.attachInsights).toHaveBeenCalledWith(project.id, ["insight-1"]);
   });
 
   it("assembles the dashboard with the injected local date", () => {
-    const { dependencies, handlers, database, currentDate } =
-      createDependencies();
+    const { dependencies, handlers, database, currentDate } = createDependencies();
     registerProjectHandlers(dependencies);
 
     const dashboard = handlers.get("getDashboard")!();
 
-    expect(database.getDashboardActivity).toHaveBeenCalledWith(
-      localDayEndExclusive(currentDate),
-    );
+    expect(database.getDashboardActivity).toHaveBeenCalledWith(localDayEndExclusive(currentDate));
     expect(dashboard).toMatchObject({
       projects: [project],
       totals: { activeBooks: 1, totalWords: 10_000 },
@@ -303,8 +276,7 @@ describe("project handlers", () => {
     const { dependencies, handlers, database } = createDependencies("busy");
     registerProjectHandlers(dependencies);
 
-    expect(() => handlers.get("deleteProject")!("busy", "作品"))
-      .toThrow("正文生成任务运行");
+    expect(() => handlers.get("deleteProject")!("busy", "作品")).toThrow("正文生成任务运行");
     expect(database.deleteProject).not.toHaveBeenCalled();
     expect(handlers.get("deleteProject")!("idle", "作品")).toBe("已删除");
   });

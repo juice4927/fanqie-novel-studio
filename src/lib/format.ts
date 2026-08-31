@@ -7,9 +7,12 @@ export function formatDate(value: string | null, includeTime = false) {
   if (!value) return "未安排";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", includeTime
-    ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }
-    : { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat(
+    "zh-CN",
+    includeTime
+      ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }
+      : { year: "numeric", month: "2-digit", day: "2-digit" },
+  ).format(date);
 }
 
 export function classNames(...values: Array<string | false | null | undefined>) {

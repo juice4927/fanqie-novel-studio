@@ -3,10 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import JSZip from "jszip";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  registerSystemHandlers,
-  type SystemHandlerDependencies,
-} from "../electron/handlers/system-handlers";
+import { registerSystemHandlers, type SystemHandlerDependencies } from "../electron/handlers/system-handlers";
 import type { RegisterHandler } from "../electron/handlers/types";
 import type { ProjectDetail, SystemHealthReport } from "../src/shared/types";
 
@@ -91,6 +88,7 @@ afterEach(() => {
 });
 
 function createDependencies(workerRun = vi.fn(async () => report)) {
+  // biome-ignore lint/suspicious/noExplicitAny: 测试桩回调参数宽松
   const handlers = new Map<string, (...args: any[]) => unknown>();
   const register: RegisterHandler = (channel, callback) => {
     handlers.set(channel, callback);
@@ -110,8 +108,8 @@ function createDependencies(workerRun = vi.fn(async () => report)) {
       lastError: null,
       nextRunAt: null,
     })),
-    getChapter: vi.fn((_projectId: string, chapterId: string) =>
-      project.chapters.find((chapter) => chapter.id === chapterId)!,
+    getChapter: vi.fn(
+      (_projectId: string, chapterId: string) => project.chapters.find((chapter) => chapter.id === chapterId)!,
     ),
     getProjectOverview: vi.fn(() => ({
       ...project,
@@ -174,9 +172,7 @@ describe("system handlers", () => {
     expect(handlers.get("getWorkspacePath")!()).toBe("C:/workspace");
     await expect(handlers.get("createBackup")!("password")).resolves.toBeNull();
     expect(database.checkpointAll).not.toHaveBeenCalled();
-    await expect(
-      handlers.get("exportProject")!("project-1", "txt"),
-    ).resolves.toBeNull();
+    await expect(handlers.get("exportProject")!("project-1", "txt")).resolves.toBeNull();
     expect(database.getChapter).not.toHaveBeenCalled();
   });
 
@@ -187,53 +183,31 @@ describe("system handlers", () => {
       temporaryDirectories.push(directory);
       const destination = path.join(directory, `旧城回声-发布包.${format}`);
       const { dependencies, handlers } = createDependencies();
-      dependencies.chooseProjectExportDestination = vi.fn(async () =>
-        destination,
-      );
+      dependencies.chooseProjectExportDestination = vi.fn(async () => destination);
       registerSystemHandlers(dependencies);
 
-      await expect(
-        handlers.get("exportProject")!("project-1", format),
-      ).resolves.toBe(destination);
+      await expect(handlers.get("exportProject")!("project-1", format)).resolves.toBe(destination);
 
-      expect(dependencies.chooseProjectExportDestination).toHaveBeenCalledWith(
-        `旧城回声-发布包.${format}`,
-        format,
-      );
+      expect(dependencies.chooseProjectExportDestination).toHaveBeenCalledWith(`旧城回声-发布包.${format}`, format);
       expect(dependencies.database.getChapter).toHaveBeenCalledTimes(2);
-      expect(dependencies.database.getChapter).toHaveBeenNthCalledWith(
-        1,
-        "project-1",
-        "chapter-1",
-      );
-      expect(dependencies.database.getChapter).toHaveBeenNthCalledWith(
-        2,
-        "project-1",
-        "chapter-2",
-      );
+      expect(dependencies.database.getChapter).toHaveBeenNthCalledWith(1, "project-1", "chapter-1");
+      expect(dependencies.database.getChapter).toHaveBeenNthCalledWith(2, "project-1", "chapter-2");
       if (format === "docx") {
         const archive = await JSZip.loadAsync(readFileSync(destination));
-        const documentXml = await archive
-          .file("word/document.xml")!
-          .async("string");
+        const documentXml = await archive.file("word/document.xml")!.async("string");
         expect(documentXml).toContain("旧城回声");
         expect(documentXml).toContain("第1章 雨夜来信");
         expect(documentXml).toContain("第一段正文");
         expect(documentXml).not.toContain("未完成章节");
       } else {
         const content = readFileSync(destination, "utf8");
-        expect(content).toContain(
-          `${format === "md" ? "# " : ""}第1章 雨夜来信`,
-        );
+        expect(content).toContain(`${format === "md" ? "# " : ""}第1章 雨夜来信`);
         expect(content).toContain("第2章 旧城坐标");
         expect(content).not.toContain("未完成章节");
         expect(content).not.toContain("不应导出");
       }
 
-      const publishingReport = readFileSync(
-        path.join(directory, "旧城回声-发布包-检查报告.md"),
-        "utf8",
-      );
+      const publishingReport = readFileSync(path.join(directory, "旧城回声-发布包-检查报告.md"), "utf8");
       expect(publishingReport).toContain("- 导出章节：2 章");
       expect(publishingReport).toContain("- 创作契约：已审批 v3");
       expect(publishingReport).toContain("- 已批准卷纲：1");
@@ -255,9 +229,7 @@ describe("system handlers", () => {
     });
     registerSystemHandlers(dependencies);
 
-    await expect(
-      handlers.get("exportProject")!("project-1", "txt"),
-    ).rejects.toThrow("没有可导出的已定稿章节");
+    await expect(handlers.get("exportProject")!("project-1", "txt")).rejects.toThrow("没有可导出的已定稿章节");
     expect(dependencies.chooseProjectExportDestination).not.toHaveBeenCalled();
   });
 
@@ -267,12 +239,10 @@ describe("system handlers", () => {
     const healthPromise = new Promise<SystemHealthReport>((resolve) => {
       resolveHealth = resolve;
     });
-    const workerRun = vi.fn(
-      (_task: string, _payload: unknown, options: { onProgress: (value: unknown) => void }) => {
-        onProgress = options.onProgress;
-        return healthPromise;
-      },
-    );
+    const workerRun = vi.fn((_task: string, _payload: unknown, options: { onProgress: (value: unknown) => void }) => {
+      onProgress = options.onProgress;
+      return healthPromise;
+    });
     const { dependencies, handlers } = createDependencies(workerRun);
     registerSystemHandlers(dependencies);
 

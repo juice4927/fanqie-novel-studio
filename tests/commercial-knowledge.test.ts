@@ -6,8 +6,8 @@ import {
   resolveGenreStage,
   resolveStoryStage,
 } from "../src/shared/commercial-knowledge";
-import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
 import { FANQIE_CATEGORY_PROFILES } from "../src/shared/fanqie-taxonomy";
+import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
 import { GENRES } from "../src/shared/types";
 
 describe("structured Chinese web-fiction genre packages", () => {
@@ -33,15 +33,9 @@ describe("structured Chinese web-fiction genre packages", () => {
     expect(resolveGenreStage(1)).toBe("开篇");
     expect(resolveGenreStage(6)).toBe("追读");
     expect(resolveGenreStage(20)).toBe("扩张");
-    expect(
-      resolveGenreStage(80, { currentWords: 900000, targetWords: 3000000 }),
-    ).toBe("中期");
-    expect(
-      resolveGenreStage(400, { currentWords: 2200000, targetWords: 3000000 }),
-    ).toBe("高潮");
-    expect(
-      resolveGenreStage(500, { currentWords: 2750000, targetWords: 3000000 }),
-    ).toBe("收束");
+    expect(resolveGenreStage(80, { currentWords: 900000, targetWords: 3000000 })).toBe("中期");
+    expect(resolveGenreStage(400, { currentWords: 2200000, targetWords: 3000000 })).toBe("高潮");
+    expect(resolveGenreStage(500, { currentWords: 2750000, targetWords: 3000000 })).toBe("收束");
   });
 
   it("produces visibly different guidance for the same generic chapter position", () => {
@@ -100,12 +94,34 @@ describe("structured Chinese web-fiction genre packages", () => {
 
   it("uses an approved project stage instead of imposing the generic chapter threshold", () => {
     const plans = [
-      { kind: "宏观阶段", status: "已批准", ordinal: 1, targetWords: 100000, title: "困城求生", goal: "建立可信的小队协作", conflict: "资源与信任同时短缺", outcome: "获得第一个稳定据点" },
-      { kind: "宏观阶段", status: "已批准", ordinal: 2, targetWords: 200000, title: "据点分裂", goal: "处理内部路线冲突", conflict: "救人与守城无法兼得", outcome: "小队形成新的行动原则" },
+      {
+        kind: "宏观阶段",
+        status: "已批准",
+        ordinal: 1,
+        targetWords: 100000,
+        title: "困城求生",
+        goal: "建立可信的小队协作",
+        conflict: "资源与信任同时短缺",
+        outcome: "获得第一个稳定据点",
+      },
+      {
+        kind: "宏观阶段",
+        status: "已批准",
+        ordinal: 2,
+        targetWords: 200000,
+        title: "据点分裂",
+        goal: "处理内部路线冲突",
+        conflict: "救人与守城无法兼得",
+        outcome: "小队形成新的行动原则",
+      },
     ];
     const storyStage = resolveStoryStage(plans, 150000);
     expect(storyStage?.title).toBe("据点分裂");
-    const guidance = compileCommercialGuidance("都市脑洞", 80, { currentWords: 150000, targetWords: 1000000, storyStage });
+    const guidance = compileCommercialGuidance("都市脑洞", 80, {
+      currentWords: 150000,
+      targetWords: 1000000,
+      storyStage,
+    });
     expect(guidance).toContain("当前项目阶段：据点分裂");
     expect(guidance).toContain("项目阶段冲突：救人与守城无法兼得");
     expect(guidance).not.toContain("当前题材节奏参考：中期");
@@ -121,15 +137,9 @@ describe("structured Chinese web-fiction genre packages", () => {
 
   it("keeps source authority and provenance visible", () => {
     expect(
-      COMMERCIAL_KNOWLEDGE_SOURCES.filter(
-        (source) => source.authority === "平台官方",
-      ).length,
+      COMMERCIAL_KNOWLEDGE_SOURCES.filter((source) => source.authority === "平台官方").length,
     ).toBeGreaterThanOrEqual(5);
-    expect(
-      COMMERCIAL_KNOWLEDGE_SOURCES.every((source) =>
-        source.url.startsWith("https://"),
-      ),
-    ).toBe(true);
+    expect(COMMERCIAL_KNOWLEDGE_SOURCES.every((source) => source.url.startsWith("https://"))).toBe(true);
   });
 
   it("maps every current Fanqie category to an executable genre profile", () => {
@@ -154,8 +164,16 @@ describe("structured Chinese web-fiction genre packages", () => {
     const scienceFiction = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:8")!;
     const sports = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:746")!;
     const suspense = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:747")!;
-    expect(scienceFiction).toMatchObject({ genre: "都市脑洞", recommendedSubtype: "异能规则", narrativeGenres: ["生存", "冒险"] });
-    expect(sports).toMatchObject({ genre: "都市脑洞", recommendedSubtype: "系统成长", narrativeGenres: ["竞技", "成长"] });
+    expect(scienceFiction).toMatchObject({
+      genre: "都市脑洞",
+      recommendedSubtype: "异能规则",
+      narrativeGenres: ["生存", "冒险"],
+    });
+    expect(sports).toMatchObject({
+      genre: "都市脑洞",
+      recommendedSubtype: "系统成长",
+      narrativeGenres: ["竞技", "成长"],
+    });
     expect(suspense.narrativeGenres[0]).toBe("悬疑");
     expect(scienceFiction.expansionRoutes).not.toEqual(sports.expansionRoutes);
     expect(sports.expansionRoutes).not.toEqual(suspense.expansionRoutes);

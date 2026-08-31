@@ -4,9 +4,7 @@ import type { ExpectationEntry } from "../src/shared/types";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 
-function expectation(
-  overrides: Partial<ExpectationEntry> = {},
-): ExpectationEntry {
+function expectation(overrides: Partial<ExpectationEntry> = {}): ExpectationEntry {
   return {
     id: "expectation-1",
     title: "确认红伞女孩身份",
@@ -33,15 +31,11 @@ describe("expectation save rules", () => {
       }),
       createdAt: undefined,
     };
-    const saved = prepareExpectationSave(
-      undefined,
-      candidate,
-      {
-        expectationId: "expectation-new",
-        createdAt: savedAt,
-        updatedAt: savedAt,
-      },
-    );
+    const saved = prepareExpectationSave(undefined, candidate, {
+      expectationId: "expectation-new",
+      createdAt: savedAt,
+      updatedAt: savedAt,
+    });
 
     expect(saved).toMatchObject({
       id: "expectation-new",
@@ -54,15 +48,11 @@ describe("expectation save rules", () => {
 
   it("preserves the original creation time when updating", () => {
     const previous = expectation();
-    const saved = prepareExpectationSave(
-      previous,
-      expectation({ createdAt: "2026-08-01T00:00:00.000Z" }),
-      {
-        expectationId: previous.id,
-        createdAt: "2026-08-02T00:00:00.000Z",
-        updatedAt: "2026-08-02T01:00:00.000Z",
-      },
-    );
+    const saved = prepareExpectationSave(previous, expectation({ createdAt: "2026-08-01T00:00:00.000Z" }), {
+      expectationId: previous.id,
+      createdAt: "2026-08-02T00:00:00.000Z",
+      updatedAt: "2026-08-02T01:00:00.000Z",
+    });
 
     expect(saved.createdAt).toBe(previous.createdAt);
     expect(saved.updatedAt).toBe("2026-08-02T01:00:00.000Z");
@@ -70,14 +60,8 @@ describe("expectation save rules", () => {
 
   it.each([
     [expectation({ title: "   " }), "期待标题不能为空"],
-    [
-      expectation({ sourceChapter: 8, expectedPayoffChapter: 7 }),
-      "预计兑现章不能早于提出章",
-    ],
-    [
-      expectation({ status: "已兑现", actualPayoffChapter: null }),
-      "已兑现期待必须填写实际兑现章",
-    ],
+    [expectation({ sourceChapter: 8, expectedPayoffChapter: 7 }), "预计兑现章不能早于提出章"],
+    [expectation({ status: "已兑现", actualPayoffChapter: null }), "已兑现期待必须填写实际兑现章"],
   ])("rejects invalid expectation state", (candidate, message) => {
     expect(() =>
       prepareExpectationSave(undefined, candidate, {

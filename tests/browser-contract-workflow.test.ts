@@ -82,21 +82,13 @@ describe("browser contract workflow", () => {
       premise: "主角发现旧城事故仍在重复",
     };
 
-    await expect(api.saveContract(projectSummary.id, nextContract)).rejects.toThrow(
-      "匹配的已批准变更单",
-    );
+    await expect(api.saveContract(projectSummary.id, nextContract)).rejects.toThrow("匹配的已批准变更单");
 
     vi.setSystemTime("2026-08-01T01:00:00.000Z");
-    const earlier = await api.saveChangeRequest(
-      projectSummary.id,
-      changeRequest(nextContract.premise),
-    );
+    const earlier = await api.saveChangeRequest(projectSummary.id, changeRequest(nextContract.premise));
     await api.decideChangeRequest(projectSummary.id, earlier.id, "批准");
     vi.setSystemTime("2026-08-01T02:00:00.000Z");
-    const later = await api.saveChangeRequest(
-      projectSummary.id,
-      changeRequest(nextContract.premise),
-    );
+    const later = await api.saveChangeRequest(projectSummary.id, changeRequest(nextContract.premise));
     await api.decideChangeRequest(projectSummary.id, later.id, "批准");
 
     const savedAt = "2026-08-01T03:00:00.000Z";
@@ -110,12 +102,8 @@ describe("browser contract workflow", () => {
       updatedAt: savedAt,
     });
     expect(afterSave.summary.updatedAt).toBe(savedAt);
-    expect(afterSave.changes.find((change) => change.id === earlier.id)?.status).toBe(
-      "已应用",
-    );
-    expect(afterSave.changes.find((change) => change.id === later.id)?.status).toBe(
-      "已批准",
-    );
+    expect(afterSave.changes.find((change) => change.id === earlier.id)?.status).toBe("已应用");
+    expect(afterSave.changes.find((change) => change.id === later.id)?.status).toBe("已批准");
 
     const approvedAt = "2026-08-01T04:00:00.000Z";
     vi.setSystemTime(approvedAt);

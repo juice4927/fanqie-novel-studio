@@ -4,7 +4,8 @@ import { validateIpcArgs } from "../electron/ipc-validation";
 
 describe("research text sanitization", () => {
   it("redacts identifying metadata and stable entities before cloud analysis", () => {
-    const source = "作者：某作者\n沈砚说道，他刚从云港市回来。《第七码头》记录了电话 13812345678 和 https://example.test/a。";
+    const source =
+      "作者：某作者\n沈砚说道，他刚从云港市回来。《第七码头》记录了电话 13812345678 和 https://example.test/a。";
     const sanitized = sanitizeResearchText(source);
     expect(sanitized).not.toContain("某作者");
     expect(sanitized).not.toContain("沈砚");
@@ -32,12 +33,28 @@ describe("research text sanitization", () => {
 
 describe("IPC runtime validation", () => {
   it("rejects malformed and oversized write payloads", () => {
-    expect(() => validateIpcArgs("createProject", [{ title: "", genre: "未知", targetWords: -1, updateCadence: "" }])).toThrow("参数无效");
-    expect(() => validateIpcArgs("saveChapter", ["project", {
-      id: "chapter", number: 1, title: "标题", outline: "章纲", content: "正文".repeat(100_001),
-      wordCount: 0, status: "草稿", batchMode: "逐章", isKeyChapter: false,
-      revision: 1, updatedAt: new Date().toISOString(),
-    }, "autosave"])).toThrow("content");
+    expect(() =>
+      validateIpcArgs("createProject", [{ title: "", genre: "未知", targetWords: -1, updateCadence: "" }]),
+    ).toThrow("参数无效");
+    expect(() =>
+      validateIpcArgs("saveChapter", [
+        "project",
+        {
+          id: "chapter",
+          number: 1,
+          title: "标题",
+          outline: "章纲",
+          content: "正文".repeat(100_001),
+          wordCount: 0,
+          status: "草稿",
+          batchMode: "逐章",
+          isKeyChapter: false,
+          revision: 1,
+          updatedAt: new Date().toISOString(),
+        },
+        "autosave",
+      ]),
+    ).toThrow("content");
     expect(() => validateIpcArgs("capturePublicRanking", ["file:///etc/passwd", "榜单"])).toThrow("参数无效");
     expect(() => validateIpcArgs("importMetricsCsv", ["project", "x".repeat(20_000_001)])).toThrow("参数无效");
     expect(() => validateIpcArgs("createBackup", ["short"])).toThrow("参数无效");
@@ -49,24 +66,60 @@ describe("IPC runtime validation", () => {
 
   it("accepts valid autosaves and does not echo secret values in errors", () => {
     const chapter = {
-      id: "chapter", number: 1, title: "标题", outline: "章纲", content: "正文",
-      wordCount: 2, status: "草稿", batchMode: "逐章", isKeyChapter: false,
-      revision: 1, updatedAt: new Date().toISOString(),
+      id: "chapter",
+      number: 1,
+      title: "标题",
+      outline: "章纲",
+      content: "正文",
+      wordCount: 2,
+      status: "草稿",
+      batchMode: "逐章",
+      isKeyChapter: false,
+      revision: 1,
+      updatedAt: new Date().toISOString(),
     };
     expect(validateIpcArgs("saveChapter", ["project", chapter, "autosave"])).toEqual(["project", chapter, "autosave"]);
     const secret = "sensitive-api-key";
     try {
-      validateIpcArgs("saveAiSettings", [{ protocol: "openai-compatible", baseUrl: "not-a-url", model: "m", embeddingModel: "e", inputPricePerMillion: 0, outputPricePerMillion: 0 }, secret]);
+      validateIpcArgs("saveAiSettings", [
+        {
+          protocol: "openai-compatible",
+          baseUrl: "not-a-url",
+          model: "m",
+          embeddingModel: "e",
+          inputPricePerMillion: 0,
+          outputPricePerMillion: 0,
+        },
+        secret,
+      ]);
       throw new Error("expected validation failure");
     } catch (error) {
       expect(String(error)).not.toContain(secret);
     }
-    const settings = { protocol: "openai-compatible" as const, baseUrl: "https://api.openai.com/v1", model: "gpt-5.1", embeddingModel: "local", inputPricePerMillion: 0, outputPricePerMillion: 0, longTaskTimeoutMinutes: 10 };
+    const settings = {
+      protocol: "openai-compatible" as const,
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-5.1",
+      embeddingModel: "local",
+      inputPricePerMillion: 0,
+      outputPricePerMillion: 0,
+      longTaskTimeoutMinutes: 10,
+    };
     expect(validateIpcArgs("saveAiSettings", [settings])).toEqual([settings]);
-    expect(validateIpcArgs("saveAiSettings", [{ ...settings, protocol: "anthropic-messages", baseUrl: "https://api.anthropic.com/v1", model: "claude-model" }])).toEqual([{ ...settings, protocol: "anthropic-messages", baseUrl: "https://api.anthropic.com/v1", model: "claude-model" }]);
+    expect(
+      validateIpcArgs("saveAiSettings", [
+        { ...settings, protocol: "anthropic-messages", baseUrl: "https://api.anthropic.com/v1", model: "claude-model" },
+      ]),
+    ).toEqual([
+      { ...settings, protocol: "anthropic-messages", baseUrl: "https://api.anthropic.com/v1", model: "claude-model" },
+    ]);
     expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, protocol: "claude-code" }])).toThrow("参数无效");
-    expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, baseUrl: "http://127.0.0.1:11434/v1" }])).toThrow("HTTPS");
-    expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, baseUrl: "https://user:secret@example.com/v1" }])).toThrow("用户名或密码");
+    expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, baseUrl: "http://127.0.0.1:11434/v1" }])).toThrow(
+      "HTTPS",
+    );
+    expect(() =>
+      validateIpcArgs("saveAiSettings", [{ ...settings, baseUrl: "https://user:secret@example.com/v1" }]),
+    ).toThrow("用户名或密码");
     expect(() => validateIpcArgs("saveAiSettings", [{ ...settings, longTaskTimeoutMinutes: 20 }])).toThrow("参数无效");
   });
 
@@ -81,36 +134,66 @@ describe("IPC runtime validation", () => {
       customGenreDirection: "不使用系统",
     };
     expect(validateIpcArgs("generateBookConcepts", [input])).toEqual([input]);
-    expect(() => validateIpcArgs("generateBookConcepts", [{
-      ...input,
-      secondaryGenres: ["悬疑", "群像", "成长", "经营"],
-    }])).toThrow("参数无效");
-    expect(() => validateIpcArgs("generateBookConcepts", [{
-      ...input,
-      secondaryGenres: ["不存在的类型"],
-    }])).toThrow("参数无效");
+    expect(() =>
+      validateIpcArgs("generateBookConcepts", [
+        {
+          ...input,
+          secondaryGenres: ["悬疑", "群像", "成长", "经营"],
+        },
+      ]),
+    ).toThrow("参数无效");
+    expect(() =>
+      validateIpcArgs("generateBookConcepts", [
+        {
+          ...input,
+          secondaryGenres: ["不存在的类型"],
+        },
+      ]),
+    ).toThrow("参数无效");
   });
 
   it("accepts a strict per-project aesthetic profile", () => {
     const contract = {
-      premise: "前提", protagonistDesire: "欲望", readerPromise: "承诺", coreEmotion: "情绪", ending: "终局",
-      immutableRules: [], prohibitedPatterns: [], version: 1, approved: false,
+      premise: "前提",
+      protagonistDesire: "欲望",
+      readerPromise: "承诺",
+      coreEmotion: "情绪",
+      ending: "终局",
+      immutableRules: [],
+      prohibitedPatterns: [],
+      version: 1,
+      approved: false,
       updatedAt: new Date().toISOString(),
       aestheticProfile: {
-        narrativeDistance: "贴身", emotionalTemperature: "热烈",
-        proseTexture: "明快", dialogueStyle: "直接", emotionalExpression: "外放",
-        signatureTechniques: ["群像交锋"], avoidPatterns: ["冷处理"],
+        narrativeDistance: "贴身",
+        emotionalTemperature: "热烈",
+        proseTexture: "明快",
+        dialogueStyle: "直接",
+        emotionalExpression: "外放",
+        signatureTechniques: ["群像交锋"],
+        avoidPatterns: ["冷处理"],
       },
     };
 
     expect(validateIpcArgs("saveContract", ["project", contract])).toEqual(["project", contract]);
     expect(validateIpcArgs("suggestAestheticProfile", ["project", contract])).toEqual(["project", contract]);
     expect(() => validateIpcArgs("suggestAestheticProfile", ["project"])).toThrow("参数无效");
-    expect(validateIpcArgs("reviewPlanning", ["project", { fromChapter: 1, chapterCount: 30 }])).toEqual(["project", { fromChapter: 1, chapterCount: 30 }]);
-    expect(validateIpcArgs("applyPlanningRepairs", ["project", { plans: [], chapters: [] }])).toEqual(["project", { plans: [], chapters: [] }]);
-    expect(() => validateIpcArgs("saveContract", ["project", {
-      ...contract,
-      aestheticProfile: { ...contract.aestheticProfile, emotionalTemperature: "统一模板" },
-    }])).toThrow("参数无效");
+    expect(validateIpcArgs("reviewPlanning", ["project", { fromChapter: 1, chapterCount: 30 }])).toEqual([
+      "project",
+      { fromChapter: 1, chapterCount: 30 },
+    ]);
+    expect(validateIpcArgs("applyPlanningRepairs", ["project", { plans: [], chapters: [] }])).toEqual([
+      "project",
+      { plans: [], chapters: [] },
+    ]);
+    expect(() =>
+      validateIpcArgs("saveContract", [
+        "project",
+        {
+          ...contract,
+          aestheticProfile: { ...contract.aestheticProfile, emotionalTemperature: "统一模板" },
+        },
+      ]),
+    ).toThrow("参数无效");
   });
 });

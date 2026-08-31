@@ -1,10 +1,5 @@
 import { normalizeAestheticProfile } from "./aesthetic-profile";
-import type {
-  CreateProjectInput,
-  ProjectPatch,
-  ProjectSummary,
-  StoryContract,
-} from "./types";
+import type { CreateProjectInput, ProjectPatch, ProjectSummary, StoryContract } from "./types";
 
 interface PrepareProjectCreationOptions {
   projectId: string;
@@ -31,18 +26,10 @@ function normalizeCadence(value: string, fallback?: string) {
 }
 
 function assertProjectNumbers(targetWords: number, safeStockLine: number) {
-  if (
-    !Number.isInteger(targetWords) ||
-    targetWords < 10_000 ||
-    targetWords > 20_000_000
-  ) {
+  if (!Number.isInteger(targetWords) || targetWords < 10_000 || targetWords > 20_000_000) {
     throw new Error("目标字数必须是 10000 至 20000000 的整数");
   }
-  if (
-    !Number.isInteger(safeStockLine) ||
-    safeStockLine < 0 ||
-    safeStockLine > 1000
-  ) {
+  if (!Number.isInteger(safeStockLine) || safeStockLine < 0 || safeStockLine > 1000) {
     throw new Error("安全存稿线必须是 0 至 1000 的整数");
   }
 }
@@ -104,24 +91,19 @@ export function prepareProjectCreation(
   };
 }
 
-export function prepareProjectUpdate(
-  current: ProjectSummary,
-  patch: ProjectPatch,
-  updatedAt: string,
-): ProjectSummary {
+export function prepareProjectUpdate(current: ProjectSummary, patch: ProjectPatch, updatedAt: string): ProjectSummary {
   const targetWords = patch.targetWords ?? current.targetWords;
   const safeStockLine = patch.safeStockLine ?? current.safeStockLine;
   assertProjectNumbers(targetWords, safeStockLine);
   return {
     ...current,
-    title: patch.title === undefined
-      ? current.title
-      : normalizeTitle(patch.title, current.title),
+    title: patch.title === undefined ? current.title : normalizeTitle(patch.title, current.title),
     status: patch.status ?? current.status,
     targetWords,
-    updateCadence: patch.updateCadence === undefined
-      ? current.updateCadence
-      : normalizeCadence(patch.updateCadence, current.updateCadence),
+    updateCadence:
+      patch.updateCadence === undefined
+        ? current.updateCadence
+        : normalizeCadence(patch.updateCadence, current.updateCadence),
     safeStockLine,
     updatedAt,
   };

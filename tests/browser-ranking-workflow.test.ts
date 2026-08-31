@@ -36,13 +36,15 @@ describe("browser ranking workflow", () => {
       source: "CSV 手动导入",
       capturedAt,
       status: "成功",
-      entries: [{
-        rank: 1,
-        title: "城,市回声",
-        words: 12_000,
-        tags: ["悬疑", "成长"],
-        sourceUrl: "https://example.com/book",
-      }],
+      entries: [
+        {
+          rank: 1,
+          title: "城,市回声",
+          words: 12_000,
+          tags: ["悬疑", "成长"],
+          sourceUrl: "https://example.com/book",
+        },
+      ],
     });
     expect(snapshot.entries[0].snapshotId).toBe(snapshot.id);
     expect((await api.listRankings())[0]).toEqual(snapshot);

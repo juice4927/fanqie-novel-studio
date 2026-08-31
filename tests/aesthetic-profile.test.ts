@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  compileAestheticGuidance,
-  normalizeAestheticProfile,
-} from "../src/shared/aesthetic-profile";
+import { compileAestheticGuidance, normalizeAestheticProfile } from "../src/shared/aesthetic-profile";
 
 describe("project aesthetic profile", () => {
   it("keeps legacy projects neutral instead of assigning a house style", () => {

@@ -1,13 +1,7 @@
-import {
-  BookCopy,
-  CheckCircle2,
-  FileInput,
-  Lightbulb,
-  LoaderCircle,
-} from "lucide-react";
-import type { ResearchBook } from "../shared/types";
+import { BookCopy, CheckCircle2, FileInput, Lightbulb, LoaderCircle } from "lucide-react";
 import { Badge, Button, EmptyState } from "../components/UI";
 import { formatCount } from "../lib/format";
+import type { ResearchBook } from "../shared/types";
 import styles from "./ResearchPage.module.css";
 
 interface ResearchBooksViewProps {
@@ -54,22 +48,11 @@ export function ResearchBooksView({
                 </div>
               </div>
               <div className={styles.researchBookAction}>
-                <Badge
-                  tone={
-                    book.status === "已拆解"
-                      ? "success"
-                      : book.status === "失败"
-                        ? "danger"
-                        : "warning"
-                  }
-                >
+                <Badge tone={book.status === "已拆解" ? "success" : book.status === "失败" ? "danger" : "warning"}>
                   {book.status}
                 </Badge>
                 {book.status === "已拆解" && (
-                  <Button
-                    variant="ghost"
-                    onClick={() => onOpenAnalysis(book)}
-                  >
+                  <Button variant="ghost" onClick={() => onOpenAnalysis(book)}>
                     查看分层
                   </Button>
                 )}
@@ -77,13 +60,7 @@ export function ResearchBooksView({
                   variant="secondary"
                   disabled={busyBookId !== null}
                   onClick={() => onRequestDeconstruct(book)}
-                  icon={
-                    busyBookId === book.id ? (
-                      <LoaderCircle className="spin" size={16} />
-                    ) : (
-                      <Lightbulb size={16} />
-                    )
-                  }
+                  icon={busyBookId === book.id ? <LoaderCircle className="spin" size={16} /> : <Lightbulb size={16} />}
                 >
                   {busyBookId === book.id ? "流式拆书中" : book.status === "已拆解" ? "重新拆解" : "生成洞察"}
                 </Button>

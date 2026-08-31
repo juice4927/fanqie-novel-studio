@@ -75,13 +75,12 @@
 }
 
 .rankingGrid {
-  grid-template-columns:
-    48px minmax(210px, 1.4fr) minmax(110px, 0.8fr) 90px 70px 100px;
+  grid-template-columns: 48px minmax(210px, 1.4fr) minmax(110px, 0.8fr) 90px 70px 100px;
 }
 
 .rankingLinks {
   display: flex;
-  flex-direction: row !important;
+  flex-direction: row;
   gap: 10px;
   align-items: center;
 }

@@ -1,11 +1,7 @@
 import { BarChart3, ExternalLink, Link2, TrendingUp } from "lucide-react";
-import type {
-  RankingAnalytics,
-  RankingEntry,
-  RankingSnapshot,
-} from "../shared/types";
 import { Badge, Button, EmptyState } from "../components/UI";
 import { formatCount, formatDate } from "../lib/format";
+import type { RankingAnalytics, RankingEntry, RankingSnapshot } from "../shared/types";
 import styles from "./ResearchPage.module.css";
 
 interface ResearchRankingViewProps {
@@ -68,7 +64,10 @@ export function ResearchRankingView({
             {analytics.marketOpportunities.slice(0, 6).map((opportunity) => (
               <article key={opportunity.listName}>
                 <div className={styles.opportunityHead}>
-                  <div><Badge tone="accent">{opportunity.genre}</Badge><strong>{opportunity.categoryName}</strong></div>
+                  <div>
+                    <Badge tone="accent">{opportunity.genre}</Badge>
+                    <strong>{opportunity.categoryName}</strong>
+                  </div>
                   <span
                     className={`${styles.opportunityScore} ${opportunity.opportunityScore === null ? styles.isBaseline : ""}`}
                   >
@@ -76,8 +75,17 @@ export function ResearchRankingView({
                   </span>
                 </div>
                 <p>{opportunity.recommendation}</p>
-                <small>{opportunity.evidenceLevel} · 证据 {opportunity.dataSufficiency}% · 动能 {opportunity.momentumScore ?? "待观察"} · 竞争{opportunity.competition}</small>
-                <small>{opportunity.snapshots}次快照 · 新晋率 {opportunity.newEntrantRate}% · 平均升位 {opportunity.averageRankChange}{opportunity.scoreRange ? ` · 机会区间 ${opportunity.scoreRange[0]}–${opportunity.scoreRange[1]}` : ""}</small>
+                <small>
+                  {opportunity.evidenceLevel} · 证据 {opportunity.dataSufficiency}% · 动能{" "}
+                  {opportunity.momentumScore ?? "待观察"} · 竞争{opportunity.competition}
+                </small>
+                <small>
+                  {opportunity.snapshots}次快照 · 新晋率 {opportunity.newEntrantRate}% · 平均升位{" "}
+                  {opportunity.averageRankChange}
+                  {opportunity.scoreRange
+                    ? ` · 机会区间 ${opportunity.scoreRange[0]}–${opportunity.scoreRange[1]}`
+                    : ""}
+                </small>
                 {opportunity.sampleWarning && <small className="warning-text">{opportunity.sampleWarning}</small>}
               </article>
             ))}
@@ -94,9 +102,7 @@ export function ResearchRankingView({
                   {snapshot.source} · {formatDate(snapshot.capturedAt, true)}
                 </small>
               </span>
-              <Badge tone={snapshot.status === "成功" ? "success" : "warning"}>
-                {snapshot.status}
-              </Badge>
+              <Badge tone={snapshot.status === "成功" ? "success" : "warning"}>{snapshot.status}</Badge>
             </div>
             <div className="data-table">
               <div className={`data-head ${styles.rankingGrid}`}>
@@ -119,7 +125,12 @@ export function ResearchRankingView({
                   <span>{entry.status}</span>
                   <span className={styles.rankingLinks}>
                     {entry.sourceUrl && (
-                      <a href={entry.sourceUrl} target="_blank" rel="noreferrer" title={entry.synopsis || "打开番茄官方详情页"}>
+                      <a
+                        href={entry.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={entry.synopsis || "打开番茄官方详情页"}
+                      >
                         详情 <ExternalLink size={12} />
                       </a>
                     )}

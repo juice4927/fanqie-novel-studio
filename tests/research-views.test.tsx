@@ -101,10 +101,7 @@ describe("research workflow modals", () => {
       />,
     );
 
-    expect(
-      (screen.getByRole("button", { name: "保存快照" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    expect((screen.getByRole("button", { name: "保存快照" }) as HTMLButtonElement).disabled).toBe(true);
     rerender(
       <RankingImportModal
         open
@@ -125,9 +122,7 @@ describe("research workflow modals", () => {
     render(
       <PasteSampleModal
         open
-        text={
-          "第一章 开端\n这是第一章的正文内容。\n第二章 转折\n这是第二章的正文内容。"
-        }
+        text={"第一章 开端\n这是第一章的正文内容。\n第二章 转折\n这是第二章的正文内容。"}
         onTextChange={vi.fn()}
         onClose={vi.fn()}
         onPreview={onPreview}

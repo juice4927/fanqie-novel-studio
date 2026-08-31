@@ -1,10 +1,9 @@
-import type { Genre } from "./types";
-import { GENRE_PLUGINS, type GenreStage } from "./genre-plugins";
 import { getFanqieCategoryProfile } from "./fanqie-taxonomy";
 import { compileGenreComposition, type GenreComposition } from "./genre-composition";
+import { GENRE_PLUGINS, type GenreStage } from "./genre-plugins";
+import type { Genre } from "./types";
 
-export const COMMERCIAL_KNOWLEDGE_VERSION =
-  "cn-web-fiction.2026-07.v5-motif-balance";
+export const COMMERCIAL_KNOWLEDGE_VERSION = "cn-web-fiction.2026-07.v5-motif-balance";
 
 export interface CommercialKnowledgeSource {
   title: string;
@@ -71,7 +70,16 @@ export interface CommercialProgress extends GenreComposition {
 }
 
 export function resolveStoryStage(
-  plans: ReadonlyArray<{ kind: string; status: string; ordinal: number; targetWords: number; title: string; goal: string; conflict: string; outcome: string }>,
+  plans: ReadonlyArray<{
+    kind: string;
+    status: string;
+    ordinal: number;
+    targetWords: number;
+    title: string;
+    goal: string;
+    conflict: string;
+    outcome: string;
+  }>,
   currentWords: number,
 ) {
   const stages = plans
@@ -86,27 +94,18 @@ export function resolveStoryStage(
   return stages.at(-1);
 }
 
-export function resolveGenreStage(
-  chapterNumber: number,
-  progress?: CommercialProgress,
-): GenreStage {
+export function resolveGenreStage(chapterNumber: number, progress?: CommercialProgress): GenreStage {
   if (progress?.stage) return progress.stage;
   if (chapterNumber <= 3) return "开篇";
   if (chapterNumber <= 10) return "追读";
-  const ratio = progress?.targetWords
-    ? progress.currentWords / progress.targetWords
-    : 0;
+  const ratio = progress?.targetWords ? progress.currentWords / progress.targetWords : 0;
   if (ratio >= 0.9) return "收束";
   if (ratio >= 0.72) return "高潮";
   if (chapterNumber > 40 || ratio >= 0.3) return "中期";
   return "扩张";
 }
 
-export function compileCommercialGuidance(
-  genre: Genre,
-  chapterNumber: number,
-  progress?: CommercialProgress,
-) {
+export function compileCommercialGuidance(genre: Genre, chapterNumber: number, progress?: CommercialProgress) {
   const plugin = GENRE_PLUGINS[genre];
   const phase = resolveGenreStage(chapterNumber, progress);
   const phaseRule = plugin.stages[phase];
@@ -124,31 +123,37 @@ export function compileCommercialGuidance(
       : progress?.subtype
         ? `当前自定义子类型：${progress.subtype}｜以创作契约中的读者承诺、人物动机和自定义方向确定具体规则，不强套内置子类型。`
         : `可选子类型：${plugin.subtypes.map((item) => item.name).join("、")}`,
-    fanqieCategory ? `番茄分类映射：${fanqieCategory.channel}·${fanqieCategory.name}｜建议子类型：${fanqieCategory.recommendedSubtype}｜核心幻想：${fanqieCategory.coreFantasy}｜目标读者：${fanqieCategory.audience}｜开篇抓手：${fanqieCategory.openingFocus}｜禁忌：${fanqieCategory.taboo}` : "番茄分类映射：尚未选择，先按六套基础题材规则执行",
-    ...(fanqieCategory ? [
-      `分类叙事主轴：${fanqieCategory.narrativeGenres.join(" + ")}`,
-      `分类元素参考：${fanqieCategory.genreElements.join("、") || "无固定元素"}`,
-      `分类冲突发动机：${fanqieCategory.conflictEngine}`,
-      `分类回报模式：${fanqieCategory.payoffPattern}`,
-      `分类长线扩张：${fanqieCategory.expansionAxis}`,
-      `分类疲劳信号：${fanqieCategory.fatigueSignal}`,
-      "分类专属质检：",
-      ...fanqieCategory.qualityChecks.map((item) => `- ${item}`),
-    ] : []),
+    fanqieCategory
+      ? `番茄分类映射：${fanqieCategory.channel}·${fanqieCategory.name}｜建议子类型：${fanqieCategory.recommendedSubtype}｜核心幻想：${fanqieCategory.coreFantasy}｜目标读者：${fanqieCategory.audience}｜开篇抓手：${fanqieCategory.openingFocus}｜禁忌：${fanqieCategory.taboo}`
+      : "番茄分类映射：尚未选择，先按六套基础题材规则执行",
+    ...(fanqieCategory
+      ? [
+          `分类叙事主轴：${fanqieCategory.narrativeGenres.join(" + ")}`,
+          `分类元素参考：${fanqieCategory.genreElements.join("、") || "无固定元素"}`,
+          `分类冲突发动机：${fanqieCategory.conflictEngine}`,
+          `分类回报模式：${fanqieCategory.payoffPattern}`,
+          `分类长线扩张：${fanqieCategory.expansionAxis}`,
+          `分类疲劳信号：${fanqieCategory.fatigueSignal}`,
+          "分类专属质检：",
+          ...fanqieCategory.qualityChecks.map((item) => `- ${item}`),
+        ]
+      : []),
     `目标读者：${plugin.targetAudience.join("；")}`,
     `基础题材母题（按需选用，不是固定套路）：${plugin.coreFantasies.join("；")}`,
     `禁忌边界：${plugin.tabooBoundaries.join("；")}`,
-    ...(progress?.storyStage ? [
-      `项目阶段目标：${progress.storyStage.goal}`,
-      `项目阶段冲突：${progress.storyStage.conflict}`,
-      `项目阶段预期结果：${progress.storyStage.outcome}`,
-      `题材节奏参考（仅作工具）：${phaseRule.objective}；${phaseRule.payoff}`,
-    ] : [
-      `参考阶段目标：${phaseRule.objective}`,
-      `参考阶段冲突：${phaseRule.conflict}`,
-      `参考阶段回报：${phaseRule.payoff}`,
-      `参考阶段完成信号：${phaseRule.exitSignal}`,
-    ]),
+    ...(progress?.storyStage
+      ? [
+          `项目阶段目标：${progress.storyStage.goal}`,
+          `项目阶段冲突：${progress.storyStage.conflict}`,
+          `项目阶段预期结果：${progress.storyStage.outcome}`,
+          `题材节奏参考（仅作工具）：${phaseRule.objective}；${phaseRule.payoff}`,
+        ]
+      : [
+          `参考阶段目标：${phaseRule.objective}`,
+          `参考阶段冲突：${phaseRule.conflict}`,
+          `参考阶段回报：${phaseRule.payoff}`,
+          `参考阶段完成信号：${phaseRule.exitSignal}`,
+        ]),
     "商业叙事循环：",
     ...CORE_LOOP.map((item) => `- ${item}`),
     "冲突工具箱（本章最多选择一项，不要求全部使用）：",
@@ -157,10 +162,7 @@ export function compileCommercialGuidance(
     "扩张轴工具箱（每个项目阶段选择一条主轴）：",
     ...plugin.expansionAxes.map((item) => `- ${item}`),
     "重复疲劳识别：",
-    ...plugin.fatigueRules.map(
-      (item) =>
-        `- ${item.name}｜信号：${item.signals.join("、")}｜修复：${item.recovery}`,
-    ),
+    ...plugin.fatigueRules.map((item) => `- ${item.name}｜信号：${item.signals.join("、")}｜修复：${item.recovery}`),
     "题材规划检查：",
     ...plugin.planningChecks.map((item) => `- ${item}`),
     "题材质量检查：",

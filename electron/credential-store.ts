@@ -4,7 +4,7 @@ import { injectFault } from "./fault-injection";
 const API_TARGET = "cn.local.fanqie.novelstudio/model-api";
 const AUTO_BACKUP_TARGET = "cn.local.fanqie.novelstudio/auto-backup";
 
-const script = String.raw`
+const script = `
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System;
@@ -102,19 +102,27 @@ function execute(target: string, operation: "read" | "write" | "delete", value =
   injectFault("credential-unavailable");
   if (process.platform !== "win32") return Promise.resolve("");
   return new Promise<string>((resolve, reject) => {
-    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], {
-      windowsHide: true,
-      env: {
-        ...process.env,
-        NOVEL_STUDIO_CREDENTIAL_OPERATION: operation,
-        NOVEL_STUDIO_CREDENTIAL_TARGET: target,
+    const child = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      {
+        windowsHide: true,
+        env: {
+          ...process.env,
+          NOVEL_STUDIO_CREDENTIAL_OPERATION: operation,
+          NOVEL_STUDIO_CREDENTIAL_TARGET: target,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
       },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    );
     let output = "";
     let error = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk) => { output += chunk; });
-    child.stderr.setEncoding("utf8").on("data", (chunk) => { error += chunk; });
+    child.stdout.setEncoding("utf8").on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk) => {
+      error += chunk;
+    });
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0) reject(new Error(error.trim() || `Windows Credential Manager 返回退出码 ${code}`));

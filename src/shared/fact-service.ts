@@ -27,11 +27,9 @@ export function prepareFactSave(
           fact.confidence === "已确认" &&
           fact.subject === next.subject &&
           fact.predicate === next.predicate &&
-          (fact.value !== next.value ||
-            fact.knowledgeScope !== next.knowledgeScope) &&
+          (fact.value !== next.value || fact.knowledgeScope !== next.knowledgeScope) &&
           fact.validFromChapter < next.validFromChapter &&
-          (fact.validToChapter === null ||
-            fact.validToChapter >= next.validFromChapter),
+          (fact.validToChapter === null || fact.validToChapter >= next.validFromChapter),
       )
     : undefined;
   const replacement =

@@ -9,25 +9,47 @@ export function chapterRecoveryKey(projectId: string, chapter: Chapter) {
   return `novel-studio.chapter-draft.${projectId}.${chapter.id || `new-${chapter.number}`}`;
 }
 
-export function readRecoveredChapter(projectId: string, chapter: Chapter, storage: Pick<Storage, "getItem"> = localStorage) {
+export function readRecoveredChapter(
+  projectId: string,
+  chapter: Chapter,
+  storage: Pick<Storage, "getItem"> = localStorage,
+) {
   try {
     const recovered = storage.getItem(chapterRecoveryKey(projectId, chapter));
     if (!recovered) return chapter;
     const parsed = JSON.parse(recovered) as Chapter;
     if (parsed.id !== chapter.id || parsed.revision < chapter.revision) return chapter;
-    if (parsed.revision === chapter.revision && Date.parse(parsed.updatedAt) < Date.parse(chapter.updatedAt)) return chapter;
+    if (parsed.revision === chapter.revision && Date.parse(parsed.updatedAt) < Date.parse(chapter.updatedAt))
+      return chapter;
     return parsed;
   } catch {
     return chapter;
   }
 }
 
-export function writeRecoveredChapter(projectId: string, chapter: Chapter, storage: Pick<Storage, "setItem"> = localStorage) {
-  try { storage.setItem(chapterRecoveryKey(projectId, chapter), JSON.stringify(chapter)); return true; } catch { return false; }
+export function writeRecoveredChapter(
+  projectId: string,
+  chapter: Chapter,
+  storage: Pick<Storage, "setItem"> = localStorage,
+) {
+  try {
+    storage.setItem(chapterRecoveryKey(projectId, chapter), JSON.stringify(chapter));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function clearRecoveredChapter(projectId: string, chapter: Chapter, storage: Pick<Storage, "removeItem"> = localStorage) {
-  try { storage.removeItem(chapterRecoveryKey(projectId, chapter)); } catch { /* storage unavailable */ }
+export function clearRecoveredChapter(
+  projectId: string,
+  chapter: Chapter,
+  storage: Pick<Storage, "removeItem"> = localStorage,
+) {
+  try {
+    storage.removeItem(chapterRecoveryKey(projectId, chapter));
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 export class AutosaveCoordinator {
@@ -90,12 +112,16 @@ export class AutosaveCoordinator {
           ? this.waiters.filter((waiter) => waiter.signature === signature)
           : this.waiters;
         this.waiters = this.waiters.filter((waiter) => !completed.includes(waiter));
-        completed.forEach((waiter) => waiter.resolve(saved));
+        completed.forEach((waiter) => {
+          waiter.resolve(saved);
+        });
       }
     } catch (error) {
       if (this.stopped) return;
       const message = error instanceof Error ? error.message : String(error);
-      const transient = /busy|locked|timeout|temporar|EAGAIN|EBUSY|disk busy|暂时|超时|繁忙|占用|连接中断/i.test(message);
+      const transient = /busy|locked|timeout|temporar|EAGAIN|EBUSY|disk busy|暂时|超时|繁忙|占用|连接中断/i.test(
+        message,
+      );
       const willRetry = transient && this.retryCount < this.maxRetries;
       this.onError(error, willRetry);
       if (willRetry) {
@@ -109,7 +135,9 @@ export class AutosaveCoordinator {
         this.retryCount = 0;
         const terminal = error instanceof Error ? error : new Error(message);
         const failed = this.waiters.splice(0);
-        failed.forEach((waiter) => waiter.reject(terminal));
+        failed.forEach((waiter) => {
+          waiter.reject(terminal);
+        });
       }
     } finally {
       this.running = false;
@@ -125,6 +153,8 @@ export class AutosaveCoordinator {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     const error = new Error("自动保存已停止");
-    this.waiters.splice(0).forEach((waiter) => waiter.reject(error));
+    this.waiters.splice(0).forEach((waiter) => {
+      waiter.reject(error);
+    });
   }
 }

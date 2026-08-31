@@ -11,7 +11,13 @@ export interface ProviderCapabilities {
 }
 
 export function inferProviderCapabilities(baseUrl: string): ProviderCapabilities {
-  const host = (() => { try { return new URL(baseUrl).hostname.toLowerCase(); } catch { return ""; } })();
+  const host = (() => {
+    try {
+      return new URL(baseUrl).hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
   if (host.endsWith("openai.com") || host.includes("deepseek") || host.includes("dashscope"))
     return { jsonMode: true, usageShape: "openai" };
   return { jsonMode: true, usageShape: "unknown" };
@@ -34,7 +40,9 @@ export function rejectsStreaming(status: number, detail: string) {
 }
 
 export function rejectsResponsesApi(status: number, detail: string) {
-  return [400, 404, 405].includes(status) && /responses|unknown (?:url|endpoint)|not found|unsupported|不支持/i.test(detail);
+  return (
+    [400, 404, 405].includes(status) && /responses|unknown (?:url|endpoint)|not found|unsupported|不支持/i.test(detail)
+  );
 }
 
 export function usesResponsesApi(model: string) {
@@ -50,8 +58,7 @@ export function aiEndpoint(
   const base = normalizeProviderUrl(baseUrl);
   if (protocol === "anthropic-messages") {
     const url = new URL(base);
-    if (url.hostname.toLowerCase() === "api.anthropic.com" && url.pathname === "/")
-      return `${base}/v1/messages`;
+    if (url.hostname.toLowerCase() === "api.anthropic.com" && url.pathname === "/") return `${base}/v1/messages`;
     return base.endsWith("/messages") ? base : `${base}/messages`;
   }
   return `${base}/${useResponses ? "responses" : "chat/completions"}`;
@@ -91,7 +98,8 @@ export function parseAnthropicOutput(body: unknown) {
 }
 
 function parseSseData(event: string) {
-  const values = event.split(/\r?\n/)
+  const values = event
+    .split(/\r?\n/)
     .filter((line) => line.startsWith("data:"))
     .map((line) => line.slice(5).trim())
     .filter((value) => value && value !== "[DONE]");
@@ -105,7 +113,11 @@ function parseSseData(event: string) {
   }
 }
 
-export async function readChatCompletionStream(response: Response, onActivity: () => void, onContent: (delta: string) => void = () => {}) {
+export async function readChatCompletionStream(
+  response: Response,
+  onActivity: () => void,
+  onContent: (delta: string) => void = () => {},
+) {
   if (!response.body) throw new Error("模型流式响应缺少正文");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -138,7 +150,11 @@ export async function readChatCompletionStream(response: Response, onActivity: (
   return { content, usage };
 }
 
-export async function readResponsesStream(response: Response, onActivity: () => void, onContent: (delta: string) => void = () => {}) {
+export async function readResponsesStream(
+  response: Response,
+  onActivity: () => void,
+  onContent: (delta: string) => void = () => {},
+) {
   if (!response.body) throw new Error("模型流式响应缺少正文");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -166,7 +182,9 @@ export async function readResponsesStream(response: Response, onActivity: () => 
         throw new Error(chunk.error?.message ?? chunk.message ?? "Responses API 流式请求失败");
       }
       if (chunk.type === "response.failed" || chunk.type === "response.incomplete") {
-        const failed = chunk.response as { error?: { message?: string }; incomplete_details?: { reason?: string } } | undefined;
+        const failed = chunk.response as
+          | { error?: { message?: string }; incomplete_details?: { reason?: string } }
+          | undefined;
         throw new Error(failed?.error?.message ?? failed?.incomplete_details?.reason ?? "Responses API 未完成输出");
       }
     }
@@ -221,8 +239,7 @@ export async function readAnthropicStream(
           outputTokens: deltaUsage.outputTokens || usage.outputTokens,
         };
       }
-      if (chunk.type === "message_delta" && chunk.delta?.stop_reason)
-        stopReason = chunk.delta.stop_reason;
+      if (chunk.type === "message_delta" && chunk.delta?.stop_reason) stopReason = chunk.delta.stop_reason;
       if (chunk.type === "error" || chunk.error)
         throw new Error(chunk.error?.message ?? "Anthropic Messages API 流式请求失败");
     }
@@ -248,13 +265,18 @@ export class JsonStringFieldExtractor {
   private escaped = false;
   private unicodeDigits: string | null = null;
 
-  constructor(private readonly field: string, private readonly onValue: (delta: string) => void) {}
+  constructor(
+    private readonly field: string,
+    private readonly onValue: (delta: string) => void,
+  ) {}
 
   push(fragment: string) {
     if (this.finished || !fragment) return;
     if (!this.started) {
       this.searchBuffer += fragment;
-      const match = new RegExp(`"${this.field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:\\s*"`).exec(this.searchBuffer);
+      const match = new RegExp(`"${this.field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:\\s*"`).exec(
+        this.searchBuffer,
+      );
       if (!match) {
         this.searchBuffer = this.searchBuffer.slice(-Math.max(256, this.field.length + 16));
         return;
@@ -277,12 +299,16 @@ export class JsonStringFieldExtractor {
       if (this.escaped) {
         this.escaped = false;
         if (character === "u") this.unicodeDigits = "";
-        else decoded += ({ b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" } as Record<string, string>)[character] ?? character;
+        else
+          decoded +=
+            ({ b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" } as Record<string, string>)[character] ?? character;
         continue;
       }
       if (character === "\\") this.escaped = true;
-      else if (character === '"') { this.finished = true; break; }
-      else decoded += character;
+      else if (character === '"') {
+        this.finished = true;
+        break;
+      } else decoded += character;
     }
     if (decoded) this.onValue(decoded);
   }

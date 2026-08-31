@@ -7,8 +7,7 @@ export interface VolumeRange {
 }
 
 export function approvedVolumeRanges(plans: PlanNode[], wordsPerChapter = 2500): VolumeRange[] {
-  if (!Number.isFinite(wordsPerChapter) || wordsPerChapter <= 0)
-    throw new Error("每章目标字数必须是正数");
+  if (!Number.isFinite(wordsPerChapter) || wordsPerChapter <= 0) throw new Error("每章目标字数必须是正数");
   let cursor = 1;
   return plans
     .filter((plan) => plan.kind === "分卷" && plan.status === "已批准")
@@ -24,8 +23,8 @@ export function approvedVolumeRanges(plans: PlanNode[], wordsPerChapter = 2500):
 }
 
 export function findCurrentVolume(plans: PlanNode[], chapterNumber: number) {
-  return approvedVolumeRanges(plans).find((range) =>
-    chapterNumber >= range.fromChapter && chapterNumber <= range.toChapter,
+  return approvedVolumeRanges(plans).find(
+    (range) => chapterNumber >= range.fromChapter && chapterNumber <= range.toChapter,
   )?.plan;
 }
 

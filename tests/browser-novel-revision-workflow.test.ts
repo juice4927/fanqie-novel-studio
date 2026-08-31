@@ -10,11 +10,19 @@ beforeEach(() => {
   storage = new Map();
   vi.stubGlobal("localStorage", {
     getItem: vi.fn((key: string) => storage.get(key) ?? null),
-    setItem: vi.fn((key: string, value: string) => { storage.set(key, value); }),
-    removeItem: vi.fn((key: string) => { storage.delete(key); }),
-    clear: vi.fn(() => { storage.clear(); }),
+    setItem: vi.fn((key: string, value: string) => {
+      storage.set(key, value);
+    }),
+    removeItem: vi.fn((key: string) => {
+      storage.delete(key);
+    }),
+    clear: vi.fn(() => {
+      storage.clear();
+    }),
     key: vi.fn((index: number) => [...storage.keys()][index] ?? null),
-    get length() { return storage.size; },
+    get length() {
+      return storage.size;
+    },
   });
 });
 
@@ -45,11 +53,7 @@ describe("browser novel revision workflow", () => {
       after: "她越过老人，径直看向沈砚。",
       baseRevision: 3,
     });
-    const result = await api.applyNovelRevision(
-      project.id,
-      proposal,
-      [proposal.textRepair!.id],
-    );
+    const result = await api.applyNovelRevision(project.id, proposal, [proposal.textRepair!.id]);
 
     expect(result.appliedTargets).toEqual(["第1章"]);
     expect(result.changeRequestIds).toHaveLength(1);
@@ -67,8 +71,7 @@ describe("browser novel revision workflow", () => {
     );
 
     const reloaded = createBrowserApi();
-    expect((await reloaded.getChapter(project.id, chapter.id)).content)
-      .toContain("她越过老人，径直看向沈砚。");
+    expect((await reloaded.getChapter(project.id, chapter.id)).content).toContain("她越过老人，径直看向沈砚。");
   });
 
   it("rejects a revision after the analyzed chapter version changes", async () => {
@@ -90,11 +93,7 @@ describe("browser novel revision workflow", () => {
       content: "门外的灯忽然亮了。",
     });
 
-    await expect(api.applyNovelRevision(
-      project.id,
-      proposal,
-      [proposal.textRepair!.id],
-    )).rejects.toThrow("版本已变化");
+    await expect(api.applyNovelRevision(project.id, proposal, [proposal.textRepair!.id])).rejects.toThrow("版本已变化");
   });
 
   it("does not invent edits for ambiguous instructions or accept unknown repair ids", async () => {
@@ -109,7 +108,6 @@ describe("browser novel revision workflow", () => {
 
     expect(proposal.textRepair).toBeNull();
     expect(proposal.warnings.join(" ")).toContain("复杂联动分析请使用桌面版模型");
-    await expect(api.applyNovelRevision(project.id, proposal, ["text:forged"]))
-      .rejects.toThrow("未知项目");
+    await expect(api.applyNovelRevision(project.id, proposal, ["text:forged"])).rejects.toThrow("未知项目");
   });
 });

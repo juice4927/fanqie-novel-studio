@@ -3,7 +3,11 @@ export interface ParagraphDiffEntry {
   text: string;
 }
 
-const paragraphs = (value: string) => value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+const paragraphs = (value: string) =>
+  value
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 export function diffParagraphs(before: string, after: string): ParagraphDiffEntry[] {
   const left = paragraphs(before);
@@ -13,9 +17,10 @@ export function diffParagraphs(before: string, after: string): ParagraphDiffEntr
   const table = Array.from({ length: rows }, () => new Uint16Array(columns));
   for (let row = left.length - 1; row >= 0; row -= 1) {
     for (let column = right.length - 1; column >= 0; column -= 1) {
-      table[row][column] = left[row] === right[column]
-        ? table[row + 1][column + 1] + 1
-        : Math.max(table[row + 1][column], table[row][column + 1]);
+      table[row][column] =
+        left[row] === right[column]
+          ? table[row + 1][column + 1] + 1
+          : Math.max(table[row + 1][column], table[row][column + 1]);
     }
   }
   const result: ParagraphDiffEntry[] = [];

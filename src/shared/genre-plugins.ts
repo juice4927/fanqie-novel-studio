@@ -1,13 +1,6 @@
 import type { Genre, LedgerKind } from "./types";
 
-export const GENRE_STAGES = [
-  "开篇",
-  "追读",
-  "扩张",
-  "中期",
-  "高潮",
-  "收束",
-] as const;
+export const GENRE_STAGES = ["开篇", "追读", "扩张", "中期", "高潮", "收束"] as const;
 export type GenreStage = (typeof GENRE_STAGES)[number];
 
 export interface GenreSubtype {
@@ -64,20 +57,9 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     id: "urban-imagination.v2",
     genre: "都市脑洞",
     readerPromise: "高概念进入现实后的快速反馈、身份反差与可验证升级",
-    targetAudience: [
-      "偏好高概念和快反馈的移动端读者",
-      "关注现实获益、身份变化与能力边界的成长型读者",
-    ],
-    coreFantasies: [
-      "用独特规则重写现实困境",
-      "低位身份因能力获得可见反馈",
-      "能力、资源和社会影响同步升级",
-    ],
-    tabooBoundaries: [
-      "金手指无边界且不付代价",
-      "只靠围观震惊替代实际结果",
-      "现实职业、财富和组织运行完全失真",
-    ],
+    targetAudience: ["偏好高概念和快反馈的移动端读者", "关注现实获益、身份变化与能力边界的成长型读者"],
+    coreFantasies: ["用独特规则重写现实困境", "低位身份因能力获得可见反馈", "能力、资源和社会影响同步升级"],
+    tabooBoundaries: ["金手指无边界且不付代价", "只靠围观震惊替代实际结果", "现实职业、财富和组织运行完全失真"],
     subtypes: [
       {
         name: "系统成长",
@@ -190,14 +172,7 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
         valueHint: "谁掌握何种证据",
       },
     ],
-    deconstructionDimensions: [
-      "脑洞解释成本",
-      "首次能力兑现",
-      "现实锚点",
-      "身份反差",
-      "能力代价",
-      "资源与组织升级",
-    ],
+    deconstructionDimensions: ["脑洞解释成本", "首次能力兑现", "现实锚点", "身份反差", "能力代价", "资源与组织升级"],
     planningChecks: [
       "能力必须有边界或代价",
       "每阶段至少更换一条扩张轴",
@@ -216,20 +191,9 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     id: "fantasy-xianxia.v2",
     genre: "玄幻/仙侠",
     readerPromise: "清晰成长、力量质变、世界展开与更高层次冲突",
-    targetAudience: [
-      "偏好升级获得感和世界探索的读者",
-      "关注战力逻辑、资源竞争和大道选择的长线读者",
-    ],
-    coreFantasies: [
-      "从弱小到掌握自身命运",
-      "突破带来解题方式质变",
-      "探索更广世界并改写秩序",
-    ],
-    tabooBoundaries: [
-      "境界只涨数字不改变能力",
-      "战力随剧情任意浮动",
-      "资源凭空出现或地图无代价刷新",
-    ],
+    targetAudience: ["偏好升级获得感和世界探索的读者", "关注战力逻辑、资源竞争和大道选择的长线读者"],
+    coreFantasies: ["从弱小到掌握自身命运", "突破带来解题方式质变", "探索更广世界并改写秩序"],
+    tabooBoundaries: ["境界只涨数字不改变能力", "战力随剧情任意浮动", "资源凭空出现或地图无代价刷新"],
     subtypes: [
       {
         name: "宗门升级",
@@ -288,27 +252,9 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
         exitSignal: "世界新常态可被描述",
       },
     }),
-    conflictEngines: [
-      "修炼资源稀缺与竞争",
-      "境界压制与越阶解法",
-      "宗门责任与个人大道",
-      "旧秩序与新修行体系",
-    ],
-    rewardLadder: [
-      "资源获得",
-      "小境界突破",
-      "战力实战验证",
-      "功法或血脉质变",
-      "地位与势力提升",
-      "掌握世界规则",
-    ],
-    expansionAxes: [
-      "境界层级",
-      "功法组合与克制",
-      "地图灵气和规则",
-      "宗门到世界势力",
-      "个人因果到大道秩序",
-    ],
+    conflictEngines: ["修炼资源稀缺与竞争", "境界压制与越阶解法", "宗门责任与个人大道", "旧秩序与新修行体系"],
+    rewardLadder: ["资源获得", "小境界突破", "战力实战验证", "功法或血脉质变", "地位与势力提升", "掌握世界规则"],
+    expansionAxes: ["境界层级", "功法组合与克制", "地图灵气和规则", "宗门到世界势力", "个人因果到大道秩序"],
     fatigueRules: [
       {
         name: "重复越阶",
@@ -344,46 +290,22 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
         valueHint: "目标、盟敌和当前影响范围",
       },
     ],
-    deconstructionDimensions: [
-      "力量层级",
-      "资源循环",
-      "地图规则",
-      "功法克制与代价",
-      "敌我层次",
-      "大道选择",
-    ],
+    deconstructionDimensions: ["力量层级", "资源循环", "地图规则", "功法克制与代价", "敌我层次", "大道选择"],
     planningChecks: [
       "升级必须改变解题方式",
       "新地图必须带来新规则",
       "资源获取有因果和代价",
       "战力胜负与已确认状态一致",
     ],
-    qualityChecks: [
-      "境界与战力一致",
-      "资源来源可追溯",
-      "功法克制有前置依据",
-      "新名词密度不过载",
-      "突破是否产生质变",
-    ],
+    qualityChecks: ["境界与战力一致", "资源来源可追溯", "功法克制有前置依据", "新名词密度不过载", "突破是否产生质变"],
   },
   "历史/架空": {
     id: "history-alternate.v2",
     genre: "历史/架空",
     readerPromise: "个人选择在时代约束中撬动制度、势力与民生的因果快感",
-    targetAudience: [
-      "偏好权谋、经营和战争因果的读者",
-      "在意制度可信度与群体命运变化的读者",
-    ],
-    coreFantasies: [
-      "用信息和组织能力突破时代限制",
-      "建立可持续制度而非单次取巧",
-      "个人决策改变势力与民生",
-    ],
-    tabooBoundaries: [
-      "现代知识无成本落地",
-      "财政、人口、交通和军需凭空满足",
-      "历史人物与势力失去自身目标",
-    ],
+    targetAudience: ["偏好权谋、经营和战争因果的读者", "在意制度可信度与群体命运变化的读者"],
+    coreFantasies: ["用信息和组织能力突破时代限制", "建立可持续制度而非单次取巧", "个人决策改变势力与民生"],
+    tabooBoundaries: ["现代知识无成本落地", "财政、人口、交通和军需凭空满足", "历史人物与势力失去自身目标"],
     subtypes: [
       {
         name: "争霸经营",
@@ -498,46 +420,22 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
         valueHint: "条款、执行者、受益者和代价",
       },
     ],
-    deconstructionDimensions: [
-      "时代约束",
-      "势力格局",
-      "信息优势",
-      "制度阻力",
-      "财政交通",
-      "战争与民生代价",
-    ],
+    deconstructionDimensions: ["时代约束", "势力格局", "信息优势", "制度阻力", "财政交通", "战争与民生代价"],
     planningChecks: [
       "改变历史必须产生连锁反应",
       "资源和交通符合时代条件",
       "不同势力拥有独立目标",
       "技术与制度落地经过完整链条",
     ],
-    qualityChecks: [
-      "称谓与制度一致",
-      "时空距离合理",
-      "财政军需可追溯",
-      "重大胜利存在成本",
-      "政策执行存在受益者与阻力",
-    ],
+    qualityChecks: ["称谓与制度一致", "时空距离合理", "财政军需可追溯", "重大胜利存在成本", "政策执行存在受益者与阻力"],
   },
   现言甜宠: {
     id: "modern-romance.v2",
     genre: "现言甜宠",
     readerPromise: "明确偏爱、可靠边界、双向成长与递进的情绪回报",
-    targetAudience: [
-      "偏好稳定情绪价值和关系确认的读者",
-      "重视成年人沟通、人格边界与共同成长的读者",
-    ],
-    coreFantasies: [
-      "被具体看见并坚定选择",
-      "在亲密关系中保持独立成长",
-      "双方共同抵御现实压力",
-    ],
-    tabooBoundaries: [
-      "控制、羞辱或侵犯边界被包装成爱",
-      "靠拒绝沟通无限延长误会",
-      "一方失去事业与人格只服务恋爱",
-    ],
+    targetAudience: ["偏好稳定情绪价值和关系确认的读者", "重视成年人沟通、人格边界与共同成长的读者"],
+    coreFantasies: ["被具体看见并坚定选择", "在亲密关系中保持独立成长", "双方共同抵御现实压力"],
+    tabooBoundaries: ["控制、羞辱或侵犯边界被包装成爱", "靠拒绝沟通无限延长误会", "一方失去事业与人格只服务恋爱"],
     subtypes: [
       {
         name: "职场恋爱",
@@ -652,20 +550,8 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
         valueHint: "旧模式、改变行动和当前进度",
       },
     ],
-    deconstructionDimensions: [
-      "关系起点",
-      "偏爱证据",
-      "亲密阶段",
-      "人物边界",
-      "外部压力",
-      "冲突修复",
-    ],
-    planningChecks: [
-      "关系变化必须由事件推动",
-      "双方均有独立目标",
-      "甜点与矛盾交替",
-      "偏爱必须体现选择或成本",
-    ],
+    deconstructionDimensions: ["关系起点", "偏爱证据", "亲密阶段", "人物边界", "外部压力", "冲突修复"],
+    planningChecks: ["关系变化必须由事件推动", "双方均有独立目标", "甜点与矛盾交替", "偏爱必须体现选择或成本"],
     qualityChecks: [
       "情绪落点清晰",
       "人物边界受尊重",
@@ -678,20 +564,9 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     id: "ancient-household.v2",
     genre: "古言宅斗",
     readerPromise: "礼法约束中的证据信息博弈、权力转移与生存成长",
-    targetAudience: [
-      "偏好家族权谋和女性成长的读者",
-      "关注礼法、名分、财产与关系反转的读者",
-    ],
-    coreFantasies: [
-      "在受限身份中夺回生存与选择权",
-      "用信息和规则让强权付出代价",
-      "建立可控资源与可靠联盟",
-    ],
-    tabooBoundaries: [
-      "主角凭现代口号无视礼法后果",
-      "证据和证人临时出现",
-      "所有女性角色只围绕争宠互害",
-    ],
+    targetAudience: ["偏好家族权谋和女性成长的读者", "关注礼法、名分、财产与关系反转的读者"],
+    coreFantasies: ["在受限身份中夺回生存与选择权", "用信息和规则让强权付出代价", "建立可控资源与可靠联盟"],
+    tabooBoundaries: ["主角凭现代口号无视礼法后果", "证据和证人临时出现", "所有女性角色只围绕争宠互害"],
     subtypes: [
       {
         name: "家宅经营",
@@ -806,14 +681,7 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
         valueHint: "名义归属、实际控制和争议",
       },
     ],
-    deconstructionDimensions: [
-      "宗族结构",
-      "礼法边界",
-      "资源分配",
-      "证据链",
-      "盟友变化",
-      "名声传播",
-    ],
+    deconstructionDimensions: ["宗族结构", "礼法边界", "资源分配", "证据链", "盟友变化", "名声传播"],
     planningChecks: [
       "计谋依赖可获得的信息",
       "胜负改变实际资源或名分",
@@ -832,20 +700,9 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     id: "period-rebirth.v2",
     genre: "年代重生",
     readerPromise: "在具体时代条件下用有限先知修正命运、改善生计并重建关系",
-    targetAudience: [
-      "偏好生活改善、家庭成长和时代机会的读者",
-      "关注物资细节、劳动过程与命运修正的读者",
-    ],
-    coreFantasies: [
-      "避开前世遗憾并保护重要的人",
-      "靠劳动和判断逐步改善生活",
-      "抓住时代变化但不脱离政策与物资边界",
-    ],
-    tabooBoundaries: [
-      "先知等于全知且永不衰减",
-      "物价票证和政策混用年代",
-      "靠囤货或投机一夜暴富而无风险",
-    ],
+    targetAudience: ["偏好生活改善、家庭成长和时代机会的读者", "关注物资细节、劳动过程与命运修正的读者"],
+    coreFantasies: ["避开前世遗憾并保护重要的人", "靠劳动和判断逐步改善生活", "抓住时代变化但不脱离政策与物资边界"],
+    tabooBoundaries: ["先知等于全知且永不衰减", "物价票证和政策混用年代", "靠囤货或投机一夜暴富而无风险"],
     subtypes: [
       {
         name: "家庭修复",
@@ -967,14 +824,7 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
         valueHint: "旧模式、当前约定和变化证据",
       },
     ],
-    deconstructionDimensions: [
-      "年月地域锚点",
-      "先知边界",
-      "家庭关系",
-      "生计过程",
-      "政策约束",
-      "时代机会",
-    ],
+    deconstructionDimensions: ["年月地域锚点", "先知边界", "家庭关系", "生计过程", "政策约束", "时代机会"],
     planningChecks: [
       "先知不等于全知并随历史偏移衰减",
       "改善过程符合物资条件",

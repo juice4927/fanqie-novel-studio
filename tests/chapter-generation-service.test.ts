@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { createChapterGenerationGuard } from "../electron/ai-retry";
 import {
-  createChapterGenerationCoordinator,
   type ChapterGenerationAi,
   type ChapterGenerationDatabase,
+  createChapterGenerationCoordinator,
 } from "../electron/chapter-generation-service";
-import { createChapterGenerationGuard } from "../electron/ai-retry";
 import type {
   AiSettings,
   Chapter,
@@ -16,10 +16,7 @@ import type {
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 
-function createChapter(
-  number: number,
-  overrides: Partial<Chapter> = {},
-): Chapter {
+function createChapter(number: number, overrides: Partial<Chapter> = {}): Chapter {
   return {
     id: `chapter-${number}`,
     number,
@@ -37,10 +34,7 @@ function createChapter(
   };
 }
 
-function createFact(
-  id: string,
-  confidence: LedgerFact["confidence"] = "已确认",
-): LedgerFact {
+function createFact(id: string, confidence: LedgerFact["confidence"] = "已确认"): LedgerFact {
   return {
     id,
     kind: "人物",
@@ -137,11 +131,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function createHarness(options: {
-  project?: ProjectDetail;
-  apiKey?: string;
-  startCompletion?: Promise<Chapter>;
-} = {}) {
+function createHarness(options: { project?: ProjectDetail; apiKey?: string; startCompletion?: Promise<Chapter> } = {}) {
   const project = options.project ?? createProject();
   let apiKey = options.apiKey ?? "secret";
   const relevantFacts = [createFact("fact-relevant")];
@@ -153,25 +143,18 @@ function createHarness(options: {
   const getProject = vi.fn(() => project);
   const getAiSettings = vi.fn(() => settings);
   const searchRelevantFacts = vi.fn(() => relevantFacts);
-  const saveGeneratedChapter = vi.fn(
-    (_projectId: string, chapter: Chapter) => chapter,
-  );
+  const saveGeneratedChapter = vi.fn((_projectId: string, chapter: Chapter) => chapter);
   const markAiJobApplicationFailed = vi.fn();
-  const startDraftChapter = vi.fn(
-    (_projectId: string, _chapter: Chapter) => ({
-      jobId: "job-1",
-      source: "network" as const,
-      completion:
-        options.startCompletion ?? Promise.resolve(generatedChapter),
-    }),
-  );
-  const draftChapter = vi.fn(
-    async (_projectId: string, chapter: Chapter) => ({
-      ...chapter,
-      content: `AI 正文 ${chapter.number}`,
-      wordCount: 7,
-    }),
-  );
+  const startDraftChapter = vi.fn((_projectId: string, _chapter: Chapter) => ({
+    jobId: "job-1",
+    source: "network" as const,
+    completion: options.startCompletion ?? Promise.resolve(generatedChapter),
+  }));
+  const draftChapter = vi.fn(async (_projectId: string, chapter: Chapter) => ({
+    ...chapter,
+    content: `AI 正文 ${chapter.number}`,
+    wordCount: 7,
+  }));
   const compileContext = vi.fn(() => context);
   const database: ChapterGenerationDatabase = {
     getProject,
@@ -252,9 +235,7 @@ describe("chapter generation coordinator", () => {
     const harness = createHarness();
     mutate(harness.project);
 
-    expect(() => harness.coordinator.startOne("project-1", chapterId)).toThrow(
-      message,
-    );
+    expect(() => harness.coordinator.startOne("project-1", chapterId)).toThrow(message);
     expect(harness.coordinator.isActive("project-1")).toBe(false);
     expect(harness.startDraftChapter).not.toHaveBeenCalled();
   });
@@ -262,9 +243,7 @@ describe("chapter generation coordinator", () => {
   it("requires an API key before taking the project lock", () => {
     const harness = createHarness({ apiKey: "" });
 
-    expect(() =>
-      harness.coordinator.startOne("project-1", "chapter-1"),
-    ).toThrow("尚未配置 AI API 密钥");
+    expect(() => harness.coordinator.startOne("project-1", "chapter-1")).toThrow("尚未配置 AI API 密钥");
     expect(harness.coordinator.isActive("project-1")).toBe(false);
     expect(harness.searchRelevantFacts).not.toHaveBeenCalled();
   });
@@ -274,12 +253,7 @@ describe("chapter generation coordinator", () => {
     const onStream = vi.fn();
     const sourceChapter = harness.project.chapters[0];
 
-    const task = harness.coordinator.startOne(
-      "project-1",
-      sourceChapter.id,
-      onStream,
-      "bypass",
-    );
+    const task = harness.coordinator.startOne("project-1", sourceChapter.id, onStream, "bypass");
 
     expect(task.jobId).toBe("job-1");
     expect(harness.coordinator.isActive("project-1")).toBe(true);
@@ -288,11 +262,7 @@ describe("chapter generation coordinator", () => {
       `${sourceChapter.title} ${sourceChapter.outline}`,
       sourceChapter.number,
     );
-    expect(harness.compileContext).toHaveBeenCalledWith(
-      harness.project,
-      sourceChapter,
-      harness.relevantFacts,
-    );
+    expect(harness.compileContext).toHaveBeenCalledWith(harness.project, sourceChapter, harness.relevantFacts);
     expect(harness.startDraftChapter).toHaveBeenCalledWith(
       "project-1",
       sourceChapter,
@@ -318,9 +288,7 @@ describe("chapter generation coordinator", () => {
     const harness = createHarness({ startCompletion: pending.promise });
     const task = harness.coordinator.startOne("project-1", "chapter-1");
 
-    expect(() =>
-      harness.coordinator.startOne("project-1", "chapter-2"),
-    ).toThrow("该作品已有正文生成任务正在运行");
+    expect(() => harness.coordinator.startOne("project-1", "chapter-2")).toThrow("该作品已有正文生成任务正在运行");
 
     pending.resolve(harness.generatedChapter);
     await task.completion;
@@ -333,9 +301,7 @@ describe("chapter generation coordinator", () => {
       throw new Error("startup failed");
     });
 
-    expect(() =>
-      harness.coordinator.startOne("project-1", "chapter-1"),
-    ).toThrow("startup failed");
+    expect(() => harness.coordinator.startOne("project-1", "chapter-1")).toThrow("startup failed");
     expect(harness.coordinator.isActive("project-1")).toBe(false);
   });
 
@@ -357,10 +323,7 @@ describe("chapter generation coordinator", () => {
 
     const task = harness.coordinator.startOne("project-1", "chapter-1");
     await expect(task.completion).rejects.toThrow("旧生成结果未保存");
-    expect(harness.markAiJobApplicationFailed).toHaveBeenCalledWith(
-      "job-1",
-      expect.stringContaining("模型输出未应用"),
-    );
+    expect(harness.markAiJobApplicationFailed).toHaveBeenCalledWith("job-1", expect.stringContaining("模型输出未应用"));
   });
 
   it("generates a five-chapter batch in order and skips existing content", async () => {
@@ -369,22 +332,13 @@ describe("chapter generation coordinator", () => {
     project.chapters[1].wordCount = 4;
     const harness = createHarness({ project });
 
-    const generated = await harness.coordinator.generateBatch(
-      "project-1",
-      "chapter-1",
-    );
+    const generated = await harness.coordinator.generateBatch("project-1", "chapter-1");
 
     expect(generated).toHaveLength(5);
     expect(generated[1]).toBe(project.chapters[1]);
-    expect(
-      harness.draftChapter.mock.calls.map((call) => call[1].number),
-    ).toEqual([1, 3, 4, 5]);
+    expect(harness.draftChapter.mock.calls.map((call) => call[1].number)).toEqual([1, 3, 4, 5]);
     expect(harness.saveGeneratedChapter).toHaveBeenCalledTimes(4);
-    expect(harness.compileContext).toHaveBeenCalledWith(
-      project,
-      project.chapters[0],
-      harness.relevantFacts,
-    );
+    expect(harness.compileContext).toHaveBeenCalledWith(project, project.chapters[0], harness.relevantFacts);
     expect(harness.draftChapter.mock.calls[0][3]).toContain('"kind":"batch"');
     expect(harness.coordinator.isActive("project-1")).toBe(false);
   });
@@ -398,9 +352,7 @@ describe("chapter generation coordinator", () => {
       })
       .mockRejectedValueOnce(new Error("batch failed"));
 
-    await expect(
-      harness.coordinator.generateBatch("project-1", "chapter-1"),
-    ).rejects.toThrow("batch failed");
+    await expect(harness.coordinator.generateBatch("project-1", "chapter-1")).rejects.toThrow("batch failed");
     expect(harness.saveGeneratedChapter).toHaveBeenCalledTimes(1);
     expect(harness.coordinator.isActive("project-1")).toBe(false);
   });

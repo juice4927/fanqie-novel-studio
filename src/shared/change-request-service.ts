@@ -38,10 +38,7 @@ export function prepareChangeRequest(
   };
 }
 
-export function decideChangeRequest(
-  change: ChangeRequest | undefined,
-  decision: "批准" | "拒绝",
-): ChangeRequest {
+export function decideChangeRequest(change: ChangeRequest | undefined, decision: "批准" | "拒绝"): ChangeRequest {
   if (!change) throw new Error("变更单不存在");
   if (change.status !== "待审批") throw new Error("只有待审批变更单可以作出决定");
   return {

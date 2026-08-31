@@ -10,7 +10,12 @@ import type {
 } from "./types";
 
 const ARRAY_FIELDS = new Set<NovelContractField>([
-  "worldRules", "keyRelationships", "majorForces", "timelineAnchors", "immutableRules", "prohibitedPatterns",
+  "worldRules",
+  "keyRelationships",
+  "majorForces",
+  "timelineAnchors",
+  "immutableRules",
+  "prohibitedPatterns",
 ]);
 
 export function contractFieldText(contract: StoryContract, field: NovelContractField) {
@@ -24,7 +29,10 @@ export function applyContractRepairs(contract: StoryContract, repairs: readonly 
     if (contractFieldText(next, repair.field) !== repair.before)
       throw new Error(`创作设定“${repair.label}”已变化，请重新分析修改意见`);
     const value = ARRAY_FIELDS.has(repair.field)
-      ? repair.after.split(/\n+/).map((item) => item.trim()).filter(Boolean)
+      ? repair.after
+          .split(/\n+/)
+          .map((item) => item.trim())
+          .filter(Boolean)
       : repair.after.trim();
     Object.assign(next, { [repair.field]: value });
   }
@@ -32,7 +40,13 @@ export function applyContractRepairs(contract: StoryContract, repairs: readonly 
 }
 
 export function planRevisionSnapshot(plan: PlanNode): NovelPlanSnapshot {
-  return { title: plan.title, goal: plan.goal, conflict: plan.conflict, outcome: plan.outcome, targetWords: plan.targetWords };
+  return {
+    title: plan.title,
+    goal: plan.goal,
+    conflict: plan.conflict,
+    outcome: plan.outcome,
+    targetWords: plan.targetWords,
+  };
 }
 
 export function chapterRevisionSnapshot(chapter: Chapter): NovelChapterSnapshot {
@@ -54,9 +68,13 @@ export function sameRevisionSnapshot(left: unknown, right: unknown) {
 }
 
 export function applyTextRepair(chapter: Chapter, repair: NovelTextRepair) {
-  if (chapter.revision !== repair.baseRevision)
-    throw new Error(`第${chapter.number}章版本已变化，请重新分析修改意见`);
-  if (repair.start < 0 || repair.end < repair.start || repair.end > chapter.content.length || chapter.content.slice(repair.start, repair.end) !== repair.before)
+  if (chapter.revision !== repair.baseRevision) throw new Error(`第${chapter.number}章版本已变化，请重新分析修改意见`);
+  if (
+    repair.start < 0 ||
+    repair.end < repair.start ||
+    repair.end > chapter.content.length ||
+    chapter.content.slice(repair.start, repair.end) !== repair.before
+  )
     throw new Error(`第${chapter.number}章修改位置已变化，请重新选择文字并分析`);
   return `${chapter.content.slice(0, repair.start)}${repair.after}${chapter.content.slice(repair.end)}`;
 }

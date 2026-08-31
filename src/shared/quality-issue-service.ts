@@ -21,16 +21,11 @@ export function prepareQualityIssueSave(
   }
   return {
     upserts: [...upserts.values()],
-    forceSequentialReview: incomingIssues.some(
-      (issue) => issue.severity === "硬性",
-    ),
+    forceSequentialReview: incomingIssues.some((issue) => issue.severity === "硬性"),
   };
 }
 
-export function resolveQualityIssue(
-  issue: QualityIssue | undefined,
-  status: QualityIssue["status"],
-): QualityIssue {
+export function resolveQualityIssue(issue: QualityIssue | undefined, status: QualityIssue["status"]): QualityIssue {
   if (!issue) throw new Error("质检项不存在");
   if (issue.severity === "硬性" && status === "已忽略") {
     throw new Error("硬性质检项不能忽略，必须解决后才能继续");

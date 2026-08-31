@@ -12,7 +12,10 @@ describe("prose temperature analysis", () => {
   });
 
   it("keeps restrained prose acceptable when people and senses carry the impact", () => {
-    const embodied = "雨声砸在破瓦上，沈青禾攥紧湿冷的衣角，喉咙发紧。老人扶起孩子，眼泪落下来，却还是把最后半袋米递了回去。".repeat(45);
+    const embodied =
+      "雨声砸在破瓦上，沈青禾攥紧湿冷的衣角，喉咙发紧。老人扶起孩子，眼泪落下来，却还是把最后半袋米递了回去。".repeat(
+        45,
+      );
 
     const metrics = analyzeProseTemperature(embodied);
 

@@ -41,8 +41,6 @@ describe("browser expectation workflow", () => {
       createdAt: existing.createdAt,
       updatedAt: savedAt,
     });
-    expect(
-      reloaded.expectations.find((item) => item.id === existing.id),
-    ).toEqual(saved);
+    expect(reloaded.expectations.find((item) => item.id === existing.id)).toEqual(saved);
   });
 });

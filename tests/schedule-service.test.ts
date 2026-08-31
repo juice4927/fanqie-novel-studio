@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { prepareScheduleSave } from "../src/shared/schedule-service";
-import type {
-  Chapter,
-  QualityIssue,
-  ScheduleItem,
-} from "../src/shared/types";
+import type { Chapter, QualityIssue, ScheduleItem } from "../src/shared/types";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 
@@ -24,9 +20,7 @@ function chapter(status: Chapter["status"] = "已定稿"): Chapter {
   };
 }
 
-function schedule(
-  status: ScheduleItem["status"] = "待发布",
-): ScheduleItem {
+function schedule(status: ScheduleItem["status"] = "待发布"): ScheduleItem {
   return {
     id: "",
     projectId: "forged-project",
@@ -39,11 +33,7 @@ function schedule(
   };
 }
 
-function prepare(
-  candidate: ScheduleItem,
-  currentChapter: Chapter | undefined,
-  issues: QualityIssue[] = [],
-) {
+function prepare(candidate: ScheduleItem, currentChapter: Chapter | undefined, issues: QualityIssue[] = []) {
   return prepareScheduleSave(candidate, {
     scheduleId: candidate.id || "schedule-1",
     projectId: "project-1",
@@ -77,28 +67,19 @@ describe("schedule save rules", () => {
   it.each([
     ["待发布", "待发布"],
     ["已发布", "已发布"],
-  ] as const)(
-    "does not repeat an existing %s chapter transition",
-    (scheduleStatus, chapterStatus) => {
-      expect(prepare(schedule(scheduleStatus), chapter(chapterStatus)).transitionTo)
-        .toBeNull();
-    },
-  );
+  ] as const)("does not repeat an existing %s chapter transition", (scheduleStatus, chapterStatus) => {
+    expect(prepare(schedule(scheduleStatus), chapter(chapterStatus)).transitionTo).toBeNull();
+  });
 
   it("allows a finalized chapter to remain waiting for scheduling", () => {
-    expect(prepare(schedule("待排期"), chapter("已定稿")).transitionTo)
-      .toBeNull();
+    expect(prepare(schedule("待排期"), chapter("已定稿")).transitionTo).toBeNull();
   });
 
   it("rejects invalid timestamps, missing chapters, and invalid jumps", () => {
-    expect(() =>
-      prepare({ ...schedule(), publishAt: "2026-08-01T08:00:00" }, chapter()),
-    ).toThrow("带时区");
+    expect(() => prepare({ ...schedule(), publishAt: "2026-08-01T08:00:00" }, chapter())).toThrow("带时区");
     expect(() => prepare(schedule(), undefined)).toThrow("排期章节不存在");
-    expect(() => prepare(schedule("已发布"), chapter("已定稿")))
-      .toThrow("不允许");
-    expect(() => prepare(schedule("待排期"), chapter("已发布")))
-      .toThrow("只有已定稿或待发布章节可以安排发布");
+    expect(() => prepare(schedule("已发布"), chapter("已定稿"))).toThrow("不允许");
+    expect(() => prepare(schedule("待排期"), chapter("已发布"))).toThrow("只有已定稿或待发布章节可以安排发布");
   });
 
   it("applies unresolved hard-issue gates to publication transitions", () => {
@@ -114,7 +95,6 @@ describe("schedule save rules", () => {
       createdAt: timestamp,
     };
 
-    expect(() => prepare(schedule(), chapter(), [hardIssue]))
-      .toThrow("未解决的硬性问题");
+    expect(() => prepare(schedule(), chapter(), [hardIssue])).toThrow("未解决的硬性问题");
   });
 });

@@ -7,5 +7,3 @@ declare global {
     novelStudio?: AppApi;
   }
 }
-
-export {};

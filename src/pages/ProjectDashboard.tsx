@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   AlertTriangle,
   BookOpenCheck,
@@ -10,26 +9,14 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import type {
-  AppApi,
-  ConceptCandidate,
-  InsightPack,
-  ProjectDetail,
-} from "../shared/types";
-import { GENRE_STAGES } from "../shared/genre-plugins";
-import type { GenrePluginDefinition } from "../shared/genre-plugins";
+import { useState } from "react";
 import { Badge, Button, Modal } from "../components/UI";
 import { formatCount } from "../lib/format";
+import type { GenrePluginDefinition } from "../shared/genre-plugins";
+import { GENRE_STAGES } from "../shared/genre-plugins";
+import type { AppApi, ConceptCandidate, InsightPack, ProjectDetail } from "../shared/types";
 
-type ProjectTab =
-  | "驾驶舱"
-  | "故事圣经"
-  | "规划台"
-  | "写作台"
-  | "状态账本"
-  | "质检中心"
-  | "发布日历"
-  | "数据复盘";
+type ProjectTab = "驾驶舱" | "故事圣经" | "规划台" | "写作台" | "状态账本" | "质检中心" | "发布日历" | "数据复盘";
 
 export function ProjectDashboard({
   project,
@@ -52,12 +39,8 @@ export function ProjectDashboard({
   const [selectedInsights, setSelectedInsights] = useState(project.insightIds);
   const [concepts, setConcepts] = useState<ConceptCandidate[]>([]);
   const [generating, setGenerating] = useState(false);
-  const unresolved = project.issues.filter(
-    (issue) => issue.status === "待处理",
-  );
-  const approvedPlans = project.plans.filter(
-    (plan) => plan.status === "已批准",
-  );
+  const unresolved = project.issues.filter((issue) => issue.status === "待处理");
+  const approvedPlans = project.plans.filter((plan) => plan.status === "已批准");
   const milestones = [
     {
       label: "关联市场洞察",
@@ -76,9 +59,7 @@ export function ProjectDashboard({
     },
     {
       label: "建立第一章并质检",
-      done: project.chapters.some((chapter) =>
-        ["待定稿", "已定稿", "待发布", "已发布"].includes(chapter.status),
-      ),
+      done: project.chapters.some((chapter) => ["待定稿", "已定稿", "待发布", "已发布"].includes(chapter.status)),
       action: () => onNavigate("写作台"),
     },
     {
@@ -126,12 +107,7 @@ export function ProjectDashboard({
           <ShieldCheck size={19} />
           <div>
             <span>已确认事实</span>
-            <strong>
-              {
-                project.facts.filter((fact) => fact.confidence === "已确认")
-                  .length
-              }
-            </strong>
+            <strong>{project.facts.filter((fact) => fact.confidence === "已确认").length}</strong>
           </div>
         </div>
         <div className="stat">
@@ -152,10 +128,8 @@ export function ProjectDashboard({
           </div>
           <div className="milestone-list">
             {milestones.map((milestone, index) => (
-              <button key={milestone.label} onClick={milestone.action}>
-                <span className={milestone.done ? "done" : ""}>
-                  {milestone.done ? <Check size={15} /> : index + 1}
-                </span>
+              <button type="button" key={milestone.label} onClick={milestone.action}>
+                <span className={milestone.done ? "done" : ""}>{milestone.done ? <Check size={15} /> : index + 1}</span>
                 <strong>{milestone.label}</strong>
                 <ChevronRight size={16} />
               </button>
@@ -229,23 +203,14 @@ export function ProjectDashboard({
               管理关联
             </Button>
             <Button
-              icon={
-                generating ? (
-                  <LoaderCircle className="spin" size={16} />
-                ) : (
-                  <Sparkles size={16} />
-                )
-              }
+              icon={generating ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
               disabled={!project.insightIds.length || generating}
               onClick={async () => {
                 setGenerating(true);
                 try {
                   setConcepts(await api.generateConcepts(project.summary.id));
                 } catch (error) {
-                  notify(
-                    error instanceof Error ? error.message : String(error),
-                    "error",
-                  );
+                  notify(error instanceof Error ? error.message : String(error), "error");
                 } finally {
                   setGenerating(false);
                 }
@@ -260,11 +225,7 @@ export function ProjectDashboard({
             {concepts.map((concept) => (
               <article key={concept.id}>
                 <div>
-                  <Badge
-                    tone={
-                      concept.originalityRisk === "低" ? "success" : "warning"
-                    }
-                  >
+                  <Badge tone={concept.originalityRisk === "低" ? "success" : "warning"}>
                     原创风险 {concept.originalityRisk}
                   </Badge>
                   <h3>{concept.title}</h3>
@@ -304,9 +265,7 @@ export function ProjectDashboard({
                       notify("候选方向已写入故事圣经，仍需补全并审批");
                     }}
                   >
-                    {concept.originalityRisk === "高"
-                      ? "需先人工复核"
-                      : "采用此方向"}
+                    {concept.originalityRisk === "高" ? "需先人工复核" : "采用此方向"}
                   </Button>
                 </footer>
               </article>
@@ -326,18 +285,12 @@ export function ProjectDashboard({
                   <Badge>{item.confidence}</Badge>
                 </div>
               ))}
-            {!project.insightIds.length && (
-              <p className="muted-line">尚未关联洞察，无法生成立项方案。</p>
-            )}
+            {!project.insightIds.length && <p className="muted-line">尚未关联洞察，无法生成立项方案。</p>}
           </div>
         )}
       </section>
       {showInsights && (
-        <Modal
-          title="关联脱敏洞察"
-          onClose={() => setShowInsights(false)}
-          width={760}
-        >
+        <Modal title="关联脱敏洞察" onClose={() => setShowInsights(false)} width={760}>
           <div className="choice-list">
             {insights.map((insight) => (
               <label key={insight.id}>

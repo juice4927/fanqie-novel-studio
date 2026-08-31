@@ -4,9 +4,7 @@ import type { ReviewExperiment } from "../src/shared/types";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 
-function experiment(
-  overrides: Partial<ReviewExperiment> = {},
-): ReviewExperiment {
+function experiment(overrides: Partial<ReviewExperiment> = {}): ReviewExperiment {
   return {
     id: "experiment-1",
     title: "调整回报类型",
@@ -49,29 +47,49 @@ describe("review experiment rules", () => {
   });
 
   it("rejects invalid chapter and date ranges", () => {
-    expect(() => prepareReviewExperiment(undefined, experiment({
-      fromChapter: 16,
-      toChapter: 15,
-    }), { id: "new", updatedAt: timestamp })).toThrow(
-      "影响起始章不能晚于结束章",
-    );
-    expect(() => prepareReviewExperiment(undefined, experiment({
-      baselineStart: "2026-07-08",
-      baselineEnd: "2026-07-01",
-    }), { id: "new", updatedAt: timestamp })).toThrow("观察日期范围无效");
-    expect(() => prepareReviewExperiment(undefined, experiment({
-      observationStart: "2026-07-15",
-      observationEnd: "2026-07-14",
-    }), { id: "new", updatedAt: timestamp })).toThrow("观察日期范围无效");
+    expect(() =>
+      prepareReviewExperiment(
+        undefined,
+        experiment({
+          fromChapter: 16,
+          toChapter: 15,
+        }),
+        { id: "new", updatedAt: timestamp },
+      ),
+    ).toThrow("影响起始章不能晚于结束章");
+    expect(() =>
+      prepareReviewExperiment(
+        undefined,
+        experiment({
+          baselineStart: "2026-07-08",
+          baselineEnd: "2026-07-01",
+        }),
+        { id: "new", updatedAt: timestamp },
+      ),
+    ).toThrow("观察日期范围无效");
+    expect(() =>
+      prepareReviewExperiment(
+        undefined,
+        experiment({
+          observationStart: "2026-07-15",
+          observationEnd: "2026-07-14",
+        }),
+        { id: "new", updatedAt: timestamp },
+      ),
+    ).toThrow("观察日期范围无效");
   });
 
   it("requires a conclusion and decision before closing", () => {
-    expect(() => prepareReviewExperiment(undefined, experiment({
-      status: "已结论",
-      conclusion: " ",
-      decision: null,
-    }), { id: "new", updatedAt: timestamp })).toThrow(
-      "结束实验必须填写结论和处理决定",
-    );
+    expect(() =>
+      prepareReviewExperiment(
+        undefined,
+        experiment({
+          status: "已结论",
+          conclusion: " ",
+          decision: null,
+        }),
+        { id: "new", updatedAt: timestamp },
+      ),
+    ).toThrow("结束实验必须填写结论和处理决定");
   });
 });

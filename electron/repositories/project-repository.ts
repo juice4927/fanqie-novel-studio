@@ -12,7 +12,11 @@ export class ProjectRepository {
   }
 
   setState<T>(db: DatabaseSync, key: string, value: T) {
-    db.prepare("INSERT OR REPLACE INTO state(key, value, updated_at) VALUES(?, ?, ?)").run(key, JSON.stringify(value), now());
+    db.prepare("INSERT OR REPLACE INTO state(key, value, updated_at) VALUES(?, ?, ?)").run(
+      key,
+      JSON.stringify(value),
+      now(),
+    );
   }
 
   getState<T>(db: DatabaseSync, key: string, fallback?: T): T {
@@ -23,35 +27,50 @@ export class ProjectRepository {
   }
 
   listRecords<T>(db: DatabaseSync, collection: string): T[] {
-    return (db.prepare("SELECT payload FROM records WHERE collection = ?").all(collection) as Array<{ payload: string }>).map((row) => JSON.parse(row.payload) as T);
+    return (
+      db.prepare("SELECT payload FROM records WHERE collection = ?").all(collection) as Array<{ payload: string }>
+    ).map((row) => JSON.parse(row.payload) as T);
   }
 
   listChapters(db: DatabaseSync): Chapter[] {
-    return (db.prepare(`
+    return (
+      db
+        .prepare(`
       SELECT c.*, b.content FROM chapters c
       LEFT JOIN chapter_contents b ON b.chapter_id = c.id
       ORDER BY c.number
-    `).all() as unknown as ChapterRow[]).map(hydrateChapter);
+    `)
+        .all() as unknown as ChapterRow[]
+    ).map(hydrateChapter);
   }
 
   listChapterMetadata(db: DatabaseSync): Chapter[] {
-    return (db.prepare("SELECT * FROM chapters ORDER BY number").all() as unknown as ChapterRow[])
-      .map((row) => hydrateChapter({ ...row, content: "" }));
+    return (db.prepare("SELECT * FROM chapters ORDER BY number").all() as unknown as ChapterRow[]).map((row) =>
+      hydrateChapter({ ...row, content: "" }),
+    );
   }
 
   getChapter(db: DatabaseSync, id: string): Chapter | undefined {
-    const row = db.prepare(`
+    const row = db
+      .prepare(`
       SELECT c.*, b.content FROM chapters c
       LEFT JOIN chapter_contents b ON b.chapter_id = c.id
       WHERE c.id = ?
-    `).get(id) as ChapterRow | undefined;
+    `)
+      .get(id) as ChapterRow | undefined;
     return row ? hydrateChapter(row) : undefined;
   }
 
   saveChapter(db: DatabaseSync, chapter: Chapter, priorRevision?: number, createRevision = true) {
     const previous = this.getChapter(db, chapter.id);
     if (previous && createRevision)
-      this.addRevision(db, "chapters", chapter.id, priorRevision ?? this.nextRevision(db, "chapters", chapter.id), previous);
+      this.addRevision(
+        db,
+        "chapters",
+        chapter.id,
+        priorRevision ?? this.nextRevision(db, "chapters", chapter.id),
+        previous,
+      );
     const metadata = JSON.stringify({ ...chapter, content: "" });
     db.prepare(`
       INSERT OR REPLACE INTO chapters(
@@ -59,31 +78,64 @@ export class ProjectRepository {
         is_key_chapter, metadata, updated_at
       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      chapter.id, chapter.number, chapter.title, chapter.outline, chapter.status,
-      chapter.wordCount, chapter.batchMode, chapter.isKeyChapter ? 1 : 0,
-      metadata, chapter.updatedAt,
+      chapter.id,
+      chapter.number,
+      chapter.title,
+      chapter.outline,
+      chapter.status,
+      chapter.wordCount,
+      chapter.batchMode,
+      chapter.isKeyChapter ? 1 : 0,
+      metadata,
+      chapter.updatedAt,
     );
-    db.prepare("INSERT OR REPLACE INTO chapter_contents(chapter_id, content) VALUES(?, ?)")
-      .run(chapter.id, chapter.content);
+    db.prepare("INSERT OR REPLACE INTO chapter_contents(chapter_id, content) VALUES(?, ?)").run(
+      chapter.id,
+      chapter.content,
+    );
   }
 
   getRecord<T>(db: DatabaseSync, collection: string, id: string): T | undefined {
-    const row = db.prepare("SELECT payload FROM records WHERE collection = ? AND id = ?").get(collection, id) as { payload: string } | undefined;
-    return row ? JSON.parse(row.payload) as T : undefined;
+    const row = db.prepare("SELECT payload FROM records WHERE collection = ? AND id = ?").get(collection, id) as
+      | { payload: string }
+      | undefined;
+    return row ? (JSON.parse(row.payload) as T) : undefined;
   }
 
-  saveRecord<T>(db: DatabaseSync, collection: string, id: string, payload: T, priorRevision?: number, createRevision = true) {
+  saveRecord<T>(
+    db: DatabaseSync,
+    collection: string,
+    id: string,
+    payload: T,
+    priorRevision?: number,
+    createRevision = true,
+  ) {
     const previous = this.getRecord<T>(db, collection, id);
-    if (previous && createRevision) this.addRevision(db, collection, id, priorRevision ?? this.nextRevision(db, collection, id), previous);
-    db.prepare("INSERT OR REPLACE INTO records(collection, id, payload, updated_at) VALUES(?, ?, ?, ?)").run(collection, id, JSON.stringify(payload), now());
+    if (previous && createRevision)
+      this.addRevision(db, collection, id, priorRevision ?? this.nextRevision(db, collection, id), previous);
+    db.prepare("INSERT OR REPLACE INTO records(collection, id, payload, updated_at) VALUES(?, ?, ?, ?)").run(
+      collection,
+      id,
+      JSON.stringify(payload),
+      now(),
+    );
   }
 
   addRevision<T>(db: DatabaseSync, collection: string, id: string, revision: number, payload: T) {
-    db.prepare("INSERT INTO revisions VALUES(?, ?, ?, ?, ?, ?)").run(randomUUID(), collection, id, revision, JSON.stringify(payload), now());
+    db.prepare("INSERT INTO revisions VALUES(?, ?, ?, ?, ?, ?)").run(
+      randomUUID(),
+      collection,
+      id,
+      revision,
+      JSON.stringify(payload),
+      now(),
+    );
   }
 
   nextRevision(db: DatabaseSync, collection: string, id: string) {
-    const row = db.prepare("SELECT MAX(revision) AS revision FROM revisions WHERE collection = ? AND entity_id = ?").get(collection, id) as { revision: number | null };
+    const row = db
+      .prepare("SELECT MAX(revision) AS revision FROM revisions WHERE collection = ? AND entity_id = ?")
+      .get(collection, id) as { revision: number | null };
     return (row.revision ?? 0) + 1;
   }
 }

@@ -6,11 +6,7 @@ interface ParseRankingCsvOptions {
   capturedAt: string;
 }
 
-function value(
-  row: Record<string, string>,
-  keys: string[],
-  fallback = "",
-): string {
+function value(row: Record<string, string>, keys: string[], fallback = ""): string {
   for (const key of keys) {
     if (row[key] !== undefined && row[key] !== "") return row[key];
   }
@@ -31,14 +27,12 @@ function safeHttpUrl(raw: string) {
   try {
     const url = new URL(raw);
     return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.toString() : "";
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 
-export function parseRankingCsv(
-  csvText: string,
-  listName: string,
-  options: ParseRankingCsvOptions,
-): RankingSnapshot {
+export function parseRankingCsv(csvText: string, listName: string, options: ParseRankingCsvOptions): RankingSnapshot {
   const parsed = Papa.parse<Record<string, string>>(csvText, {
     header: true,
     skipEmptyLines: true,
@@ -54,9 +48,7 @@ export function parseRankingCsv(
     listName,
     capturedAt: options.capturedAt,
     status: parsed.errors.length ? "部分成功" : "成功",
-    error: parsed.errors.length
-      ? parsed.errors.map((error) => error.message).join("；")
-      : null,
+    error: parsed.errors.length ? parsed.errors.map((error) => error.message).join("；") : null,
     entries: parsed.data.map((row, index) => ({
       id: options.createId(),
       snapshotId,

@@ -30,17 +30,19 @@ describe("change request rules", () => {
     expect(resolveChangeTargetVersion("创作契约", "contract", versions)).toBe(2);
     expect(resolveChangeTargetVersion("规划", "plan-1", versions)).toBe(3);
     expect(resolveChangeTargetVersion("章节", "chapter-1", versions)).toBe(7);
-    expect(() => resolveChangeTargetVersion("创作契约", "forged", versions)).toThrow(
-      "创作契约目标无效",
-    );
-    expect(() => resolveChangeTargetVersion("规划", "missing", {
-      ...versions,
-      planVersion: () => undefined,
-    })).toThrow("变更目标规划不存在");
-    expect(() => resolveChangeTargetVersion("章节", "missing", {
-      ...versions,
-      chapterVersion: () => undefined,
-    })).toThrow("变更目标章节不存在");
+    expect(() => resolveChangeTargetVersion("创作契约", "forged", versions)).toThrow("创作契约目标无效");
+    expect(() =>
+      resolveChangeTargetVersion("规划", "missing", {
+        ...versions,
+        planVersion: () => undefined,
+      }),
+    ).toThrow("变更目标规划不存在");
+    expect(() =>
+      resolveChangeTargetVersion("章节", "missing", {
+        ...versions,
+        chapterVersion: () => undefined,
+      }),
+    ).toThrow("变更目标章节不存在");
   });
 
   it("owns generated metadata and rejects decisions for missing requests", () => {

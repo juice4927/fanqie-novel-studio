@@ -6,10 +6,7 @@ interface PrepareExpectationSaveOptions {
   updatedAt: string;
 }
 
-export type ExpectationSaveCandidate = Omit<
-  ExpectationEntry,
-  "id" | "createdAt" | "updatedAt"
-> &
+export type ExpectationSaveCandidate = Omit<ExpectationEntry, "id" | "createdAt" | "updatedAt"> &
   Partial<Pick<ExpectationEntry, "id" | "createdAt" | "updatedAt">>;
 
 export function prepareExpectationSave(
@@ -26,10 +23,7 @@ export function prepareExpectationSave(
     updatedAt: options.updatedAt,
   };
   if (!next.title) throw new Error("期待标题不能为空");
-  if (
-    next.expectedPayoffChapter !== null &&
-    next.expectedPayoffChapter < next.sourceChapter
-  ) {
+  if (next.expectedPayoffChapter !== null && next.expectedPayoffChapter < next.sourceChapter) {
     throw new Error("预计兑现章不能早于提出章");
   }
   if (next.status === "已兑现" && !next.actualPayoffChapter) {

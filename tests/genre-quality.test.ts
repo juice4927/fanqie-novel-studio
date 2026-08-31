@@ -43,12 +43,7 @@ describe("genre-specific local quality checks", () => {
       genre: "都市脑洞",
       originalityMatches: [],
     });
-    expect(
-      issues.some(
-        (issue) =>
-          issue.category === "重复疲劳" && issue.message.includes("震惊循环"),
-      ),
-    ).toBe(true);
+    expect(issues.some((issue) => issue.category === "重复疲劳" && issue.message.includes("震惊循环"))).toBe(true);
   });
 
   it("warns when a long chapter reads like a disembodied report", () => {

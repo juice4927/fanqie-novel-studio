@@ -32,11 +32,7 @@ describe("plan workflow rules", () => {
 
   it("returns an edited approved plan to pending approval", () => {
     const previous = plan();
-    const prepared = preparePlanSave(
-      previous,
-      { ...previous, goal: "建立并验证规则" },
-      previous.id,
-    );
+    const prepared = preparePlanSave(previous, { ...previous, goal: "建立并验证规则" }, previous.id);
 
     expect(prepared).toMatchObject({
       protectedEdit: true,
@@ -46,18 +42,10 @@ describe("plan workflow rules", () => {
   });
 
   it("normalizes new plan status and enforces approval gates", () => {
-    const draft = preparePlanSave(
-      undefined,
-      plan({ id: "", status: "已批准" }),
-      "new-plan",
-    ).plan;
+    const draft = preparePlanSave(undefined, plan({ id: "", status: "已批准" }), "new-plan").plan;
     expect(draft).toMatchObject({ id: "new-plan", status: "草稿" });
-    expect(() => approvePlanDraft(undefined, { approved: true })).toThrow(
-      "规划节点不存在",
-    );
-    expect(() => approvePlanDraft(draft, { approved: false })).toThrow(
-      "必须先审批创作契约",
-    );
+    expect(() => approvePlanDraft(undefined, { approved: true })).toThrow("规划节点不存在");
+    expect(() => approvePlanDraft(draft, { approved: false })).toThrow("必须先审批创作契约");
     expect(approvePlanDraft(draft, { approved: true }).status).toBe("已批准");
   });
 });

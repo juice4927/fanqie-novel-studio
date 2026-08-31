@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   cosineSimilarity,
+  type EmbeddingProvider,
   HashBigramEmbeddingProvider,
   validateEmbeddingVector,
-  type EmbeddingProvider,
 } from "../electron/semantic";
 
 describe("embedding providers", () => {

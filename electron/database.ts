@@ -2,9 +2,35 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import {
+  decideChangeRequest as decideChangeRequestDraft,
+  prepareChangeRequest,
+  resolveChangeTargetVersion,
+} from "../src/shared/change-request-service";
+import {
+  assertChapterTransition,
+  deriveChapterBatchMode,
+  isProtectedChapterEdit,
+  prepareChapterSave,
+} from "../src/shared/chapter-lifecycle";
+import { approveContractDraft, prepareContractUpdate } from "../src/shared/contract-service";
+import {
+  assertDashboardCutoff,
+  compareActiveAlerts,
+  compareDueSchedules,
+  deriveProjectRisk,
+} from "../src/shared/dashboard-policy";
+import { prepareExpectationSave } from "../src/shared/expectation-service";
+import { prepareFactSave } from "../src/shared/fact-service";
+import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
+import { prepareProjectCreation, prepareProjectUpdate } from "../src/shared/project-service";
+import { prepareQualityIssueSave, resolveQualityIssue } from "../src/shared/quality-issue-service";
+import { prepareReviewExperiment } from "../src/shared/review-experiment-service";
+import { prepareScheduleSave } from "../src/shared/schedule-service";
+import { prepareFinalizedChapterSummaries } from "../src/shared/summaries";
 import type {
-  AiSettings,
   AiJobRecord,
+  AiSettings,
   AutoBackupInput,
   AutoBackupSettings,
   ChangeRequest,
@@ -16,84 +42,45 @@ import type {
   InsightPack,
   LedgerFact,
   MetricSnapshot,
-  ReviewExperiment,
   PlanNode,
   ProjectDetail,
   ProjectPatch,
   ProjectSummary,
   QualityIssue,
-  RankingSnapshot,
   RankingCaptureSchedule,
-  ResearchBook,
+  RankingSnapshot,
   ResearchAnalysisRecord,
+  ResearchBook,
+  ReviewExperiment,
+  RevisionRecord,
   ScheduleItem,
   SearchHit,
-  RevisionRecord,
   StoryContract,
   StorySummary,
   SystemHealthReport,
 } from "../src/shared/types";
-import {
-  approveContractDraft,
-  prepareContractUpdate,
-} from "../src/shared/contract-service";
-import {
-  decideChangeRequest as decideChangeRequestDraft,
-  prepareChangeRequest,
-  resolveChangeTargetVersion,
-} from "../src/shared/change-request-service";
-import { prepareFactSave } from "../src/shared/fact-service";
-import { prepareExpectationSave } from "../src/shared/expectation-service";
-import {
-  prepareQualityIssueSave,
-  resolveQualityIssue,
-} from "../src/shared/quality-issue-service";
-import { prepareScheduleSave } from "../src/shared/schedule-service";
-import {
-  prepareProjectCreation,
-  prepareProjectUpdate,
-} from "../src/shared/project-service";
-import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
-import { prepareReviewExperiment } from "../src/shared/review-experiment-service";
-import {
-  assertDashboardCutoff,
-  compareActiveAlerts,
-  compareDueSchedules,
-  deriveProjectRisk,
-} from "../src/shared/dashboard-policy";
+import { type ChapterGenerationGuard, chapterGenerationFingerprint } from "./ai-retry";
+import { injectFault } from "./fault-injection";
+import { hasColumn, runMigrations } from "./migration-runner";
+import type { AiJobCompletion } from "./repositories/ai-audit-repository";
+import { AiAuditRepository } from "./repositories/ai-audit-repository";
+import { ProjectRepository } from "./repositories/project-repository";
+import { ResearchRepository } from "./repositories/research-repository";
+import { RevisionRepository } from "./repositories/revision-repository";
+import { SearchRepository } from "./repositories/search-repository";
 import {
   cosineSimilarity,
+  type EmbeddingProvider,
   HASH_BIGRAM_PROVIDER_ID,
   HashBigramEmbeddingProvider,
   validateEmbeddingVector,
-  type EmbeddingProvider,
 } from "./semantic";
-import {
-  prepareFinalizedChapterSummaries,
-} from "../src/shared/summaries";
-import {
-  assertChapterTransition,
-  deriveChapterBatchMode,
-  isProtectedChapterEdit,
-  prepareChapterSave,
-} from "../src/shared/chapter-lifecycle";
-import { hasColumn, runMigrations } from "./migration-runner";
-import { AiAuditRepository } from "./repositories/ai-audit-repository";
-import type { AiJobCompletion } from "./repositories/ai-audit-repository";
-import { RevisionRepository } from "./repositories/revision-repository";
-import { SearchRepository } from "./repositories/search-repository";
-import { ProjectRepository } from "./repositories/project-repository";
-import { ResearchRepository } from "./repositories/research-repository";
-import { injectFault } from "./fault-injection";
-import { chapterGenerationFingerprint, type ChapterGenerationGuard } from "./ai-retry";
 
 const now = () => new Date().toISOString();
 
 function openDatabase(filePath: string) {
   const db = new DatabaseSync(filePath);
-  db.exec(
-    "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;",
-  );
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;");
   return db;
 }
 
@@ -151,18 +138,10 @@ export class WorkspaceDatabase {
     this.researchRoot = path.join(root, "research");
     this.backupRoot = path.join(root, "backups");
     this.trashRoot = path.join(root, "trash");
-    for (const directory of [
-      root,
-      this.projectsRoot,
-      this.researchRoot,
-      this.backupRoot,
-      this.trashRoot,
-    ])
+    for (const directory of [root, this.projectsRoot, this.researchRoot, this.backupRoot, this.trashRoot])
       mkdirSync(directory, { recursive: true });
     this.catalog = openDatabase(path.join(root, "catalog.sqlite"));
-    this.research = openDatabase(
-      path.join(this.researchRoot, "research.sqlite"),
-    );
+    this.research = openDatabase(path.join(this.researchRoot, "research.sqlite"));
     this.initCatalog();
     this.projects = new ProjectRepository(this.catalog);
     this.researchData = new ResearchRepository(this.research);
@@ -173,7 +152,8 @@ export class WorkspaceDatabase {
 
   private initCatalog() {
     runMigrations(this.catalog, [
-      (db) => db.exec(`
+      (db) =>
+        db.exec(`
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -199,7 +179,12 @@ export class WorkspaceDatabase {
           db.exec("ALTER TABLE projects ADD COLUMN safe_stock_line INTEGER NOT NULL DEFAULT 10");
       },
       (db) => {
-        for (const column of ["input_tokens INTEGER NOT NULL DEFAULT 0", "output_tokens INTEGER NOT NULL DEFAULT 0", "actual_cost REAL NOT NULL DEFAULT 0", "duration_ms INTEGER NOT NULL DEFAULT 0"]) {
+        for (const column of [
+          "input_tokens INTEGER NOT NULL DEFAULT 0",
+          "output_tokens INTEGER NOT NULL DEFAULT 0",
+          "actual_cost REAL NOT NULL DEFAULT 0",
+          "duration_ms INTEGER NOT NULL DEFAULT 0",
+        ]) {
           const name = column.split(" ")[0];
           if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
         }
@@ -207,16 +192,23 @@ export class WorkspaceDatabase {
       (db) => {
         db.exec("DROP INDEX IF EXISTS idx_global_ai_jobs_dedupe");
         if (!hasColumn(db, "ai_jobs", "retry_context")) db.exec("ALTER TABLE ai_jobs ADD COLUMN retry_context TEXT");
-        db.exec("CREATE INDEX IF NOT EXISTS idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, model, status, updated_at)");
+        db.exec(
+          "CREATE INDEX IF NOT EXISTS idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, model, status, updated_at)",
+        );
       },
       (db) => {
         db.exec("DROP INDEX IF EXISTS idx_global_ai_jobs_cache");
-        db.exec("CREATE INDEX idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, provider, model, status, updated_at)");
+        db.exec(
+          "CREATE INDEX idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, provider, model, status, updated_at)",
+        );
       },
       (db) => {
         for (const column of [
-          "headers_at TEXT", "first_token_at TEXT", "completed_at TEXT",
-          "chunk_count INTEGER NOT NULL DEFAULT 0", "attempt_count INTEGER NOT NULL DEFAULT 0",
+          "headers_at TEXT",
+          "first_token_at TEXT",
+          "completed_at TEXT",
+          "chunk_count INTEGER NOT NULL DEFAULT 0",
+          "attempt_count INTEGER NOT NULL DEFAULT 0",
         ]) {
           const name = column.split(" ")[0];
           if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
@@ -227,7 +219,8 @@ export class WorkspaceDatabase {
 
   private initResearch() {
     runMigrations(this.research, [
-      (db) => db.exec(`
+      (db) =>
+        db.exec(`
       CREATE TABLE IF NOT EXISTS ranking_snapshots (
         id TEXT PRIMARY KEY, source TEXT NOT NULL, list_name TEXT NOT NULL,
         captured_at TEXT NOT NULL, status TEXT NOT NULL, error TEXT
@@ -271,7 +264,8 @@ export class WorkspaceDatabase {
 
   private initProject(db: DatabaseSync) {
     runMigrations(db, [
-      (database) => database.exec(`
+      (database) =>
+        database.exec(`
       CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS records (
         collection TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -297,7 +291,8 @@ export class WorkspaceDatabase {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_jobs_dedupe ON ai_jobs(task_type, input_hash, prompt_version, model);
       `),
-      (database) => database.exec(`
+      (database) =>
+        database.exec(`
       CREATE TABLE chapters (
         id TEXT PRIMARY KEY,
         number INTEGER NOT NULL,
@@ -344,10 +339,14 @@ export class WorkspaceDatabase {
       `),
       (database) => {
         if (!hasColumn(database, "embeddings", "provider_id"))
-          database.exec(`ALTER TABLE embeddings ADD COLUMN provider_id TEXT NOT NULL DEFAULT '${HASH_BIGRAM_PROVIDER_ID}'`);
+          database.exec(
+            `ALTER TABLE embeddings ADD COLUMN provider_id TEXT NOT NULL DEFAULT '${HASH_BIGRAM_PROVIDER_ID}'`,
+          );
         if (!hasColumn(database, "embeddings", "dimensions"))
           database.exec("ALTER TABLE embeddings ADD COLUMN dimensions INTEGER NOT NULL DEFAULT 192");
-        database.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_provider ON embeddings(source_type, provider_id, dimensions)");
+        database.exec(
+          "CREATE INDEX IF NOT EXISTS idx_embeddings_provider ON embeddings(source_type, provider_id, dimensions)",
+        );
       },
     ]);
   }
@@ -355,12 +354,10 @@ export class WorkspaceDatabase {
   private projectDb(projectId: string) {
     const existing = this.projectDbs.get(projectId);
     if (existing) return existing;
-    if (!this.catalog.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId))
-      throw new Error("项目不存在");
+    if (!this.catalog.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) throw new Error("项目不存在");
     const root = path.resolve(this.projectsRoot);
     const directory = path.resolve(root, projectId);
-    if (!directory.startsWith(`${root}${path.sep}`))
-      throw new Error("项目目录校验失败");
+    if (!directory.startsWith(`${root}${path.sep}`)) throw new Error("项目目录校验失败");
     mkdirSync(path.join(directory, "attachments"), { recursive: true });
     mkdirSync(path.join(directory, "exports"), { recursive: true });
     const db = openDatabase(path.join(directory, "project.sqlite"));
@@ -399,7 +396,10 @@ export class WorkspaceDatabase {
     return this.getProjectSummary(id);
   }
 
-  createProjectFromConcept(input: CreateProjectInput, contractDraft: Omit<StoryContract, "version" | "approved" | "updatedAt">): ProjectSummary {
+  createProjectFromConcept(
+    input: CreateProjectInput,
+    contractDraft: Omit<StoryContract, "version" | "approved" | "updatedAt">,
+  ): ProjectSummary {
     const created = this.createProject(input);
     const project = this.getProject(created.id);
     this.saveContract(created.id, { ...project.contract, ...contractDraft, approved: false });
@@ -408,34 +408,26 @@ export class WorkspaceDatabase {
 
   listProjects(): ProjectSummary[] {
     const rows = this.catalog
-      .prepare(
-        "SELECT * FROM projects WHERE status != '归档' ORDER BY updated_at DESC, id",
-      )
+      .prepare("SELECT * FROM projects WHERE status != '归档' ORDER BY updated_at DESC, id")
       .all() as unknown as CatalogRow[];
     return rows.map((row) => this.hydrateSummary(row));
   }
 
   deleteProject(id: string, confirmationTitle: string) {
-    const row = this.catalog
-      .prepare("SELECT * FROM projects WHERE id = ?")
-      .get(id) as unknown as CatalogRow | undefined;
+    const row = this.catalog.prepare("SELECT * FROM projects WHERE id = ?").get(id) as unknown as
+      | CatalogRow
+      | undefined;
     if (!row) throw new Error("作品不存在或已经删除");
-    if (confirmationTitle.trim() !== row.title)
-      throw new Error("输入的书名与作品名不一致");
+    if (confirmationTitle.trim() !== row.title) throw new Error("输入的书名与作品名不一致");
     const open = this.projectDbs.get(id);
     if (open) {
       open.close();
       this.projectDbs.delete(id);
     }
     const source = path.resolve(this.projectsRoot, id);
-    const destination = path.resolve(
-      this.trashRoot,
-      `${id}-${Date.now()}`,
-    );
-    if (!source.startsWith(`${path.resolve(this.projectsRoot)}${path.sep}`))
-      throw new Error("作品目录校验失败");
-    if (!destination.startsWith(`${path.resolve(this.trashRoot)}${path.sep}`))
-      throw new Error("回收站目录校验失败");
+    const destination = path.resolve(this.trashRoot, `${id}-${Date.now()}`);
+    if (!source.startsWith(`${path.resolve(this.projectsRoot)}${path.sep}`)) throw new Error("作品目录校验失败");
+    if (!destination.startsWith(`${path.resolve(this.trashRoot)}${path.sep}`)) throw new Error("回收站目录校验失败");
     let moved = false;
     try {
       renameSync(source, destination);
@@ -451,7 +443,11 @@ export class WorkspaceDatabase {
       else this.catalog.prepare("UPDATE projects SET status = '归档', updated_at = ? WHERE id = ?").run(now(), id);
       this.catalog.exec("COMMIT");
     } catch (error) {
-      try { this.catalog.exec("ROLLBACK"); } catch { /* no active transaction */ }
+      try {
+        this.catalog.exec("ROLLBACK");
+      } catch {
+        /* no active transaction */
+      }
       if (moved) renameSync(destination, source);
       throw error;
     }
@@ -461,9 +457,9 @@ export class WorkspaceDatabase {
   }
 
   getProjectSummary(id: string): ProjectSummary {
-    const row = this.catalog
-      .prepare("SELECT * FROM projects WHERE id = ?")
-      .get(id) as unknown as CatalogRow | undefined;
+    const row = this.catalog.prepare("SELECT * FROM projects WHERE id = ?").get(id) as unknown as
+      | CatalogRow
+      | undefined;
     if (!row) throw new Error("项目不存在");
     return this.hydrateSummary(row);
   }
@@ -473,28 +469,42 @@ export class WorkspaceDatabase {
     const dueToday: ScheduleItem[] = [];
     const activeAlerts: QualityIssue[] = [];
     let pendingIssues = 0;
-    const projects = this.catalog
-      .prepare("SELECT id FROM projects WHERE status != '归档'")
-      .all() as Array<{ id: string }>;
+    const projects = this.catalog.prepare("SELECT id FROM projects WHERE status != '归档'").all() as Array<{
+      id: string;
+    }>;
     for (const project of projects) {
       const db = this.projectDb(project.id);
-      dueToday.push(...(db.prepare(`
+      dueToday.push(
+        ...(
+          db
+            .prepare(`
         SELECT payload FROM records
         WHERE collection = 'schedule'
           AND json_extract(payload, '$.status') != '已发布'
           AND julianday(json_extract(payload, '$.publishAt')) < julianday(?)
         ORDER BY julianday(json_extract(payload, '$.publishAt')), id
-      `).all(throughExclusive) as Array<{ payload: string }>).map((row) => parseJson<ScheduleItem>(row.payload)));
-      const issueCount = db.prepare(`
+      `)
+            .all(throughExclusive) as Array<{ payload: string }>
+        ).map((row) => parseJson<ScheduleItem>(row.payload)),
+      );
+      const issueCount = db
+        .prepare(`
         SELECT COUNT(*) AS count FROM records
         WHERE collection = 'issues' AND json_extract(payload, '$.status') = '待处理'
-      `).get() as { count: number };
+      `)
+        .get() as { count: number };
       pendingIssues += Number(issueCount.count);
-      activeAlerts.push(...(db.prepare(`
+      activeAlerts.push(
+        ...(
+          db
+            .prepare(`
         SELECT payload FROM records
         WHERE collection = 'issues' AND json_extract(payload, '$.status') = '待处理'
         ORDER BY julianday(json_extract(payload, '$.createdAt')) DESC, id LIMIT 12
-      `).all() as Array<{ payload: string }>).map((row) => parseJson<QualityIssue>(row.payload)));
+      `)
+            .all() as Array<{ payload: string }>
+        ).map((row) => parseJson<QualityIssue>(row.payload)),
+      );
     }
     return {
       dueToday: dueToday.sort(compareDueSchedules),
@@ -505,23 +515,33 @@ export class WorkspaceDatabase {
 
   private hydrateSummary(row: CatalogRow): ProjectSummary {
     const db = this.projectDb(row.id);
-    const chapterStats = db.prepare(`
+    const chapterStats = db
+      .prepare(`
       SELECT COUNT(*) AS chapter_count,
         COALESCE(SUM(word_count), 0) AS current_words,
         COALESCE(SUM(CASE WHEN status IN ('已定稿', '待发布') THEN 1 ELSE 0 END), 0) AS stock_chapters
       FROM chapters
-    `).get() as { chapter_count: number; current_words: number; stock_chapters: number };
-    const pendingHardIssues = Number((db.prepare(`
+    `)
+      .get() as { chapter_count: number; current_words: number; stock_chapters: number };
+    const pendingHardIssues = Number(
+      (
+        db
+          .prepare(`
       SELECT COUNT(*) AS count FROM records
       WHERE collection = 'issues'
         AND json_extract(payload, '$.status') = '待处理'
         AND json_extract(payload, '$.severity') = '硬性'
-    `).get() as { count: number }).count);
-    const next = db.prepare(`
+    `)
+          .get() as { count: number }
+      ).count,
+    );
+    const next = db
+      .prepare(`
       SELECT json_extract(payload, '$.publishAt') AS publish_at FROM records
       WHERE collection = 'schedule' AND json_extract(payload, '$.status') != '已发布'
       ORDER BY publish_at LIMIT 1
-    `).get() as { publish_at: string } | undefined;
+    `)
+      .get() as { publish_at: string } | undefined;
     return {
       id: row.id,
       title: row.title,
@@ -554,15 +574,7 @@ export class WorkspaceDatabase {
       UPDATE projects SET title = ?, status = ?, target_words = ?, update_cadence = ?, safe_stock_line = ?, updated_at = ? WHERE id = ?
     `,
       )
-      .run(
-        next.title,
-        next.status,
-        next.targetWords,
-        next.updateCadence,
-        next.safeStockLine,
-        updatedAt,
-        id,
-      );
+      .run(next.title, next.status, next.targetWords, next.updateCadence, next.safeStockLine, updatedAt, id);
     return this.getProjectSummary(id);
   }
 
@@ -571,32 +583,18 @@ export class WorkspaceDatabase {
     return {
       summary: this.getProjectSummary(id),
       contract: this.getState<StoryContract>(db, "contract"),
-      plans: this.listRecords<PlanNode>(db, "plans").sort(
-        (a, b) => a.ordinal - b.ordinal,
-      ),
+      plans: this.listRecords<PlanNode>(db, "plans").sort((a, b) => a.ordinal - b.ordinal),
       chapters: this.projects.listChapters(db),
-      facts: this.listRecords<LedgerFact>(db, "facts").sort((a, b) =>
-        b.updatedAt.localeCompare(a.updatedAt),
-      ),
-      issues: this.listRecords<QualityIssue>(db, "issues").sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
-      ),
-      changes: this.listRecords<ChangeRequest>(db, "changes").sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
-      ),
-      schedule: this.listRecords<ScheduleItem>(db, "schedule").sort((a, b) =>
-        a.publishAt.localeCompare(b.publishAt),
-      ),
-      metrics: this.listRecords<MetricSnapshot>(db, "metrics").sort((a, b) =>
-        b.recordedAt.localeCompare(a.recordedAt),
-      ),
+      facts: this.listRecords<LedgerFact>(db, "facts").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      issues: this.listRecords<QualityIssue>(db, "issues").sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      changes: this.listRecords<ChangeRequest>(db, "changes").sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      schedule: this.listRecords<ScheduleItem>(db, "schedule").sort((a, b) => a.publishAt.localeCompare(b.publishAt)),
+      metrics: this.listRecords<MetricSnapshot>(db, "metrics").sort((a, b) => b.recordedAt.localeCompare(a.recordedAt)),
       experiments: this.listRecords<ReviewExperiment>(db, "experiments").sort((a, b) =>
         b.updatedAt.localeCompare(a.updatedAt),
       ),
       insightIds: this.getState<string[]>(db, "insightIds", []),
-      summaries: this.listRecords<StorySummary>(db, "summaries").sort(
-        (a, b) => a.fromChapter - b.fromChapter,
-      ),
+      summaries: this.listRecords<StorySummary>(db, "summaries").sort((a, b) => a.fromChapter - b.fromChapter),
       expectations: this.listRecords<ExpectationEntry>(db, "expectations").sort(
         (a, b) => a.sourceChapter - b.sourceChapter,
       ),
@@ -615,10 +613,14 @@ export class WorkspaceDatabase {
       changes: this.listRecords<ChangeRequest>(db, "changes").sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       schedule: this.listRecords<ScheduleItem>(db, "schedule").sort((a, b) => a.publishAt.localeCompare(b.publishAt)),
       metrics: this.listRecords<MetricSnapshot>(db, "metrics").sort((a, b) => b.recordedAt.localeCompare(a.recordedAt)),
-      experiments: this.listRecords<ReviewExperiment>(db, "experiments").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      experiments: this.listRecords<ReviewExperiment>(db, "experiments").sort((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt),
+      ),
       insightIds: this.getState<string[]>(db, "insightIds", []),
       summaries: this.listRecords<StorySummary>(db, "summaries").sort((a, b) => a.fromChapter - b.fromChapter),
-      expectations: this.listRecords<ExpectationEntry>(db, "expectations").sort((a, b) => a.sourceChapter - b.sourceChapter),
+      expectations: this.listRecords<ExpectationEntry>(db, "expectations").sort(
+        (a, b) => a.sourceChapter - b.sourceChapter,
+      ),
     };
   }
 
@@ -634,7 +636,10 @@ export class WorkspaceDatabase {
     try {
       const previous = this.getState<StoryContract>(db, "contract");
       const update = prepareContractUpdate(previous, contract, now());
-      if (!update.changed) { db.exec("COMMIT"); return previous; }
+      if (!update.changed) {
+        db.exec("COMMIT");
+        return previous;
+      }
       if (previous.approved && !this.consumeApprovedChange(db, "创作契约", "contract", previous.version))
         throw new Error("已审批创作契约只能通过已批准的改纲变更单修改");
       const next = update.contract;
@@ -644,7 +649,11 @@ export class WorkspaceDatabase {
       this.touchProject(id);
       return next;
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
@@ -662,8 +671,16 @@ export class WorkspaceDatabase {
       this.catalog.exec("COMMIT");
       return next;
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
-      try { this.catalog.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
+      try {
+        this.catalog.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
@@ -677,33 +694,29 @@ export class WorkspaceDatabase {
     const db = this.projectDb(id);
     db.exec("BEGIN IMMEDIATE");
     try {
-    const previous = plan.id
-      ? this.getRecord<PlanNode>(db, "plans", plan.id)
-      : undefined;
-    const prepared = preparePlanSave(
-      previous,
-      plan,
-      plan.id || randomUUID(),
-    );
-    if (prepared.noOp) { db.exec("COMMIT"); return previous!; }
-    if (
-      prepared.protectedEdit &&
-      !this.consumeApprovedChange(
-        db,
-        "规划",
-        previous!.id,
-        this.entityVersion(db, "plans", previous!.id),
-      )
-    ) {
-      throw new Error("已批准规划只能通过已批准的改纲变更单修改");
-    }
-    const next = prepared.plan;
-    this.saveRecord(db, "plans", next.id, next);
-    db.exec("COMMIT");
-    this.touchProject(id);
-    return next;
+      const previous = plan.id ? this.getRecord<PlanNode>(db, "plans", plan.id) : undefined;
+      const prepared = preparePlanSave(previous, plan, plan.id || randomUUID());
+      if (prepared.noOp) {
+        db.exec("COMMIT");
+        return previous!;
+      }
+      if (
+        prepared.protectedEdit &&
+        !this.consumeApprovedChange(db, "规划", previous!.id, this.entityVersion(db, "plans", previous!.id))
+      ) {
+        throw new Error("已批准规划只能通过已批准的改纲变更单修改");
+      }
+      const next = prepared.plan;
+      this.saveRecord(db, "plans", next.id, next);
+      db.exec("COMMIT");
+      this.touchProject(id);
+      return next;
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
@@ -721,8 +734,7 @@ export class WorkspaceDatabase {
   }
 
   saveGeneratedChapter(id: string, chapter: Chapter, expected?: ChapterGenerationGuard) {
-    if (!chapter.id || !chapter.content.trim())
-      throw new Error("AI 草稿缺少章节或正文");
+    if (!chapter.id || !chapter.content.trim()) throw new Error("AI 草稿缺少章节或正文");
     return this.persistChapter(id, chapter, "待质检", true, expected);
   }
 
@@ -742,7 +754,11 @@ export class WorkspaceDatabase {
       this.touchProject(id);
       return saved;
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
@@ -755,24 +771,18 @@ export class WorkspaceDatabase {
     createRevision = true,
     expected?: ChapterGenerationGuard,
   ) {
-    const previous = chapter.id
-      ? this.projects.getChapter(db, chapter.id)
-      : undefined;
-    if (expected && (
-      !previous ||
-      previous.revision !== expected.revision ||
-      chapterGenerationFingerprint(previous) !== expected.fingerprint
-    )) {
+    const previous = chapter.id ? this.projects.getChapter(db, chapter.id) : undefined;
+    if (
+      expected &&
+      (!previous ||
+        previous.revision !== expected.revision ||
+        chapterGenerationFingerprint(previous) !== expected.fingerprint)
+    ) {
       throw new Error("章节在 AI 生成期间已被修改，旧生成结果未保存");
     }
     const protectedEdit = isProtectedChapterEdit(previous, chapter);
-    if (
-      protectedEdit &&
-      !this.consumeApprovedChange(db, "章节", previous!.id, previous!.revision)
-    ) {
-      throw new Error(
-        "已定稿或进入发布流程的章节只能通过匹配的已批准变更单修改",
-      );
+    if (protectedEdit && !this.consumeApprovedChange(db, "章节", previous!.id, previous!.revision)) {
+      throw new Error("已定稿或进入发布流程的章节只能通过匹配的已批准变更单修改");
     }
     const facts = this.listRecords<LedgerFact>(db, "facts");
     const issues = this.listRecords<QualityIssue>(db, "issues");
@@ -780,27 +790,29 @@ export class WorkspaceDatabase {
     let endingExpectationId = chapter.endingExpectationId ?? null;
     if (chapter.endingExpectation?.trim()) {
       const existingExpectation = endingExpectationId
-        ? this.getRecord<ExpectationEntry>(
-            db,
-            "expectations",
-            endingExpectationId,
-          )
+        ? this.getRecord<ExpectationEntry>(db, "expectations", endingExpectationId)
         : undefined;
-      const savedExpectation = this.persistExpectation(db, {
-        id: endingExpectationId ?? "",
-        title: chapter.endingExpectation.trim(),
-        description: chapter.endingExpectation.trim(),
-        sourceChapter: chapter.number,
-        expectedPayoffChapter: chapter.expectationTargetChapter ?? null,
-        actualPayoffChapter: existingExpectation?.actualPayoffChapter ?? null,
-        status: existingExpectation?.status ?? "待兑现",
-        payoffResult: existingExpectation?.payoffResult ?? "",
-        createdAt: existingExpectation?.createdAt ?? now(),
-        updatedAt: now(),
-      }, createRevision);
+      const savedExpectation = this.persistExpectation(
+        db,
+        {
+          id: endingExpectationId ?? "",
+          title: chapter.endingExpectation.trim(),
+          description: chapter.endingExpectation.trim(),
+          sourceChapter: chapter.number,
+          expectedPayoffChapter: chapter.expectationTargetChapter ?? null,
+          actualPayoffChapter: existingExpectation?.actualPayoffChapter ?? null,
+          status: existingExpectation?.status ?? "待兑现",
+          payoffResult: existingExpectation?.payoffResult ?? "",
+          createdAt: existingExpectation?.createdAt ?? now(),
+          updatedAt: now(),
+        },
+        createRevision,
+      );
       endingExpectationId = savedExpectation.id;
     }
-    const genre = (this.catalog.prepare("SELECT genre FROM projects WHERE id = ?").get(id) as { genre: ProjectSummary["genre"] }).genre;
+    const genre = (
+      this.catalog.prepare("SELECT genre FROM projects WHERE id = ?").get(id) as { genre: ProjectSummary["genre"] }
+    ).genre;
     const contract = this.getState<StoryContract>(db, "contract");
     const next = prepareChapterSave(chapter, {
       previous,
@@ -819,24 +831,21 @@ export class WorkspaceDatabase {
       updatedAt: now(),
     });
     if (protectedEdit && next.status === "待质检") {
-      for (const schedule of this.listRecords<ScheduleItem>(db, "schedule").filter((item) => item.chapterId === next.id && item.status !== "已发布"))
+      for (const schedule of this.listRecords<ScheduleItem>(db, "schedule").filter(
+        (item) => item.chapterId === next.id && item.status !== "已发布",
+      ))
         this.saveRecord(db, "schedule", schedule.id, { ...schedule, status: "待排期" });
     }
     this.projects.saveChapter(db, next, previous?.revision, createRevision);
     db.prepare("DELETE FROM chapter_fts WHERE id = ?").run(next.id);
-    db.prepare(
-      "INSERT INTO chapter_fts(id, title, content) VALUES(?, ?, ?)",
-    ).run(next.id, next.title, next.content);
+    db.prepare("INSERT INTO chapter_fts(id, title, content) VALUES(?, ?, ?)").run(next.id, next.title, next.content);
     db.prepare("DELETE FROM chapter_fts_tri WHERE id = ?").run(next.id);
-    db.prepare(
-      "INSERT INTO chapter_fts_tri(id, title, content) VALUES(?, ?, ?)",
-    ).run(next.id, next.title, next.content);
-    this.saveEmbedding(
-      db,
-      "chapters",
+    db.prepare("INSERT INTO chapter_fts_tri(id, title, content) VALUES(?, ?, ?)").run(
       next.id,
-      `${next.title}\n${next.outline}\n${next.content.slice(0, 1600)}`,
+      next.title,
+      next.content,
     );
+    this.saveEmbedding(db, "chapters", next.id, `${next.title}\n${next.outline}\n${next.content.slice(0, 1600)}`);
     return next;
   }
 
@@ -849,15 +858,17 @@ export class WorkspaceDatabase {
       this.touchProject(id);
       return saved;
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
 
   private persistExpectation(db: DatabaseSync, expectation: ExpectationEntry, createRevision = true) {
-    const previous = expectation.id
-      ? this.getRecord<ExpectationEntry>(db, "expectations", expectation.id)
-      : undefined;
+    const previous = expectation.id ? this.getRecord<ExpectationEntry>(db, "expectations", expectation.id) : undefined;
     const next = prepareExpectationSave(previous, expectation, {
       expectationId: expectation.id || randomUUID(),
       createdAt: now(),
@@ -875,8 +886,7 @@ export class WorkspaceDatabase {
     const issues = this.listRecords<QualityIssue>(db, "issues");
     assertChapterTransition(chapter.status, status, chapterId, issues);
     const saved = this.persistChapter(id, { ...chapter, status }, status);
-    if (status === "已定稿" && chapter.status !== "已定稿")
-      this.updateSummaries(id, saved);
+    if (status === "已定稿" && chapter.status !== "已定稿") this.updateSummaries(id, saved);
     return saved;
   }
 
@@ -895,34 +905,26 @@ export class WorkspaceDatabase {
       }
       const next = prepared.fact;
       this.saveRecord(db, "facts", next.id, next);
-      this.saveEmbedding(
-        db,
-        "facts",
-        next.id,
-        factEmbeddingText(next),
-      );
+      this.saveEmbedding(db, "facts", next.id, factEmbeddingText(next));
       db.exec("COMMIT");
       this.touchProject(id);
       return next;
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
 
-  searchRelevantFacts(
-    id: string,
-    queryText: string,
-    chapterNumber: number,
-    limit = 80,
-  ) {
+  searchRelevantFacts(id: string, queryText: string, chapterNumber: number, limit = 80) {
     const db = this.projectDb(id);
-    const facts = new Map(
-      this.listRecords<LedgerFact>(db, "facts").map((fact) => [fact.id, fact]),
-    );
-    const storedRows = db.prepare(
-      "SELECT source_id, content_hash, provider_id, dimensions FROM embeddings WHERE source_type = 'facts'",
-    ).all() as Array<{ source_id: string; content_hash: string; provider_id: string; dimensions: number }>;
+    const facts = new Map(this.listRecords<LedgerFact>(db, "facts").map((fact) => [fact.id, fact]));
+    const storedRows = db
+      .prepare("SELECT source_id, content_hash, provider_id, dimensions FROM embeddings WHERE source_type = 'facts'")
+      .all() as Array<{ source_id: string; content_hash: string; provider_id: string; dimensions: number }>;
     const storedById = new Map(storedRows.map((row) => [row.source_id, row]));
     const staleEmbeddings: Array<{ sourceId: string; text: string }> = [];
     for (const fact of facts.values()) {
@@ -943,21 +945,21 @@ export class WorkspaceDatabase {
       .prepare(
         "SELECT source_id, vector FROM embeddings WHERE source_type = 'facts' AND provider_id = ? AND dimensions = ?",
       )
-      .all(this.embeddingProvider.id, this.embeddingProvider.dimensions) as Array<{ source_id: string; vector: string }>;
+      .all(this.embeddingProvider.id, this.embeddingProvider.dimensions) as Array<{
+      source_id: string;
+      vector: string;
+    }>;
     return rows
       .map((row) => ({
         fact: facts.get(row.source_id),
         score: cosineSimilarity(query, parseJson<number[]>(row.vector)),
       }))
-      .filter((item): item is { fact: LedgerFact; score: number } =>
-        Boolean(item.fact),
-      )
+      .filter((item): item is { fact: LedgerFact; score: number } => Boolean(item.fact))
       .filter(
         ({ fact }) =>
           (fact.confidence === "已确认" || fact.confidence === "有冲突") &&
           fact.validFromChapter <= chapterNumber &&
-          (fact.validToChapter === null ||
-            fact.validToChapter >= chapterNumber),
+          (fact.validToChapter === null || fact.validToChapter >= chapterNumber),
       )
       .sort((left, right) => right.score - left.score)
       .slice(0, limit)
@@ -969,11 +971,7 @@ export class WorkspaceDatabase {
     return this.search.search(db, query, this.projects.listChapters(db), offset, limit);
   }
 
-  listRevisions(
-    id: string,
-    collection: RevisionRecord["collection"],
-    entityId: string,
-  ): RevisionRecord[] {
+  listRevisions(id: string, collection: RevisionRecord["collection"], entityId: string): RevisionRecord[] {
     const db = this.projectDb(id);
     return this.revisions.list(db, collection, entityId);
   }
@@ -982,14 +980,26 @@ export class WorkspaceDatabase {
     const db = this.projectDb(id);
     const row = this.revisions.get(db, revisionId);
     if (!row) throw new Error("历史版本不存在");
-    const payload = parseJson<any>(row.payload);
-    const authorizeRestore = (targetKind: ChangeRequest["targetKind"], targetId: string, baseVersion: number, current: unknown) => {
+    const payload = parseJson<unknown>(row.payload);
+    const authorizeRestore = (
+      targetKind: ChangeRequest["targetKind"],
+      targetId: string,
+      baseVersion: number,
+      current: unknown,
+    ) => {
       const change: ChangeRequest = {
-        id: randomUUID(), targetKind, targetId, baseVersion,
-        title: "恢复历史版本", reason: `恢复修订 ${revisionId}`,
-        beforeValue: JSON.stringify(current), afterValue: JSON.stringify(payload),
-        impact: "受保护内容将恢复为选定历史版本", rollback: "可再次从历史版本恢复",
-        status: "已批准", createdAt: now(),
+        id: randomUUID(),
+        targetKind,
+        targetId,
+        baseVersion,
+        title: "恢复历史版本",
+        reason: `恢复修订 ${revisionId}`,
+        beforeValue: JSON.stringify(current),
+        afterValue: JSON.stringify(payload),
+        impact: "受保护内容将恢复为选定历史版本",
+        rollback: "可再次从历史版本恢复",
+        status: "已批准",
+        createdAt: now(),
       };
       this.saveRecord(db, "changes", change.id, change);
     };
@@ -1000,14 +1010,14 @@ export class WorkspaceDatabase {
       this.saveChapter(id, payload as Chapter);
     } else if (row.collection === "plans") {
       const current = this.getRecord<PlanNode>(db, "plans", row.entity_id);
-      if (current?.status === "已批准") authorizeRestore("规划", current.id, this.entityVersion(db, "plans", current.id), current);
+      if (current?.status === "已批准")
+        authorizeRestore("规划", current.id, this.entityVersion(db, "plans", current.id), current);
       this.savePlan(id, payload as PlanNode);
     } else if (row.collection === "state" && row.entity_id === "contract") {
       const current = this.getState<StoryContract>(db, "contract");
       if (current.approved) authorizeRestore("创作契约", "contract", current.version, current);
       this.saveContract(id, payload as StoryContract);
-    }
-    else this.saveRecord(db, row.collection, row.entity_id, payload);
+    } else this.saveRecord(db, row.collection, row.entity_id, payload);
     this.touchProject(id);
   }
 
@@ -1025,7 +1035,11 @@ export class WorkspaceDatabase {
       db.exec("COMMIT");
       this.touchProject(id);
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
@@ -1039,19 +1053,12 @@ export class WorkspaceDatabase {
 
   saveChangeRequest(id: string, change: ChangeRequest) {
     const db = this.projectDb(id);
-    const baseVersion = resolveChangeTargetVersion(
-      change.targetKind,
-      change.targetId,
-      {
-        contractVersion: this.getState<StoryContract>(db, "contract").version,
-        planVersion: (targetId) =>
-          this.getRecord<PlanNode>(db, "plans", targetId)
-            ? this.entityVersion(db, "plans", targetId)
-            : undefined,
-        chapterVersion: (targetId) =>
-          this.projects.getChapter(db, targetId)?.revision,
-      },
-    );
+    const baseVersion = resolveChangeTargetVersion(change.targetKind, change.targetId, {
+      contractVersion: this.getState<StoryContract>(db, "contract").version,
+      planVersion: (targetId) =>
+        this.getRecord<PlanNode>(db, "plans", targetId) ? this.entityVersion(db, "plans", targetId) : undefined,
+      chapterVersion: (targetId) => this.projects.getChapter(db, targetId)?.revision,
+    });
     const next = prepareChangeRequest(change, {
       id: randomUUID(),
       baseVersion,
@@ -1064,12 +1071,7 @@ export class WorkspaceDatabase {
   decideChangeRequest(id: string, changeId: string, decision: "批准" | "拒绝") {
     const db = this.projectDb(id);
     const change = this.getRecord<ChangeRequest>(db, "changes", changeId);
-    this.saveRecord(
-      db,
-      "changes",
-      changeId,
-      decideChangeRequestDraft(change, decision),
-    );
+    this.saveRecord(db, "changes", changeId, decideChangeRequestDraft(change, decision));
   }
 
   saveSchedule(id: string, item: ScheduleItem) {
@@ -1098,7 +1100,11 @@ export class WorkspaceDatabase {
       this.touchProject(id);
       return plan.schedule;
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
@@ -1111,7 +1117,11 @@ export class WorkspaceDatabase {
       db.exec("COMMIT");
       this.touchProject(id);
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
@@ -1129,9 +1139,9 @@ export class WorkspaceDatabase {
   }
 
   listRankings(): RankingSnapshot[] {
-    const rows = this.research
-      .prepare("SELECT * FROM ranking_snapshots ORDER BY captured_at DESC")
-      .all() as Array<Record<string, unknown>>;
+    const rows = this.research.prepare("SELECT * FROM ranking_snapshots ORDER BY captured_at DESC").all() as Array<
+      Record<string, unknown>
+    >;
     return rows.map((row) => ({
       id: String(row.id),
       source: String(row.source),
@@ -1141,9 +1151,7 @@ export class WorkspaceDatabase {
       error: row.error ? String(row.error) : null,
       entries: (
         this.research
-          .prepare(
-            "SELECT * FROM ranking_entries WHERE snapshot_id = ? ORDER BY rank",
-          )
+          .prepare("SELECT * FROM ranking_entries WHERE snapshot_id = ? ORDER BY rank")
           .all(String(row.id)) as Array<Record<string, unknown>>
       ).map((entry) => ({
         id: String(entry.id),
@@ -1167,40 +1175,37 @@ export class WorkspaceDatabase {
     this.research.exec("BEGIN IMMEDIATE");
     try {
       this.research
-      .prepare("INSERT INTO ranking_snapshots VALUES(?, ?, ?, ?, ?, ?)")
-      .run(
-        snapshot.id,
-        snapshot.source,
-        snapshot.listName,
-        snapshot.capturedAt,
-        snapshot.status,
-        snapshot.error,
-      );
-    const insert = this.research.prepare(
-      `INSERT INTO ranking_entries(
+        .prepare("INSERT INTO ranking_snapshots VALUES(?, ?, ?, ?, ?, ?)")
+        .run(snapshot.id, snapshot.source, snapshot.listName, snapshot.capturedAt, snapshot.status, snapshot.error);
+      const insert = this.research.prepare(
+        `INSERT INTO ranking_entries(
         id, snapshot_id, rank, title, author, genre, words, status, tags, source_url,
         synopsis, official_reader_url, platform
       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
+      );
       for (const entry of snapshot.entries)
         insert.run(
-        entry.id,
-        snapshot.id,
-        entry.rank,
-        entry.title,
-        entry.author,
-        entry.genre,
-        entry.words,
-        entry.status,
-        JSON.stringify(entry.tags),
-        entry.sourceUrl,
-        entry.synopsis ?? null,
-        entry.officialReaderUrl ?? null,
+          entry.id,
+          snapshot.id,
+          entry.rank,
+          entry.title,
+          entry.author,
+          entry.genre,
+          entry.words,
+          entry.status,
+          JSON.stringify(entry.tags),
+          entry.sourceUrl,
+          entry.synopsis ?? null,
+          entry.officialReaderUrl ?? null,
           entry.platform ?? null,
         );
       this.research.exec("COMMIT");
     } catch (error) {
-      try { this.research.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        this.research.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
   }
@@ -1226,10 +1231,7 @@ export class WorkspaceDatabase {
     return this.researchData.listBooks();
   }
 
-  saveResearchBook(
-    book: ResearchBook,
-    chapters: Array<{ title: string; content: string; wordCount: number }>,
-  ) {
+  saveResearchBook(book: ResearchBook, chapters: Array<{ title: string; content: string; wordCount: number }>) {
     this.researchData.saveBook(book, chapters);
   }
 
@@ -1266,13 +1268,7 @@ export class WorkspaceDatabase {
     return this.researchData.originalityMatches(content);
   }
 
-  findAiJob(
-    taskType: string,
-    inputHash: string,
-    promptVersion: string,
-    provider: string,
-    model: string,
-  ) {
+  findAiJob(taskType: string, inputHash: string, promptVersion: string, provider: string, model: string) {
     return this.aiAudit.findSuccessful(taskType, inputHash, promptVersion, provider, model);
   }
 
@@ -1286,10 +1282,22 @@ export class WorkspaceDatabase {
     inputSummary: string,
     retryContext?: string,
   ) {
-    return this.aiAudit.start(projectId, taskType, inputHash, promptVersion, provider, model, inputSummary, retryContext);
+    return this.aiAudit.start(
+      projectId,
+      taskType,
+      inputHash,
+      promptVersion,
+      provider,
+      model,
+      inputSummary,
+      retryContext,
+    );
   }
 
-  updateAiJobTelemetry(id: string, telemetry: Pick<AiJobCompletion, "headersAt" | "firstTokenAt" | "chunkCount" | "attemptCount">) {
+  updateAiJobTelemetry(
+    id: string,
+    telemetry: Pick<AiJobCompletion, "headersAt" | "firstTokenAt" | "chunkCount" | "attemptCount">,
+  ) {
     this.aiAudit.updateTelemetry(id, telemetry);
   }
 
@@ -1324,22 +1332,21 @@ export class WorkspaceDatabase {
     let inferredAnthropic = false;
     try {
       inferredAnthropic = new URL(baseUrl).hostname.toLowerCase().endsWith("anthropic.com");
-    } catch { /* invalid legacy values remain editable in settings */ }
-    const protocol = storedProtocol === "anthropic-messages" || (!storedProtocol && inferredAnthropic)
-      ? "anthropic-messages"
-      : "openai-compatible";
+    } catch {
+      /* invalid legacy values remain editable in settings */
+    }
+    const protocol =
+      storedProtocol === "anthropic-messages" || (!storedProtocol && inferredAnthropic)
+        ? "anthropic-messages"
+        : "openai-compatible";
     const model = this.getSetting("ai.model", "gpt-4.1");
-    const embeddingModel = this.getSetting(
-      "ai.embeddingModel",
-      "text-embedding-3-small",
+    const embeddingModel = this.getSetting("ai.embeddingModel", "text-embedding-3-small");
+    const inputPricePerMillion = Number(this.getSetting("ai.inputPricePerMillion", "0"));
+    const outputPricePerMillion = Number(this.getSetting("ai.outputPricePerMillion", "0"));
+    const longTaskTimeoutMinutes = Math.min(
+      15,
+      Math.max(5, Number(this.getSetting("ai.longTaskTimeoutMinutes", "10")) || 10),
     );
-    const inputPricePerMillion = Number(
-      this.getSetting("ai.inputPricePerMillion", "0"),
-    );
-    const outputPricePerMillion = Number(
-      this.getSetting("ai.outputPricePerMillion", "0"),
-    );
-    const longTaskTimeoutMinutes = Math.min(15, Math.max(5, Number(this.getSetting("ai.longTaskTimeoutMinutes", "10")) || 10));
     return {
       protocol,
       baseUrl,
@@ -1357,14 +1364,8 @@ export class WorkspaceDatabase {
     this.setSetting("ai.baseUrl", settings.baseUrl);
     this.setSetting("ai.model", settings.model);
     this.setSetting("ai.embeddingModel", settings.embeddingModel);
-    this.setSetting(
-      "ai.inputPricePerMillion",
-      String(settings.inputPricePerMillion),
-    );
-    this.setSetting(
-      "ai.outputPricePerMillion",
-      String(settings.outputPricePerMillion),
-    );
+    this.setSetting("ai.inputPricePerMillion", String(settings.inputPricePerMillion));
+    this.setSetting("ai.outputPricePerMillion", String(settings.outputPricePerMillion));
     this.setSetting("ai.longTaskTimeoutMinutes", String(settings.longTaskTimeoutMinutes));
     return this.getAiSettings();
   }
@@ -1409,43 +1410,108 @@ export class WorkspaceDatabase {
       try {
         const rows = db.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
         const messages = rows.map((row) => row.integrity_check).filter((message) => message !== "ok");
-        checks.push({ id, label, status: messages.length ? "错误" : "正常", detail: messages.length ? messages.slice(0, 3).join("；") : "SQLite 完整性检查通过", projectId, repairable: false });
+        checks.push({
+          id,
+          label,
+          status: messages.length ? "错误" : "正常",
+          detail: messages.length ? messages.slice(0, 3).join("；") : "SQLite 完整性检查通过",
+          projectId,
+          repairable: false,
+        });
       } catch (error) {
-        checks.push({ id, label, status: "错误", detail: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300), projectId, repairable: false });
+        checks.push({
+          id,
+          label,
+          status: "错误",
+          detail: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
+          projectId,
+          repairable: false,
+        });
       }
     };
 
     addIntegrityCheck("catalog-integrity", "目录数据库", this.catalog, null);
     addIntegrityCheck("research-integrity", "研究数据库", this.research, null);
-    const projectRows = this.catalog.prepare("SELECT id, title FROM projects ORDER BY created_at").all() as Array<{ id: string; title: string }>;
+    const projectRows = this.catalog.prepare("SELECT id, title FROM projects ORDER BY created_at").all() as Array<{
+      id: string;
+      title: string;
+    }>;
     const catalogIds = new Set(projectRows.map((row) => row.id));
     let chapterCount = 0;
-    let failedAiJobs = Number((this.catalog.prepare("SELECT COUNT(*) AS count FROM ai_jobs WHERE status = '失败'").get() as { count: number }).count);
+    let failedAiJobs = Number(
+      (this.catalog.prepare("SELECT COUNT(*) AS count FROM ai_jobs WHERE status = '失败'").get() as { count: number })
+        .count,
+    );
 
     for (const row of projectRows) {
       const databasePath = path.join(this.projectsRoot, row.id, "project.sqlite");
       if (!existsSync(databasePath)) {
-        checks.push({ id: `project-missing-${row.id}`, label: row.title, status: "错误", detail: "目录库存在作品，但项目数据库文件缺失", projectId: row.id, repairable: false });
+        checks.push({
+          id: `project-missing-${row.id}`,
+          label: row.title,
+          status: "错误",
+          detail: "目录库存在作品，但项目数据库文件缺失",
+          projectId: row.id,
+          repairable: false,
+        });
         continue;
       }
       const db = this.projectDb(row.id);
       addIntegrityCheck(`project-integrity-${row.id}`, `${row.title} · 项目数据库`, db, row.id);
       const records = Number((db.prepare("SELECT COUNT(*) AS count FROM chapters").get() as { count: number }).count);
       const fts = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts").get() as { count: number }).count);
-      const trigram = Number((db.prepare("SELECT COUNT(*) AS count FROM chapter_fts_tri").get() as { count: number }).count);
+      const trigram = Number(
+        (db.prepare("SELECT COUNT(*) AS count FROM chapter_fts_tri").get() as { count: number }).count,
+      );
       chapterCount += records;
-      failedAiJobs += Number((db.prepare("SELECT COUNT(*) AS count FROM ai_jobs WHERE status = '失败'").get() as { count: number }).count);
+      failedAiJobs += Number(
+        (db.prepare("SELECT COUNT(*) AS count FROM ai_jobs WHERE status = '失败'").get() as { count: number }).count,
+      );
       const indexesMatch = records === fts && records === trigram;
-      checks.push({ id: `project-search-${row.id}`, label: `${row.title} · 搜索索引`, status: indexesMatch ? "正常" : "警告", detail: indexesMatch ? `${records} 章索引完整` : `章节 ${records}，全文索引 ${fts}，中文索引 ${trigram}`, projectId: row.id, repairable: !indexesMatch });
+      checks.push({
+        id: `project-search-${row.id}`,
+        label: `${row.title} · 搜索索引`,
+        status: indexesMatch ? "正常" : "警告",
+        detail: indexesMatch ? `${records} 章索引完整` : `章节 ${records}，全文索引 ${fts}，中文索引 ${trigram}`,
+        projectId: row.id,
+        repairable: !indexesMatch,
+      });
     }
 
     for (const entry of readdirSync(this.projectsRoot, { withFileTypes: true }))
       if (entry.isDirectory() && !catalogIds.has(entry.name))
-        checks.push({ id: `orphan-${entry.name}`, label: "孤立项目目录", status: "警告", detail: `projects/${entry.name} 不在目录库中，未做自动处理`, projectId: null, repairable: false });
+        checks.push({
+          id: `orphan-${entry.name}`,
+          label: "孤立项目目录",
+          status: "警告",
+          detail: `projects/${entry.name} 不在目录库中，未做自动处理`,
+          projectId: null,
+          repairable: false,
+        });
 
-    checks.push({ id: "failed-ai-jobs", label: "失败的 AI 任务", status: failedAiJobs ? "警告" : "正常", detail: failedAiJobs ? `共 ${failedAiJobs} 个失败任务，可在重新执行对应操作后保留审计记录` : "没有失败的 AI 任务", projectId: null, repairable: false });
-    const status = checks.some((item) => item.status === "错误") ? "错误" : checks.some((item) => item.status === "警告") ? "警告" : "正常";
-    return { checkedAt: now(), status, projectCount: projectRows.length, chapterCount, failedAiJobs, workspaceBytes: directoryBytes(this.root), backupBytes: directoryBytes(this.backupRoot), checks };
+    checks.push({
+      id: "failed-ai-jobs",
+      label: "失败的 AI 任务",
+      status: failedAiJobs ? "警告" : "正常",
+      detail: failedAiJobs ? `共 ${failedAiJobs} 个失败任务，可在重新执行对应操作后保留审计记录` : "没有失败的 AI 任务",
+      projectId: null,
+      repairable: false,
+    });
+    const status = checks.some((item) => item.status === "错误")
+      ? "错误"
+      : checks.some((item) => item.status === "警告")
+        ? "警告"
+        : "正常";
+    return {
+      checkedAt: now(),
+      status,
+      projectCount: projectRows.length,
+      chapterCount,
+      failedAiJobs,
+      workspaceBytes: directoryBytes(this.root),
+      backupBytes: directoryBytes(this.backupRoot),
+      checks,
+    };
   }
 
   rebuildSearchIndexes(projectId: string, verify = true) {
@@ -1464,7 +1530,11 @@ export class WorkspaceDatabase {
       }
       db.exec("COMMIT");
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
       throw error;
     }
     return verify ? this.runSystemHealthCheck() : null;
@@ -1493,16 +1563,14 @@ export class WorkspaceDatabase {
   }
 
   private getSetting(key: string, fallback: string) {
-    const row = this.catalog
-      .prepare("SELECT value FROM settings WHERE key = ?")
-      .get(key) as { value: string } | undefined;
+    const row = this.catalog.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+      | { value: string }
+      | undefined;
     return row?.value ?? fallback;
   }
 
   private setSetting(key: string, value: string) {
-    this.catalog
-      .prepare("INSERT OR REPLACE INTO settings VALUES(?, ?)")
-      .run(key, value);
+    this.catalog.prepare("INSERT OR REPLACE INTO settings VALUES(?, ?)").run(key, value);
   }
 
   private consumeApprovedChange(
@@ -1525,15 +1593,9 @@ export class WorkspaceDatabase {
     return true;
   }
 
-  private entityVersion(
-    db: DatabaseSync,
-    collection: RevisionRecord["collection"],
-    entityId: string,
-  ) {
+  private entityVersion(db: DatabaseSync, collection: RevisionRecord["collection"], entityId: string) {
     const row = db
-      .prepare(
-        "SELECT MAX(revision) AS revision FROM revisions WHERE collection = ? AND entity_id = ?",
-      )
+      .prepare("SELECT MAX(revision) AS revision FROM revisions WHERE collection = ? AND entity_id = ?")
       .get(collection, entityId) as { revision: number | null };
     return (row.revision ?? 0) + 1;
   }
@@ -1558,11 +1620,7 @@ export class WorkspaceDatabase {
     return this.projects.listRecords<T>(db, collection);
   }
 
-  private getRecord<T>(
-    db: DatabaseSync,
-    collection: string,
-    id: string,
-  ): T | undefined {
+  private getRecord<T>(db: DatabaseSync, collection: string, id: string): T | undefined {
     return this.projects.getRecord<T>(db, collection, id);
   }
 
@@ -1577,13 +1635,7 @@ export class WorkspaceDatabase {
     this.projects.saveRecord(db, collection, id, payload, priorRevision, createRevision);
   }
 
-  private addRevision<T>(
-    db: DatabaseSync,
-    collection: string,
-    id: string,
-    revision: number,
-    payload: T,
-  ) {
+  private addRevision<T>(db: DatabaseSync, collection: string, id: string, revision: number, payload: T) {
     this.projects.addRevision(db, collection, id, revision, payload);
   }
 
@@ -1591,35 +1643,28 @@ export class WorkspaceDatabase {
     return this.projects.nextRevision(db, collection, id);
   }
 
-  private saveEmbedding(
-    db: DatabaseSync,
-    sourceType: string,
-    sourceId: string,
-    text: string,
-  ) {
+  private saveEmbedding(db: DatabaseSync, sourceType: string, sourceId: string, text: string) {
     this.saveEmbeddings(db, sourceType, [{ sourceId, text }]);
   }
 
-  private saveEmbeddings(
-    db: DatabaseSync,
-    sourceType: string,
-    entries: Array<{ sourceId: string; text: string }>,
-  ) {
+  private saveEmbeddings(db: DatabaseSync, sourceType: string, entries: Array<{ sourceId: string; text: string }>) {
     if (!entries.length) return;
     const vectors = this.embedTexts(entries.map((entry) => entry.text));
     const insert = db.prepare(
       "INSERT OR REPLACE INTO embeddings(id, source_type, source_id, content_hash, vector, provider_id, dimensions, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
     );
-    entries.forEach((entry, index) => insert.run(
-      `${sourceType}:${entry.sourceId}`,
-      sourceType,
-      entry.sourceId,
-      hashText(entry.text),
-      JSON.stringify(vectors[index]),
-      this.embeddingProvider.id,
-      this.embeddingProvider.dimensions,
-      now(),
-    ));
+    entries.forEach((entry, index) => {
+      insert.run(
+        `${sourceType}:${entry.sourceId}`,
+        sourceType,
+        entry.sourceId,
+        hashText(entry.text),
+        JSON.stringify(vectors[index]),
+        this.embeddingProvider.id,
+        this.embeddingProvider.dimensions,
+        now(),
+      );
+    });
   }
 
   private embedText(text: string) {
@@ -1637,24 +1682,10 @@ export class WorkspaceDatabase {
   private updateSummaries(projectId: string, chapter: Chapter) {
     const db = this.projectDb(projectId);
     const project = this.getProjectOverview(projectId);
-    const updates = prepareFinalizedChapterSummaries(
-      project,
-      chapter,
-      now(),
-    );
+    const updates = prepareFinalizedChapterSummaries(project, chapter, now());
     for (const summary of updates) {
-      const previous = this.getRecord<StorySummary>(
-        db,
-        "summaries",
-        summary.id,
-      );
-      this.saveRecord(
-        db,
-        "summaries",
-        summary.id,
-        summary,
-        previous?.version,
-      );
+      const previous = this.getRecord<StorySummary>(db, "summaries", summary.id);
+      this.saveRecord(db, "summaries", summary.id, summary, previous?.version);
     }
   }
 }
@@ -1665,11 +1696,10 @@ function normalizeForFingerprint(text: string) {
   return text.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
 }
 
-function textWindows(text: string, step: number) {
+function _textWindows(text: string, step: number) {
   const normalized = normalizeForFingerprint(text);
   const windows: string[] = [];
-  for (let index = 0; index <= normalized.length - 24; index += step)
-    windows.push(normalized.slice(index, index + 24));
+  for (let index = 0; index <= normalized.length - 24; index += step) windows.push(normalized.slice(index, index + 24));
   return windows;
 }
 

@@ -3,11 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import JSZip from "jszip";
-import type {
-  HealthCheckTask,
-  ProjectDetail,
-  SystemHealthReport,
-} from "../../src/shared/types";
+import type { HealthCheckTask, ProjectDetail, SystemHealthReport } from "../../src/shared/types";
 import {
   autoBackupFileName,
   createEncryptedBackup,
@@ -15,11 +11,7 @@ import {
   pruneAutoBackups,
   restoreEncryptedBackup,
 } from "../backup";
-import {
-  deleteAutoBackupCredential,
-  readAutoBackupCredential,
-  writeAutoBackupCredential,
-} from "../credential-store";
+import { deleteAutoBackupCredential, readAutoBackupCredential, writeAutoBackupCredential } from "../credential-store";
 import { now, type WorkspaceDatabase } from "../database";
 import type { BackgroundWorker } from "../worker-client";
 import type { RegisterHandler } from "./types";
@@ -55,20 +47,13 @@ export interface SystemHandlerDependencies {
   getSystemMetadata: () => SystemMetadata;
   chooseBackupDestination: (defaultFileName: string) => Promise<string | null>;
   chooseBackupSource: () => Promise<string | null>;
-  chooseDiagnosticDestination: (
-    defaultFileName: string,
-  ) => Promise<string | null>;
+  chooseDiagnosticDestination: (defaultFileName: string) => Promise<string | null>;
   confirmDiagnosticExport?: () => Promise<boolean>;
-  chooseProjectExportDestination: (
-    defaultFileName: string,
-    format: "txt" | "md" | "docx",
-  ) => Promise<string | null>;
+  chooseProjectExportDestination: (defaultFileName: string, format: "txt" | "md" | "docx") => Promise<string | null>;
 }
 
 export interface SystemHandlerRuntime {
-  runAutomaticBackup: (force?: boolean) => Promise<
-    ReturnType<SystemDatabase["getAutoBackupSettings"]>
-  >;
+  runAutomaticBackup: (force?: boolean) => Promise<ReturnType<SystemDatabase["getAutoBackupSettings"]>>;
 }
 
 const exportableChapterStatuses = new Set(["已定稿", "待发布", "已发布"]);
@@ -80,18 +65,11 @@ async function exportProject(
   chooseDestination: SystemHandlerDependencies["chooseProjectExportDestination"],
 ) {
   const project = database.getProjectOverview(projectId);
-  const chapterMetadata = project.chapters.filter((chapter) =>
-    exportableChapterStatuses.has(chapter.status),
-  );
+  const chapterMetadata = project.chapters.filter((chapter) => exportableChapterStatuses.has(chapter.status));
   if (!chapterMetadata.length) throw new Error("没有可导出的已定稿章节");
-  const destination = await chooseDestination(
-    `${project.summary.title}-发布包.${format}`,
-    format,
-  );
+  const destination = await chooseDestination(`${project.summary.title}-发布包.${format}`, format);
   if (!destination) return null;
-  const chapters = chapterMetadata.map((chapter) =>
-    database.getChapter(projectId, chapter.id),
-  );
+  const chapters = chapterMetadata.map((chapter) => database.getChapter(projectId, chapter.id));
   if (format === "docx") {
     const document = new Document({
       sections: [
@@ -136,9 +114,7 @@ async function exportProject(
 
 function buildPublishingReport(project: ProjectDetail, chapterCount: number) {
   const pending = project.issues.filter((issue) => issue.status === "待处理");
-  const conflicts = project.facts.filter(
-    (fact) => fact.confidence === "有冲突",
-  );
+  const conflicts = project.facts.filter((fact) => fact.confidence === "有冲突");
   return [
     `# ${project.summary.title} 发布前检查报告`,
     "",
@@ -153,18 +129,14 @@ function buildPublishingReport(project: ProjectDetail, chapterCount: number) {
     "## 待处理问题",
     "",
     ...(pending.length
-      ? pending.map(
-          (issue) =>
-            `- [${issue.severity}] ${issue.category}：${issue.message}`,
-        )
+      ? pending.map((issue) => `- [${issue.severity}] ${issue.category}：${issue.message}`)
       : ["- 无"]),
     "",
     "## 冲突事实",
     "",
     ...(conflicts.length
       ? conflicts.map(
-          (fact) =>
-            `- ${fact.subject} / ${fact.predicate}：${fact.value}（证据第${fact.evidenceChapter}章）`,
+          (fact) => `- ${fact.subject} / ${fact.predicate}：${fact.value}（证据第${fact.evidenceChapter}章）`,
         )
       : ["- 无"]),
     "",
@@ -196,9 +168,7 @@ export function registerSystemHandlers({
         healthTasks.delete(id);
       }
     }
-    const completed = [...healthTaskFinishedAt.entries()].sort(
-      (left, right) => right[1] - left[1],
-    );
+    const completed = [...healthTaskFinishedAt.entries()].sort((left, right) => right[1] - left[1]);
     for (const [id] of completed.slice(100)) {
       healthTaskFinishedAt.delete(id);
       healthTasks.delete(id);
@@ -208,36 +178,21 @@ export function registerSystemHandlers({
   const runAutomaticBackup = async (force = false) => {
     const settings = database.getAutoBackupSettings();
     if (!settings.enabled || autoBackupRunning) return settings;
-    if (
-      !force &&
-      settings.nextRunAt &&
-      Date.parse(settings.nextRunAt) > Date.now()
-    ) {
+    if (!force && settings.nextRunAt && Date.parse(settings.nextRunAt) > Date.now()) {
       return settings;
     }
     autoBackupRunning = true;
     try {
       const password = await readAutoBackupCredential();
-      if (!password)
-        throw new Error("自动备份密码不存在，请在系统设置中重新保存");
+      if (!password) throw new Error("自动备份密码不存在，请在系统设置中重新保存");
       database.checkpointAll();
       const destination = path.join(database.backupRoot, autoBackupFileName());
       await createEncryptedBackup(database.root, destination, password);
-      await pruneAutoBackups(
-        database.backupRoot,
-        settings.retentionCount,
-      );
-      return database.finishAutoBackup(
-        "成功",
-        nextAutoBackupAt(settings.frequency),
-      );
+      await pruneAutoBackups(database.backupRoot, settings.retentionCount);
+      return database.finishAutoBackup("成功", nextAutoBackupAt(settings.frequency));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return database.finishAutoBackup(
-        "失败",
-        new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-        message,
-      );
+      return database.finishAutoBackup("失败", new Date(Date.now() + 60 * 60 * 1000).toISOString(), message);
     } finally {
       autoBackupRunning = false;
     }
@@ -256,16 +211,13 @@ export function registerSystemHandlers({
             label: string;
           };
           const task = healthTasks.get(id);
-          if (task?.status === "运行中")
-            healthTasks.set(id, { ...task, ...progress });
+          if (task?.status === "运行中") healthTasks.set(id, { ...task, ...progress });
         },
       },
     );
 
   register("createBackup", async (password) => {
-    const destination = await chooseBackupDestination(
-      `长篇创作工作台-${now().slice(0, 10)}.novelbak`,
-    );
+    const destination = await chooseBackupDestination(`长篇创作工作台-${now().slice(0, 10)}.novelbak`);
     if (!destination) return null;
     database.checkpointAll();
     await createEncryptedBackup(database.root, destination, password);
@@ -282,14 +234,10 @@ export function registerSystemHandlers({
   }));
   register("saveAutoBackupSettings", async (input, password) => {
     const currentPassword = await readAutoBackupCredential();
-    if (input.enabled && !password && !currentPassword)
-      throw new Error("启用自动备份需要设置至少 8 位的专用密码");
+    if (input.enabled && !password && !currentPassword) throw new Error("启用自动备份需要设置至少 8 位的专用密码");
     if (password) await writeAutoBackupCredential(password);
     if (!input.enabled) await deleteAutoBackupCredential();
-    const saved = database.saveAutoBackupSettings(
-      input,
-      input.enabled ? nextAutoBackupAt(input.frequency) : null,
-    );
+    const saved = database.saveAutoBackupSettings(input, input.enabled ? nextAutoBackupAt(input.frequency) : null);
     return {
       ...saved,
       hasPassword: input.enabled && Boolean(password || currentPassword),
@@ -302,9 +250,7 @@ export function registerSystemHandlers({
   register("runSystemHealthCheck", () => runHealthCheck(randomUUID()));
   register("startSystemHealthCheck", () => {
     pruneHealthTasks();
-    const running = [...healthTasks.values()].find(
-      (task) => task.status === "运行中",
-    );
+    const running = [...healthTasks.values()].find((task) => task.status === "运行中");
     if (running) return running;
     const id = randomUUID();
     const task: HealthCheckTask = {
@@ -352,7 +298,7 @@ export function registerSystemHandlers({
   });
   register("cancelSystemHealthCheck", (id) => {
     const task = healthTasks.get(id);
-    if (!task || task.status !== "运行中") return false;
+    if (task?.status !== "运行中") return false;
     healthTasks.set(id, { ...task, status: "已取消", label: "正在取消" });
     return worker.cancel(id);
   });
@@ -361,42 +307,22 @@ export function registerSystemHandlers({
     return runHealthCheck(randomUUID());
   });
   register("exportDiagnosticBundle", async () => {
-    if (confirmDiagnosticExport && !await confirmDiagnosticExport()) return null;
-    const destination = await chooseDiagnosticDestination(
-      `长篇创作工作台-诊断-${now().slice(0, 10)}.zip`,
-    );
+    if (confirmDiagnosticExport && !(await confirmDiagnosticExport())) return null;
+    const destination = await chooseDiagnosticDestination(`长篇创作工作台-诊断-${now().slice(0, 10)}.zip`);
     if (!destination) return null;
     const zip = new JSZip();
-    zip.file(
-      "system.json",
-      JSON.stringify(
-        { ...getSystemMetadata(), generatedAt: now() },
-        null,
-        2,
-      ),
-    );
-    zip.file(
-      "health.json",
-      JSON.stringify(database.runSystemHealthCheck(), null, 2),
-    );
+    zip.file("system.json", JSON.stringify({ ...getSystemMetadata(), generatedAt: now() }, null, 2));
+    zip.file("health.json", JSON.stringify(database.runSystemHealthCheck(), null, 2));
     try {
       zip.file("application.jsonl", await readFile(logFilePath, "utf8"));
     } catch {
       zip.file("application.jsonl", "");
     }
-    await writeFile(
-      destination,
-      await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }),
-    );
+    await writeFile(destination, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
     return destination;
   });
   register("exportProject", (projectId, format) =>
-    exportProject(
-      database,
-      projectId,
-      format,
-      chooseProjectExportDestination,
-    ),
+    exportProject(database, projectId, format, chooseProjectExportDestination),
   );
   register("getWorkspacePath", () => database.root);
 

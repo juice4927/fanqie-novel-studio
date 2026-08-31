@@ -76,11 +76,10 @@ describe("fact save rules", () => {
 
   it("marks overlapping open values as conflicts but permits closed history", () => {
     const current = fact();
-    const active = prepareFactSave(
-      [current],
-      fact({ id: "active", value: "上海", validFromChapter: 2 }),
-      { factId: "active", updatedAt: timestamp },
-    );
+    const active = prepareFactSave([current], fact({ id: "active", value: "上海", validFromChapter: 2 }), {
+      factId: "active",
+      updatedAt: timestamp,
+    });
     const historical = prepareFactSave(
       [current],
       fact({
@@ -97,19 +96,17 @@ describe("fact save rules", () => {
   });
 
   it("keeps ignored candidates out of conflicts", () => {
-    const ignored = prepareFactSave(
-      [fact()],
-      fact({ id: "ignored", value: "上海", confidence: "已忽略" }),
-      { factId: "ignored", updatedAt: timestamp },
-    );
+    const ignored = prepareFactSave([fact()], fact({ id: "ignored", value: "上海", confidence: "已忽略" }), {
+      factId: "ignored",
+      updatedAt: timestamp,
+    });
 
     expect(ignored.fact.confidence).toBe("已忽略");
     expect(ignored.replacement).toBeUndefined();
-    const replacement = prepareFactSave(
-      [fact({ confidence: "已忽略" })],
-      fact({ id: "new", value: "上海" }),
-      { factId: "new", updatedAt: timestamp },
-    );
+    const replacement = prepareFactSave([fact({ confidence: "已忽略" })], fact({ id: "new", value: "上海" }), {
+      factId: "new",
+      updatedAt: timestamp,
+    });
     expect(replacement.fact.confidence).toBe("已确认");
   });
 });

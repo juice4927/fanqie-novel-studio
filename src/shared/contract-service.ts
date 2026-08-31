@@ -34,21 +34,11 @@ function contractContent(contract: StoryContract) {
   };
 }
 
-export function contractContentChanged(
-  previous: StoryContract,
-  candidate: StoryContract,
-) {
-  return (
-    JSON.stringify(contractContent(previous)) !==
-    JSON.stringify(contractContent(candidate))
-  );
+export function contractContentChanged(previous: StoryContract, candidate: StoryContract) {
+  return JSON.stringify(contractContent(previous)) !== JSON.stringify(contractContent(candidate));
 }
 
-export function prepareContractUpdate(
-  previous: StoryContract,
-  candidate: StoryContract,
-  updatedAt: string,
-) {
+export function prepareContractUpdate(previous: StoryContract, candidate: StoryContract, updatedAt: string) {
   if (!contractContentChanged(previous, candidate)) {
     return { changed: false as const, contract: previous };
   }
@@ -56,9 +46,7 @@ export function prepareContractUpdate(
     changed: true as const,
     contract: {
       ...candidate,
-      aestheticProfile: normalizeAestheticProfile(
-        candidate.aestheticProfile,
-      ),
+      aestheticProfile: normalizeAestheticProfile(candidate.aestheticProfile),
       approved: false,
       version: previous.version + 1,
       updatedAt,
@@ -76,27 +64,18 @@ export function missingContractApprovalFields(contract: StoryContract) {
     ["核心回报", contract.primaryPayoff],
     ["长篇发动机", contract.longFormEngine],
   ];
-  const missing = required
-    .filter(([, value]) => !value?.trim())
-    .map(([label]) => label);
+  const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label);
   if (!contract.protagonistArc?.trim()) missing.push("主角弧光");
   const meaningfulCount = (values: readonly string[] | undefined) =>
     values?.filter((value) => value.trim()).length ?? 0;
-  if (meaningfulCount(contract.keyRelationships) < 2)
-    missing.push("关键关系（至少2条）");
-  if (meaningfulCount(contract.worldRules) < 2)
-    missing.push("世界规则（至少2条）");
-  if (meaningfulCount(contract.majorForces) < 2)
-    missing.push("主要势力（至少2个）");
-  if (meaningfulCount(contract.timelineAnchors) < 3)
-    missing.push("时间锚点（至少3条）");
+  if (meaningfulCount(contract.keyRelationships) < 2) missing.push("关键关系（至少2条）");
+  if (meaningfulCount(contract.worldRules) < 2) missing.push("世界规则（至少2条）");
+  if (meaningfulCount(contract.majorForces) < 2) missing.push("主要势力（至少2个）");
+  if (meaningfulCount(contract.timelineAnchors) < 3) missing.push("时间锚点（至少3条）");
   return missing;
 }
 
-export function findApprovedContractChange(
-  changes: readonly ChangeRequest[],
-  baseVersion: number,
-) {
+export function findApprovedContractChange(changes: readonly ChangeRequest[], baseVersion: number) {
   return changes
     .filter(
       (change) =>
@@ -108,12 +87,8 @@ export function findApprovedContractChange(
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
 }
 
-export function approveContractDraft(
-  contract: StoryContract,
-  updatedAt: string,
-) {
+export function approveContractDraft(contract: StoryContract, updatedAt: string) {
   const missing = missingContractApprovalFields(contract);
-  if (missing.length)
-    throw new Error(`创作契约尚未补全：${missing.join("、")}`);
+  if (missing.length) throw new Error(`创作契约尚未补全：${missing.join("、")}`);
   return { ...contract, approved: true, updatedAt };
 }

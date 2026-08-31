@@ -1,71 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  BookMarked,
-  BookOpenCheck,
-  BrainCircuit,
-  CalendarDays,
-  Check,
-  ChevronRight,
-  CircleDot,
-  ClipboardCheck,
-  FileOutput,
-  GitPullRequestArrow,
-  Layers3,
-  LoaderCircle,
-  History,
-  LockKeyhole,
-  NotebookTabs,
-  Plus,
-  Save,
-  Search,
-  SearchCheck,
-  Send,
-  ShieldCheck,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
-import type {
-  AppApi,
-  BatchGenerationPreview,
-  ChangeRequest,
-  Chapter,
-  ChapterStatus,
-  ConceptCandidate,
-  ContextPackage,
-  InsightPack,
-  ExpectationEntry,
-  LedgerFact,
-  LedgerKind,
-  PlanNode,
-  PlanningGenerationInput,
-  ProjectDetail,
-  ProjectStatus,
-  ScheduleItem,
-  StoryContract,
-  ReviewSuggestion,
-  SearchHit,
-  RevisionRecord,
-} from "../shared/types";
-import { AutosaveCoordinator, chapterDraftSignature, clearRecoveredChapter, readRecoveredChapter, writeRecoveredChapter } from "../lib/chapter-draft";
-import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
-import type { GenrePluginDefinition } from "../shared/genre-plugins";
-import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
-import {
-  Badge,
-  Button,
-  EmptyState,
-  Field,
-  IconButton,
-  Input,
-  Modal,
-  Segmented,
-  Select,
-  Textarea,
-} from "../components/UI";
-import { formatCount, formatDate } from "../lib/format";
-import { summarizeMetrics } from "../shared/metrics";
+import { BrainCircuit, FileOutput, Plus, Sparkles, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Badge, Button, EmptyState, Field, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
+import { GENRE_PLUGINS } from "../shared/genre-plugins";
+import type { AppApi, Chapter, ExpectationEntry, LedgerFact, LedgerKind, ProjectDetail } from "../shared/types";
 
 export interface CommonProjectProps {
   project: ProjectDetail;
@@ -73,16 +10,42 @@ export interface CommonProjectProps {
   reload: () => Promise<void>;
   notify: (message: string, tone?: "success" | "error") => void;
 }
-const EMPTY_CHAPTER = (number: number): Chapter => ({
-  id: "", number, title: "", outline: "", content: "", wordCount: 0,
-  status: "章纲", batchMode: "逐章", isKeyChapter: false, chapterPromise: "",
-  expectedPayoff: "", crisis: "", endingExpectation: "", expectationTargetChapter: null,
-  endingExpectationId: null, linkedExpectationIds: [], revision: 0, updatedAt: new Date().toISOString(),
+const _EMPTY_CHAPTER = (number: number): Chapter => ({
+  id: "",
+  number,
+  title: "",
+  outline: "",
+  content: "",
+  wordCount: 0,
+  status: "章纲",
+  batchMode: "逐章",
+  isKeyChapter: false,
+  chapterPromise: "",
+  expectedPayoff: "",
+  crisis: "",
+  endingExpectation: "",
+  expectationTargetChapter: null,
+  endingExpectationId: null,
+  linkedExpectationIds: [],
+  revision: 0,
+  updatedAt: new Date().toISOString(),
 });
-const splitLines = (value: string) => value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
-const issueTone = (value: string) => value === "硬性" ? "danger" : value === "警告" ? "warning" : "neutral";
-function LightbulbIcon() { return <span className="mini-icon"><Sparkles size={16} /></span>; }
-function UploadIcon() { return <FileOutput size={16} />; }
+const _splitLines = (value: string) =>
+  value
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+const _issueTone = (value: string) => (value === "硬性" ? "danger" : value === "警告" ? "warning" : "neutral");
+function _LightbulbIcon() {
+  return (
+    <span className="mini-icon">
+      <Sparkles size={16} />
+    </span>
+  );
+}
+function _UploadIcon() {
+  return <FileOutput size={16} />;
+}
 
 export function LedgerPage({ project, api, reload, notify }: CommonProjectProps) {
   const [modal, setModal] = useState(false);
@@ -113,8 +76,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  const [expectationDraft, setExpectationDraft] =
-    useState<ExpectationEntry>(blankExpectation);
+  const [expectationDraft, setExpectationDraft] = useState<ExpectationEntry>(blankExpectation);
   const kinds: LedgerKind[] = [
     "人物",
     "关系",
@@ -132,29 +94,20 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
     (fact) => fact.confidence !== "已忽略" && (filter === "全部" || fact.kind === filter),
   );
   const pendingFacts = project.facts.filter((fact) => fact.confidence === "待确认");
-  const currentChapter = Math.max(
-    0,
-    ...project.chapters.map((chapter) => chapter.number),
-  );
+  const currentChapter = Math.max(0, ...project.chapters.map((chapter) => chapter.number));
   const openExpectations = project.expectations.filter(
     (item) => item.status === "待兑现" || item.status === "部分兑现",
   );
   const overdueCount = openExpectations.filter(
-    (item) =>
-      item.expectedPayoffChapter !== null &&
-      item.expectedPayoffChapter < currentChapter,
+    (item) => item.expectedPayoffChapter !== null && item.expectedPayoffChapter < currentChapter,
   ).length;
   const openExpectation = (item?: ExpectationEntry) => {
     setExpectationDraft(item ?? blankExpectation());
     setExpectationModal(true);
   };
   const genrePlugin = GENRE_PLUGINS[project.summary.genre];
-  const activeLedgerTemplate = genrePlugin.ledgerTemplates.find(
-    (item) => item.label === draft.genreDimension,
-  );
-  const openLedgerTemplate = (
-    template: (typeof genrePlugin.ledgerTemplates)[number],
-  ) => {
+  const activeLedgerTemplate = genrePlugin.ledgerTemplates.find((item) => item.label === draft.genreDimension);
+  const openLedgerTemplate = (template: (typeof genrePlugin.ledgerTemplates)[number]) => {
     setDraft({
       id: "",
       kind: template.kind,
@@ -183,23 +136,28 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
           新增事实
         </Button>
         {project.chapters.some((chapter) => chapter.status === "已定稿") && (
-          <Button variant="secondary" icon={<Sparkles size={16} />} onClick={async () => {
-            const chapter = project.chapters.filter((item) => item.status === "已定稿").at(-1)!;
-            try { const facts = await api.extractChapterFacts(project.summary.id, chapter.id); await reload(); notify(facts.length ? `已提取 ${facts.length} 条待确认状态` : "本章没有新的持久状态"); }
-            catch (error) { notify(String(error), "error"); }
-          }}>扫描最新定稿</Button>
+          <Button
+            variant="secondary"
+            icon={<Sparkles size={16} />}
+            onClick={async () => {
+              const chapter = project.chapters.filter((item) => item.status === "已定稿").at(-1)!;
+              try {
+                const facts = await api.extractChapterFacts(project.summary.id, chapter.id);
+                await reload();
+                notify(facts.length ? `已提取 ${facts.length} 条待确认状态` : "本章没有新的持久状态");
+              } catch (error) {
+                notify(String(error), "error");
+              }
+            }}
+          >
+            扫描最新定稿
+          </Button>
         )}
       </header>
       <div className="toolbar-row ledger-filter">
-        <Segmented
-          options={["全部", ...kinds] as const}
-          value={filter}
-          onChange={setFilter}
-        />
+        <Segmented options={["全部", ...kinds] as const} value={filter} onChange={setFilter} />
         <span>
-          {pendingFacts.length} 项待确认 · {" "}
-          {project.facts.filter((fact) => fact.confidence === "有冲突").length}{" "}
-          项冲突
+          {pendingFacts.length} 项待确认 · {project.facts.filter((fact) => fact.confidence === "有冲突").length} 项冲突
         </span>
       </div>
       {pendingFacts.length ? (
@@ -218,16 +176,53 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                 : undefined;
               return (
                 <article key={fact.id}>
-                  <span><Badge>{fact.changeType ?? (replaced ? "状态替换" : fact.kind)}</Badge><strong>{fact.subject} · {fact.predicate}</strong><small>{fact.changeType === "知情范围变更" && replaced ? `${replaced.knowledgeScope || "公开"} → ${fact.knowledgeScope || "公开"}` : replaced ? `${replaced.value} → ${fact.value}` : fact.value}{fact.numericDelta !== null && fact.numericDelta !== undefined ? `（${fact.numericDelta > 0 ? "+" : ""}${fact.numericDelta}）` : ""}｜证据第{fact.evidenceChapter}章{replaced ? "｜确认后结束旧状态" : ""}</small></span>
+                  <span>
+                    <Badge>{fact.changeType ?? (replaced ? "状态替换" : fact.kind)}</Badge>
+                    <strong>
+                      {fact.subject} · {fact.predicate}
+                    </strong>
+                    <small>
+                      {fact.changeType === "知情范围变更" && replaced
+                        ? `${replaced.knowledgeScope || "公开"} → ${fact.knowledgeScope || "公开"}`
+                        : replaced
+                          ? `${replaced.value} → ${fact.value}`
+                          : fact.value}
+                      {fact.numericDelta !== null && fact.numericDelta !== undefined
+                        ? `（${fact.numericDelta > 0 ? "+" : ""}${fact.numericDelta}）`
+                        : ""}
+                      ｜证据第{fact.evidenceChapter}章{replaced ? "｜确认后结束旧状态" : ""}
+                    </small>
+                  </span>
                   <div className="inline-actions">
-                    <Button variant="secondary" onClick={async () => {
-                      try { await api.saveFact(project.summary.id, { ...fact, confidence: "已确认" }); await reload(); notify(replaced ? "新状态已生效，旧状态已结束" : "候选事实已确认"); }
-                      catch (error) { notify(String(error), "error"); }
-                    }}>确认入账</Button>
-                    <Button variant="ghost" icon={<Trash2 size={14} />} onClick={async () => {
-                      try { await api.saveFact(project.summary.id, { ...fact, confidence: "已忽略" }); await reload(); notify("候选已忽略"); }
-                      catch (error) { notify(String(error), "error"); }
-                    }}>忽略</Button>
+                    <Button
+                      variant="secondary"
+                      onClick={async () => {
+                        try {
+                          await api.saveFact(project.summary.id, { ...fact, confidence: "已确认" });
+                          await reload();
+                          notify(replaced ? "新状态已生效，旧状态已结束" : "候选事实已确认");
+                        } catch (error) {
+                          notify(String(error), "error");
+                        }
+                      }}
+                    >
+                      确认入账
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      icon={<Trash2 size={14} />}
+                      onClick={async () => {
+                        try {
+                          await api.saveFact(project.summary.id, { ...fact, confidence: "已忽略" });
+                          await reload();
+                          notify("候选已忽略");
+                        } catch (error) {
+                          notify(String(error), "error");
+                        }
+                      }}
+                    >
+                      忽略
+                    </Button>
                   </div>
                 </article>
               );
@@ -245,10 +240,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
         </div>
         <div className="genre-ledger-templates">
           {genrePlugin.ledgerTemplates.map((template) => (
-            <button
-              key={template.label}
-              onClick={() => openLedgerTemplate(template)}
-            >
+            <button type="button" key={template.label} onClick={() => openLedgerTemplate(template)}>
               <span>
                 <strong>{template.label}</strong>
                 <Badge>{template.kind}</Badge>
@@ -265,15 +257,9 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
         <div className="section-heading">
           <div>
             <h2>期待 / 兑现账本</h2>
-            <p>
-              跟踪提出、承接、预计兑现和实际结果；逾期用于提醒，不是机械门禁。
-            </p>
+            <p>跟踪提出、承接、预计兑现和实际结果；逾期用于提醒，不是机械门禁。</p>
           </div>
-          <Button
-            variant="secondary"
-            icon={<Plus size={16} />}
-            onClick={() => openExpectation()}
-          >
+          <Button variant="secondary" icon={<Plus size={16} />} onClick={() => openExpectation()}>
             新增期待
           </Button>
         </div>
@@ -287,12 +273,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
             <span>已逾期</span>
           </div>
           <div>
-            <strong>
-              {
-                project.expectations.filter((item) => item.status === "已兑现")
-                  .length
-              }
-            </strong>
+            <strong>{project.expectations.filter((item) => item.status === "已兑现").length}</strong>
             <span>已兑现</span>
           </div>
         </div>
@@ -305,20 +286,13 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                 item.expectedPayoffChapter < currentChapter;
               return (
                 <button
+                  type="button"
                   key={item.id}
                   className={overdue ? "overdue" : ""}
                   onClick={() => openExpectation(item)}
                 >
                   <span>
-                    <Badge
-                      tone={
-                        item.status === "已兑现"
-                          ? "success"
-                          : overdue
-                            ? "danger"
-                            : "warning"
-                      }
-                    >
+                    <Badge tone={item.status === "已兑现" ? "success" : overdue ? "danger" : "warning"}>
                       {overdue ? "已逾期" : item.status}
                     </Badge>
                     <small>第{item.sourceChapter}章提出</small>
@@ -328,16 +302,8 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                     <small>{item.description || "未填写说明"}</small>
                   </span>
                   <span>
-                    <strong>
-                      {item.expectedPayoffChapter
-                        ? `第${item.expectedPayoffChapter}章`
-                        : "未定章"}
-                    </strong>
-                    <small>
-                      {item.actualPayoffChapter
-                        ? `实际第${item.actualPayoffChapter}章`
-                        : "预计兑现"}
-                    </small>
+                    <strong>{item.expectedPayoffChapter ? `第${item.expectedPayoffChapter}章` : "未定章"}</strong>
+                    <small>{item.actualPayoffChapter ? `实际第${item.actualPayoffChapter}章` : "预计兑现"}</small>
                   </span>
                 </button>
               );
@@ -377,11 +343,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                 <span>
                   <Badge
                     tone={
-                      fact.confidence === "有冲突"
-                        ? "danger"
-                        : fact.confidence === "已确认"
-                          ? "success"
-                          : "warning"
+                      fact.confidence === "有冲突" ? "danger" : fact.confidence === "已确认" ? "success" : "warning"
                     }
                   >
                     {fact.confidence}
@@ -411,8 +373,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
           </div>
           <Badge>{project.summaries.length} 条</Badge>
         </div>
-        {project.summaries.filter((summary) => summary.layer !== "场景")
-          .length ? (
+        {project.summaries.filter((summary) => summary.layer !== "场景").length ? (
           <div className="summary-list">
             {project.summaries
               .filter((summary) => summary.layer !== "场景")
@@ -422,20 +383,13 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                 <details key={summary.id}>
                   <summary>
                     <Badge
-                      tone={
-                        summary.layer === "全书"
-                          ? "accent"
-                          : summary.layer === "分卷"
-                            ? "success"
-                            : "neutral"
-                      }
+                      tone={summary.layer === "全书" ? "accent" : summary.layer === "分卷" ? "success" : "neutral"}
                     >
                       {summary.layer}
                     </Badge>
                     <strong>{summary.title}</strong>
                     <span>
-                      第{summary.fromChapter}–{summary.toChapter}章 · v
-                      {summary.version}
+                      第{summary.fromChapter}–{summary.toChapter}章 · v{summary.version}
                     </span>
                   </summary>
                   <p>{summary.content}</p>
@@ -447,10 +401,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
         )}
       </section>
       {expectationModal && (
-        <Modal
-          title={expectationDraft.id ? "更新期待兑现" : "新增期待"}
-          onClose={() => setExpectationModal(false)}
-        >
+        <Modal title={expectationDraft.id ? "更新期待兑现" : "新增期待"} onClose={() => setExpectationModal(false)}>
           <div className="form-stack">
             <Field label="期待标题">
               <Input
@@ -498,9 +449,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                   onChange={(event) =>
                     setExpectationDraft({
                       ...expectationDraft,
-                      expectedPayoffChapter: event.target.value
-                        ? Number(event.target.value)
-                        : null,
+                      expectedPayoffChapter: event.target.value ? Number(event.target.value) : null,
                     })
                   }
                 />
@@ -513,9 +462,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                   onChange={(event) =>
                     setExpectationDraft({
                       ...expectationDraft,
-                      actualPayoffChapter: event.target.value
-                        ? Number(event.target.value)
-                        : null,
+                      actualPayoffChapter: event.target.value ? Number(event.target.value) : null,
                     })
                   }
                 />
@@ -537,10 +484,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                 <option>已放弃</option>
               </Select>
             </Field>
-            <Field
-              label="兑现结果 / 变化"
-              hint="记录资源、关系、地位、信息或后续机会的实际变化"
-            >
+            <Field label="兑现结果 / 变化" hint="记录资源、关系、地位、信息或后续机会的实际变化">
               <Textarea
                 rows={3}
                 value={expectationDraft.payoffResult}
@@ -553,24 +497,17 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
               />
             </Field>
             <div className="modal-actions">
-              <Button
-                variant="secondary"
-                onClick={() => setExpectationModal(false)}
-              >
+              <Button variant="secondary" onClick={() => setExpectationModal(false)}>
                 取消
               </Button>
               <Button
                 disabled={
                   !expectationDraft.title.trim() ||
-                  (expectationDraft.status === "已兑现" &&
-                    !expectationDraft.actualPayoffChapter)
+                  (expectationDraft.status === "已兑现" && !expectationDraft.actualPayoffChapter)
                 }
                 onClick={async () => {
                   try {
-                    await api.saveExpectation(
-                      project.summary.id,
-                      expectationDraft,
-                    );
+                    await api.saveExpectation(project.summary.id, expectationDraft);
                     await reload();
                     setExpectationModal(false);
                     notify("期待账本已更新");
@@ -587,11 +524,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
       )}
       {modal && (
         <Modal
-          title={
-            activeLedgerTemplate
-              ? `新增${activeLedgerTemplate.label}`
-              : "新增状态事实"
-          }
+          title={activeLedgerTemplate ? `新增${activeLedgerTemplate.label}` : "新增状态事实"}
           onClose={() => setModal(false)}
         >
           <div className="form-stack">
@@ -617,8 +550,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                   onChange={(event) =>
                     setDraft({
                       ...draft,
-                      confidence: event.target
-                        .value as LedgerFact["confidence"],
+                      confidence: event.target.value as LedgerFact["confidence"],
                     })
                   }
                 >
@@ -631,21 +563,14 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
               <Field label="主体">
                 <Input
                   value={draft.subject}
-                  onChange={(event) =>
-                    setDraft({ ...draft, subject: event.target.value })
-                  }
-                  placeholder={
-                    activeLedgerTemplate?.subjectPlaceholder ??
-                    "角色、地点或事件"
-                  }
+                  onChange={(event) => setDraft({ ...draft, subject: event.target.value })}
+                  placeholder={activeLedgerTemplate?.subjectPlaceholder ?? "角色、地点或事件"}
                 />
               </Field>
               <Field label="属性 / 关系">
                 <Input
                   value={draft.predicate}
-                  onChange={(event) =>
-                    setDraft({ ...draft, predicate: event.target.value })
-                  }
+                  onChange={(event) => setDraft({ ...draft, predicate: event.target.value })}
                 />
               </Field>
             </div>
@@ -654,9 +579,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                 rows={3}
                 value={draft.value}
                 placeholder={activeLedgerTemplate?.valueHint}
-                onChange={(event) =>
-                  setDraft({ ...draft, value: event.target.value })
-                }
+                onChange={(event) => setDraft({ ...draft, value: event.target.value })}
               />
             </Field>
             <div className="form-grid three">
@@ -681,9 +604,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                   onChange={(event) =>
                     setDraft({
                       ...draft,
-                      validToChapter: event.target.value
-                        ? Number(event.target.value)
-                        : null,
+                      validToChapter: event.target.value ? Number(event.target.value) : null,
                     })
                   }
                 />
@@ -705,9 +626,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
             <Field label="知情范围" hint="秘密类事实必须写明哪些角色知道">
               <Input
                 value={draft.knowledgeScope}
-                onChange={(event) =>
-                  setDraft({ ...draft, knowledgeScope: event.target.value })
-                }
+                onChange={(event) => setDraft({ ...draft, knowledgeScope: event.target.value })}
               />
             </Field>
             <div className="modal-actions">
@@ -721,9 +640,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                   await reload();
                   setModal(false);
                   notify(
-                    saved.confidence === "有冲突"
-                      ? "事实已保存，但检测到冲突"
-                      : "事实已保存",
+                    saved.confidence === "有冲突" ? "事实已保存，但检测到冲突" : "事实已保存",
                     saved.confidence === "有冲突" ? "error" : "success",
                   );
                 }}

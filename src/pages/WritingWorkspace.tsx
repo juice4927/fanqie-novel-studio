@@ -1,79 +1,45 @@
-import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  ArrowLeft,
-  BookMarked,
-  BookOpenCheck,
   BrainCircuit,
-  CalendarDays,
   Check,
-  ChevronRight,
-  CircleDot,
-  ClipboardCheck,
   FileOutput,
-  GitPullRequestArrow,
+  History,
   Layers3,
   LoaderCircle,
   MessageSquareText,
-  History,
-  LockKeyhole,
-  NotebookTabs,
   Plus,
   Save,
   Search,
   SearchCheck,
-  Send,
-  ShieldCheck,
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Badge, Button, Field, IconButton, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
+import {
+  AutosaveCoordinator,
+  chapterDraftSignature,
+  clearRecoveredChapter,
+  readRecoveredChapter,
+  writeRecoveredChapter,
+} from "../lib/chapter-draft";
+import { formatCount, formatDate } from "../lib/format";
+import { CONTEXT_SECTION_LABELS } from "../shared/context-diagnostics";
+import { diffParagraphs } from "../shared/paragraph-diff";
+import { TOKEN_ESTIMATE_WARNING } from "../shared/token-estimator";
 import type {
   AppApi,
   BatchGenerationPreview,
-  ChangeRequest,
   Chapter,
-  ChapterStatus,
-  ConceptCandidate,
   ContextPackage,
-  InsightPack,
-  ExpectationEntry,
-  LedgerFact,
-  LedgerKind,
   NovelRevisionAuthority,
   NovelRevisionProposal,
   NovelRevisionScope,
-  PlanNode,
-  PlanningGenerationInput,
   ProjectDetail,
-  ProjectStatus,
-  ScheduleItem,
-  StoryContract,
-  ReviewSuggestion,
-  SearchHit,
   RevisionRecord,
+  SearchHit,
 } from "../shared/types";
 import { CHAPTER_FUNCTIONS } from "../shared/types";
-import { AutosaveCoordinator, chapterDraftSignature, clearRecoveredChapter, readRecoveredChapter, writeRecoveredChapter } from "../lib/chapter-draft";
-import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
-import type { GenrePluginDefinition } from "../shared/genre-plugins";
-import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
-import { TOKEN_ESTIMATE_WARNING } from "../shared/token-estimator";
-import {
-  Badge,
-  Button,
-  EmptyState,
-  Field,
-  IconButton,
-  Input,
-  Modal,
-  Segmented,
-  Select,
-  Textarea,
-} from "../components/UI";
-import { formatCount, formatDate } from "../lib/format";
-import { summarizeMetrics } from "../shared/metrics";
-import { CONTEXT_SECTION_LABELS } from "../shared/context-diagnostics";
-import { diffParagraphs } from "../shared/paragraph-diff";
 
 export interface CommonProjectProps {
   project: ProjectDetail;
@@ -83,26 +49,53 @@ export interface CommonProjectProps {
 }
 
 const EMPTY_CHAPTER = (number: number): Chapter => ({
-  id: "", number, title: "", outline: "", content: "", wordCount: 0,
-  status: "章纲", batchMode: "逐章", isKeyChapter: false, chapterPromise: "",
-  expectedPayoff: "", crisis: "", endingExpectation: "", expectationTargetChapter: null,
-  endingExpectationId: null, linkedExpectationIds: [], revision: 0, updatedAt: new Date().toISOString(),
+  id: "",
+  number,
+  title: "",
+  outline: "",
+  content: "",
+  wordCount: 0,
+  status: "章纲",
+  batchMode: "逐章",
+  isKeyChapter: false,
+  chapterPromise: "",
+  expectedPayoff: "",
+  crisis: "",
+  endingExpectation: "",
+  expectationTargetChapter: null,
+  endingExpectationId: null,
+  linkedExpectationIds: [],
+  revision: 0,
+  updatedAt: new Date().toISOString(),
 });
-const splitLines = (value: string) => value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
-const issueTone = (value: string) => value === "硬性" ? "danger" : value === "警告" ? "warning" : "neutral";
-function LightbulbIcon() { return <span className="mini-icon"><Sparkles size={16} /></span>; }
-function UploadIcon() { return <FileOutput size={16} />; }
-
-export function WritingPage({ project, api, reload, notify, onDirtyChange }: CommonProjectProps & { onDirtyChange?: (dirty: boolean) => void }) {
-  const [selectedId, setSelectedId] = useState(project.chapters[0]?.id ?? "");
-  const selected = project.chapters.find(
-    (chapter) => chapter.id === selectedId,
+const _splitLines = (value: string) =>
+  value
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+const _issueTone = (value: string) => (value === "硬性" ? "danger" : value === "警告" ? "warning" : "neutral");
+function _LightbulbIcon() {
+  return (
+    <span className="mini-icon">
+      <Sparkles size={16} />
+    </span>
   );
+}
+function _UploadIcon() {
+  return <FileOutput size={16} />;
+}
+
+export function WritingPage({
+  project,
+  api,
+  reload,
+  notify,
+  onDirtyChange,
+}: CommonProjectProps & { onDirtyChange?: (dirty: boolean) => void }) {
+  const [selectedId, setSelectedId] = useState(project.chapters[0]?.id ?? "");
+  const selected = project.chapters.find((chapter) => chapter.id === selectedId);
   const [draft, setDraft] = useState<Chapter>(
-    readRecoveredChapter(
-      project.summary.id,
-      selected ?? EMPTY_CHAPTER(project.chapters.length + 1),
-    ),
+    readRecoveredChapter(project.summary.id, selected ?? EMPTY_CHAPTER(project.chapters.length + 1)),
   );
   const [context, setContext] = useState<ContextPackage | null>(null);
   const [busy, setBusy] = useState(false);
@@ -127,28 +120,43 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
   const autosaveRef = useRef<AutosaveCoordinator | null>(null);
   const reloadRef = useRef(reload);
   const notifyRef = useRef(notify);
-  const [batchPreview, setBatchPreview] =
-    useState<BatchGenerationPreview | null>(null);
+  const [batchPreview, setBatchPreview] = useState<BatchGenerationPreview | null>(null);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [revisionProposal, setRevisionProposal] = useState<NovelRevisionProposal | null>(null);
   const [selectedRepairIds, setSelectedRepairIds] = useState<string[]>([]);
   const [revisionSelection, setRevisionSelection] = useState({ start: 0, end: 0, text: "" });
-  const [revisionInput, setRevisionInput] = useState<{ instruction: string; authority: NovelRevisionAuthority; scope: NovelRevisionScope }>({
-    instruction: "", authority: "设定为准", scope: "当前章节",
+  const [revisionInput, setRevisionInput] = useState<{
+    instruction: string;
+    authority: NovelRevisionAuthority;
+    scope: NovelRevisionScope;
+  }>({
+    instruction: "",
+    authority: "设定为准",
+    scope: "当前章节",
   });
-  useEffect(() => { draftRef.current = draft; reloadRef.current = reload; notifyRef.current = notify; }, [draft, reload, notify]);
-  useEffect(() => api.onChapterFactsExtracted((event) => {
-    if (event.projectId !== project.summary.id) return;
-    void reloadRef.current();
-    if (event.status === "失败") {
-      notifyRef.current(`章节已定稿，但状态扫描失败：${event.message ?? "未知错误"}`, "error");
-      return;
-    }
-    notifyRef.current(event.candidateCount
-      ? `状态扫描完成，生成 ${event.candidateCount} 条待确认状态`
-      : "状态扫描完成，本章没有新的持久状态");
-  }), [api, project.summary.id]);
+  useEffect(() => {
+    draftRef.current = draft;
+    reloadRef.current = reload;
+    notifyRef.current = notify;
+  }, [draft, reload, notify]);
+  useEffect(
+    () =>
+      api.onChapterFactsExtracted((event) => {
+        if (event.projectId !== project.summary.id) return;
+        void reloadRef.current();
+        if (event.status === "失败") {
+          notifyRef.current(`章节已定稿，但状态扫描失败：${event.message ?? "未知错误"}`, "error");
+          return;
+        }
+        notifyRef.current(
+          event.candidateCount
+            ? `状态扫描完成，生成 ${event.candidateCount} 条待确认状态`
+            : "状态扫描完成，本章没有新的持久状态",
+        );
+      }),
+    [api, project.summary.id],
+  );
   useEffect(() => {
     const media = window.matchMedia("(max-width: 600px)");
     const update = () => setCompactList(media.matches);
@@ -171,7 +179,10 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
       },
       (error, willRetry) => {
         setSaveStatus("error");
-        notifyRef.current(`${error instanceof Error ? error.message : String(error)}${willRetry ? "；将自动重试" : ""}`, "error");
+        notifyRef.current(
+          `${error instanceof Error ? error.message : String(error)}${willRetry ? "；将自动重试" : ""}`,
+          "error",
+        );
       },
     );
     autosaveRef.current = coordinator;
@@ -189,31 +200,40 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
     setDraft(merged);
     lastSavedSignature.current = chapterDraftSignature(merged);
   }, [project, selectedId]);
+  const chapter = project.chapters.find((item) => item.id === selectedId);
   useEffect(() => {
-    const chapter = project.chapters.find((item) => item.id === selectedId);
     if (!chapter) {
       setChapterLoading(false);
       return;
     }
     const requestId = ++chapterRequestRef.current;
     setChapterLoading(true);
-    void api.getChapter(project.summary.id, chapter.id).then((loaded) => {
-      if (chapterRequestRef.current !== requestId) return;
-      const recovered = readRecoveredChapter(project.summary.id, loaded);
-      draftRef.current = recovered;
-      setDraft(recovered);
-      lastSavedSignature.current = chapterDraftSignature(loaded);
-      setSaveStatus(chapterDraftSignature(recovered) === lastSavedSignature.current ? "saved" : "dirty");
-    }).catch((error) => {
-      if (chapterRequestRef.current === requestId)
-        notifyRef.current(error instanceof Error ? error.message : String(error), "error");
-    }).finally(() => {
-      if (chapterRequestRef.current === requestId) setChapterLoading(false);
-    });
-    return () => { chapterRequestRef.current += 1; };
-  }, [api, project.summary.id, selectedId]);
+    void api
+      .getChapter(project.summary.id, chapter.id)
+      .then((loaded) => {
+        if (chapterRequestRef.current !== requestId) return;
+        const recovered = readRecoveredChapter(project.summary.id, loaded);
+        draftRef.current = recovered;
+        setDraft(recovered);
+        lastSavedSignature.current = chapterDraftSignature(loaded);
+        setSaveStatus(chapterDraftSignature(recovered) === lastSavedSignature.current ? "saved" : "dirty");
+      })
+      .catch((error) => {
+        if (chapterRequestRef.current === requestId)
+          notifyRef.current(error instanceof Error ? error.message : String(error), "error");
+      })
+      .finally(() => {
+        if (chapterRequestRef.current === requestId) setChapterLoading(false);
+      });
+    return () => {
+      chapterRequestRef.current += 1;
+    };
+  }, [api, chapter, project.summary.id]);
   const dirty = chapterDraftSignature(draft) !== lastSavedSignature.current;
-  useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
   useEffect(() => {
     if (busy || chapterLoading) return;
     if (!dirty) {
@@ -224,15 +244,19 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
     const recoveryTimer = window.setTimeout(() => {
       setRecoveryAvailable(writeRecoveredChapter(project.summary.id, draftRef.current));
     }, 500);
-    const timer = !draft.id || ["已定稿", "待发布", "已发布"].includes(draft.status)
-      ? null
-      : window.setTimeout(() => {
-          const snapshot = draftRef.current;
-          setSaveStatus("saving");
-          autosaveRef.current?.enqueue(snapshot);
-        }, 2000);
-    return () => { if (timer) window.clearTimeout(timer); window.clearTimeout(recoveryTimer); };
-  }, [api, busy, chapterLoading, dirty, draft, notify, project.summary.id]);
+    const timer =
+      !draft.id || ["已定稿", "待发布", "已发布"].includes(draft.status)
+        ? null
+        : window.setTimeout(() => {
+            const snapshot = draftRef.current;
+            setSaveStatus("saving");
+            autosaveRef.current?.enqueue(snapshot);
+          }, 2000);
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      window.clearTimeout(recoveryTimer);
+    };
+  }, [busy, chapterLoading, dirty, draft, project.summary.id]);
   useEffect(() => {
     const preventUnsavedExit = (event: BeforeUnloadEvent) => {
       if (chapterDraftSignature(draftRef.current) === lastSavedSignature.current) return;
@@ -261,9 +285,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
   }, [api, project.summary.id, query]);
   const filteredChapters =
     query.trim().length >= 2
-      ? project.chapters.filter((chapter) =>
-          searchHits.some((hit) => hit.id === chapter.id),
-        )
+      ? project.chapters.filter((chapter) => searchHits.some((hit) => hit.id === chapter.id))
       : project.chapters.slice(0, loadedCount);
   const ROW_HEIGHT = 54;
   const OVERSCAN = 6;
@@ -279,7 +301,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
     try {
       const hits = await api.searchProject(project.summary.id, requestedQuery, offset, 50);
       if (searchRequestRef.current !== requestId || query !== requestedQuery) return;
-      setSearchHits((current) => current.length === offset ? [...current, ...hits] : current);
+      setSearchHits((current) => (current.length === offset ? [...current, ...hits] : current));
       setSearchHasMore(hits.length === 50);
     } finally {
       searchLoadingRef.current = false;
@@ -342,12 +364,50 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
     setContext(null);
   };
   const editorBusy = busy || chapterLoading;
-  const revisionRepairItems = revisionProposal ? [
-    ...revisionProposal.contractRepairs.map((item) => ({ id: item.id, kind: "创作设定", label: item.label, reason: item.reason, risk: item.risk, before: item.before, after: item.after })),
-    ...revisionProposal.planRepairs.map((item) => ({ id: item.id, kind: "规划", label: item.location, reason: item.reason, risk: item.risk, before: JSON.stringify(item.before, null, 2), after: JSON.stringify(item.after, null, 2) })),
-    ...revisionProposal.chapterRepairs.map((item) => ({ id: item.id, kind: "章纲", label: item.location, reason: item.reason, risk: item.risk, before: JSON.stringify(item.before, null, 2), after: JSON.stringify(item.after, null, 2) })),
-    ...(revisionProposal.textRepair ? [{ id: revisionProposal.textRepair.id, kind: "正文", label: `第${draft.number}章正文`, reason: revisionProposal.textRepair.reason, risk: revisionProposal.textRepair.risk, before: revisionProposal.textRepair.before, after: revisionProposal.textRepair.after }] : []),
-  ] : [];
+  const revisionRepairItems = revisionProposal
+    ? [
+        ...revisionProposal.contractRepairs.map((item) => ({
+          id: item.id,
+          kind: "创作设定",
+          label: item.label,
+          reason: item.reason,
+          risk: item.risk,
+          before: item.before,
+          after: item.after,
+        })),
+        ...revisionProposal.planRepairs.map((item) => ({
+          id: item.id,
+          kind: "规划",
+          label: item.location,
+          reason: item.reason,
+          risk: item.risk,
+          before: JSON.stringify(item.before, null, 2),
+          after: JSON.stringify(item.after, null, 2),
+        })),
+        ...revisionProposal.chapterRepairs.map((item) => ({
+          id: item.id,
+          kind: "章纲",
+          label: item.location,
+          reason: item.reason,
+          risk: item.risk,
+          before: JSON.stringify(item.before, null, 2),
+          after: JSON.stringify(item.after, null, 2),
+        })),
+        ...(revisionProposal.textRepair
+          ? [
+              {
+                id: revisionProposal.textRepair.id,
+                kind: "正文",
+                label: `第${draft.number}章正文`,
+                reason: revisionProposal.textRepair.reason,
+                risk: revisionProposal.textRepair.risk,
+                before: revisionProposal.textRepair.before,
+                after: revisionProposal.textRepair.after,
+              },
+            ]
+          : []),
+      ]
+    : [];
   return (
     <div className="writing-layout">
       <aside className="chapter-list">
@@ -384,7 +444,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
             placeholder="检索正文"
           />
         </label>
-        <div
+        <section
           className="chapter-scroll"
           onScroll={(event) => {
             const element = event.currentTarget;
@@ -399,28 +459,35 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
           }}
           aria-label="章节列表"
         >
-          <div className="chapter-virtual-spacer" style={{ height: compactList ? ROW_HEIGHT : filteredChapters.length * ROW_HEIGHT }}>
-          <div className="chapter-virtual-window" style={{ transform: compactList ? undefined : `translateY(${startIndex * ROW_HEIGHT}px)` }}>
-          {virtualChapters.map((chapter) => (
-            <button
-              key={chapter.id}
-              disabled={editorBusy}
-              className={selectedId === chapter.id ? "active" : ""}
-              onClick={() => selectChapter(chapter)}
+          <div
+            className="chapter-virtual-spacer"
+            style={{ height: compactList ? ROW_HEIGHT : filteredChapters.length * ROW_HEIGHT }}
+          >
+            <div
+              className="chapter-virtual-window"
+              style={{ transform: compactList ? undefined : `translateY(${startIndex * ROW_HEIGHT}px)` }}
             >
-              <span>{chapter.number}</span>
-              <div>
-                <strong>{chapter.title || "未命名章"}</strong>
-                <small>
-                  {chapter.status} · {formatCount(chapter.wordCount)}字
-                </small>
-              </div>
-              {chapter.isKeyChapter && <i />}
-            </button>
-          ))}
+              {virtualChapters.map((chapter) => (
+                <button
+                  type="button"
+                  key={chapter.id}
+                  disabled={editorBusy}
+                  className={selectedId === chapter.id ? "active" : ""}
+                  onClick={() => selectChapter(chapter)}
+                >
+                  <span>{chapter.number}</span>
+                  <div>
+                    <strong>{chapter.title || "未命名章"}</strong>
+                    <small>
+                      {chapter.status} · {formatCount(chapter.wordCount)}字
+                    </small>
+                  </div>
+                  {chapter.isKeyChapter && <i />}
+                </button>
+              ))}
+            </div>
           </div>
-          </div>
-        </div>
+        </section>
       </aside>
       <div className="editor-workspace">
         <header className="editor-toolbar">
@@ -430,15 +497,23 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
               className="title-input"
               disabled={editorBusy}
               value={draft.title}
-              onChange={(event) =>
-                setDraft({ ...draft, title: event.target.value })
-              }
+              onChange={(event) => setDraft({ ...draft, title: event.target.value })}
               placeholder="章节标题"
             />
           </div>
           <div className="heading-actions">
             <span className={`autosave-status autosave-${saveStatus}`} role="status">
-              {chapterLoading ? "正在读取正文" : !recoveryAvailable ? "恢复副本不可用" : saveStatus === "saving" ? "正在自动保存" : saveStatus === "dirty" ? "未保存" : saveStatus === "error" ? "保存失败" : "已保存"}
+              {chapterLoading
+                ? "正在读取正文"
+                : !recoveryAvailable
+                  ? "恢复副本不可用"
+                  : saveStatus === "saving"
+                    ? "正在自动保存"
+                    : saveStatus === "dirty"
+                      ? "未保存"
+                      : saveStatus === "error"
+                        ? "保存失败"
+                        : "已保存"}
             </span>
             <Segmented
               options={["逐章", "五章批次"] as const}
@@ -498,9 +573,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
               setBusy(true);
               try {
                 const saved = await saveLatestForAction();
-                setContext(
-                  await api.compileContext(project.summary.id, saved.id),
-                );
+                setContext(await api.compileContext(project.summary.id, saved.id));
               } catch (error) {
                 notify(String(error), "error");
               } finally {
@@ -521,21 +594,17 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
               setBusy(true);
               try {
                 beforeGeneration = await saveLatestForAction();
-                const result = await api.generateChapterDraft(
-                  project.summary.id,
-                  beforeGeneration.id,
-                  (event) => {
-                    if (event.type === "attempt-start") {
-                      streamedAttempt = event.attempt;
-                      streamedContent = "";
-                    } else if (event.type === "delta" && event.attempt === streamedAttempt) {
-                      streamedContent += event.delta;
-                    } else return;
-                    const streamedDraft = { ...beforeGeneration, content: streamedContent };
-                    draftRef.current = streamedDraft;
-                    setDraft(streamedDraft);
-                  },
-                );
+                const result = await api.generateChapterDraft(project.summary.id, beforeGeneration.id, (event) => {
+                  if (event.type === "attempt-start") {
+                    streamedAttempt = event.attempt;
+                    streamedContent = "";
+                  } else if (event.type === "delta" && event.attempt === streamedAttempt) {
+                    streamedContent += event.delta;
+                  } else return;
+                  const streamedDraft = { ...beforeGeneration, content: streamedContent };
+                  draftRef.current = streamedDraft;
+                  setDraft(streamedDraft);
+                });
                 draftRef.current = result;
                 lastSavedSignature.current = chapterDraftSignature(result);
                 clearRecoveredChapter(project.summary.id, result);
@@ -546,10 +615,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
               } catch (error) {
                 draftRef.current = beforeGeneration;
                 setDraft(beforeGeneration);
-                notify(
-                  error instanceof Error ? error.message : String(error),
-                  "error",
-                );
+                notify(error instanceof Error ? error.message : String(error), "error");
               } finally {
                 setBusy(false);
               }
@@ -566,14 +632,9 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                 setBusy(true);
                 try {
                   const saved = await saveLatestForAction();
-                  setBatchPreview(
-                    await api.previewChapterBatch(project.summary.id, saved.id),
-                  );
+                  setBatchPreview(await api.previewChapterBatch(project.summary.id, saved.id));
                 } catch (error) {
-                  notify(
-                    error instanceof Error ? error.message : String(error),
-                    "error",
-                  );
+                  notify(error instanceof Error ? error.message : String(error), "error");
                 } finally {
                   setBusy(false);
                 }
@@ -589,26 +650,12 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
               setBusy(true);
               try {
                 const saved = await saveLatestForAction();
-                const issues = await api.runQualityCheck(
-                  project.summary.id,
-                  saved.id,
-                );
-                await api.transitionChapter(
-                  project.summary.id,
-                  saved.id,
-                  "待定稿",
-                );
+                const issues = await api.runQualityCheck(project.summary.id, saved.id);
+                await api.transitionChapter(project.summary.id, saved.id, "待定稿");
                 await reload();
-                notify(
-                  issues.length
-                    ? `质检完成，发现 ${issues.length} 项问题`
-                    : "质检完成，未发现问题",
-                );
+                notify(issues.length ? `质检完成，发现 ${issues.length} 项问题` : "质检完成，未发现问题");
               } catch (error) {
-                notify(
-                  error instanceof Error ? error.message : String(error),
-                  "error",
-                );
+                notify(error instanceof Error ? error.message : String(error), "error");
               } finally {
                 setBusy(false);
               }
@@ -622,28 +669,23 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
               disabled={editorBusy}
               onClick={async () => {
                 try {
-                  const result = await api.transitionChapter(
-                    project.summary.id,
-                    draft.id,
-                    "已定稿",
-                  );
+                  const result = await api.transitionChapter(project.summary.id, draft.id, "已定稿");
                   await reload();
                   if (result.ledgerExtraction.status === "排队中") {
                     notify("章节已定稿，状态扫描正在后台进行");
                   } else if (result.ledgerExtraction.status === "已完成") {
-                    notify(result.ledgerExtraction.candidateCount
-                      ? `章节已定稿，生成 ${result.ledgerExtraction.candidateCount} 条待确认状态`
-                      : "章节已定稿，本章没有新的持久状态");
+                    notify(
+                      result.ledgerExtraction.candidateCount
+                        ? `章节已定稿，生成 ${result.ledgerExtraction.candidateCount} 条待确认状态`
+                        : "章节已定稿，本章没有新的持久状态",
+                    );
                   } else if (result.ledgerExtraction.status === "失败") {
                     notify(`章节已定稿，但状态扫描失败：${result.ledgerExtraction.message ?? "未知错误"}`, "error");
                   } else {
                     notify("章节已定稿；未配置 AI，未扫描状态候选");
                   }
                 } catch (error) {
-                  notify(
-                    error instanceof Error ? error.message : String(error),
-                    "error",
-                  );
+                  notify(error instanceof Error ? error.message : String(error), "error");
                 }
               }}
             >
@@ -659,9 +701,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                   rows={2}
                   disabled={editorBusy}
                   value={draft.chapterPromise ?? ""}
-                  onChange={(event) =>
-                    setDraft({ ...draft, chapterPromise: event.target.value })
-                  }
+                  onChange={(event) => setDraft({ ...draft, chapterPromise: event.target.value })}
                   placeholder="承接哪项期待，本章具体答应什么"
                 />
               </Field>
@@ -670,9 +710,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                   rows={2}
                   disabled={editorBusy}
                   value={draft.expectedPayoff ?? ""}
-                  onChange={(event) =>
-                    setDraft({ ...draft, expectedPayoff: event.target.value })
-                  }
+                  onChange={(event) => setDraft({ ...draft, expectedPayoff: event.target.value })}
                   placeholder="胜负、关系、信息、资源或身份变化"
                 />
               </Field>
@@ -681,9 +719,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                   rows={2}
                   disabled={editorBusy}
                   value={draft.crisis ?? ""}
-                  onChange={(event) =>
-                    setDraft({ ...draft, crisis: event.target.value })
-                  }
+                  onChange={(event) => setDraft({ ...draft, crisis: event.target.value })}
                   placeholder="具体压力、代价和时间限制"
                 />
               </Field>
@@ -707,9 +743,13 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                 <Select
                   disabled={editorBusy}
                   value={draft.chapterFunction ?? "行动"}
-                  onChange={(event) => setDraft({ ...draft, chapterFunction: event.target.value as Chapter["chapterFunction"] })}
+                  onChange={(event) =>
+                    setDraft({ ...draft, chapterFunction: event.target.value as Chapter["chapterFunction"] })
+                  }
                 >
-                  {CHAPTER_FUNCTIONS.map((item) => <option key={item}>{item}</option>)}
+                  {CHAPTER_FUNCTIONS.map((item) => (
+                    <option key={item}>{item}</option>
+                  ))}
                 </Select>
               </Field>
               <Field label="目标字数">
@@ -732,9 +772,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                   onChange={(event) =>
                     setDraft({
                       ...draft,
-                      expectationTargetChapter: event.target.value
-                        ? Number(event.target.value)
-                        : null,
+                      expectationTargetChapter: event.target.value ? Number(event.target.value) : null,
                     })
                   }
                 />
@@ -748,18 +786,12 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                   onChange={(event) =>
                     setDraft({
                       ...draft,
-                      linkedExpectationIds: Array.from(
-                        event.currentTarget.selectedOptions,
-                        (option) => option.value,
-                      ),
+                      linkedExpectationIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value),
                     })
                   }
                 >
                   {project.expectations
-                    .filter(
-                      (item) =>
-                        item.status === "待兑现" || item.status === "部分兑现",
-                    )
+                    .filter((item) => item.status === "待兑现" || item.status === "部分兑现")
                     .map((item) => (
                       <option value={item.id} key={item.id}>
                         第{item.sourceChapter}章 · {item.title}
@@ -775,9 +807,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                 rows={5}
                 disabled={editorBusy}
                 value={draft.outline}
-                onChange={(event) =>
-                  setDraft({ ...draft, outline: event.target.value })
-                }
+                onChange={(event) => setDraft({ ...draft, outline: event.target.value })}
                 placeholder="目标、冲突、信息揭示、状态变化、章末推动力"
               />
             </Field>
@@ -787,32 +817,26 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
             className="manuscript"
             value={draft.content}
             disabled={editorBusy}
-            onChange={(event) =>
-              setDraft({ ...draft, content: event.target.value })
-            }
+            onChange={(event) => setDraft({ ...draft, content: event.target.value })}
             placeholder="在这里写正文，或先保存章纲后使用 AI 生成草稿。"
           />
           <footer className="editor-footer">
             <span>
-              {draft.content.replace(/\s/g, "").length.toLocaleString()} 字 · v
-              {draft.revision || 1}
+              {draft.content.replace(/\s/g, "").length.toLocaleString()} 字 · v{draft.revision || 1}
             </span>
             {draft.content.length >= 190_000 && (
               <Badge tone={draft.content.length > 200_000 ? "danger" : "warning"}>
-                {draft.content.length > 200_000 ? "正文超过 200,000 字符保存上限" : `距离保存上限还剩 ${(200_000 - draft.content.length).toLocaleString()} 字符`}
+                {draft.content.length > 200_000
+                  ? "正文超过 200,000 字符保存上限"
+                  : `距离保存上限还剩 ${(200_000 - draft.content.length).toLocaleString()} 字符`}
               </Badge>
             )}
             <span className="editor-version-actions">
               {draft.id && (
                 <button
+                  type="button"
                   onClick={async () => {
-                    setHistory(
-                      await api.listRevisions(
-                        project.summary.id,
-                        "chapters",
-                        draft.id,
-                      ),
-                    );
+                    setHistory(await api.listRevisions(project.summary.id, "chapters", draft.id));
                     setHistoryOpen(true);
                   }}
                 >
@@ -820,13 +844,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                   历史版本
                 </button>
               )}
-              <Badge
-                tone={
-                  draft.status === "已定稿" || draft.status === "已发布"
-                    ? "success"
-                    : "neutral"
-                }
-              >
+              <Badge tone={draft.status === "已定稿" || draft.status === "已发布" ? "success" : "neutral"}>
                 {draft.status}
               </Badge>
             </span>
@@ -856,8 +874,16 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
               <div className="context-diagnostic-list">
                 {context.diagnostics.sections.map((section) => (
                   <div key={section.key} className={`context-diagnostic context-${section.status}`}>
-                    <span><strong>{section.label}</strong><small>{section.source}</small></span>
-                    <span><Badge tone={section.status === "缺失" ? "warning" : "neutral"}>{section.status}</Badge><small>{section.includedItems}/{section.totalItems} 项 · {section.characters} 字</small></span>
+                    <span>
+                      <strong>{section.label}</strong>
+                      <small>{section.source}</small>
+                    </span>
+                    <span>
+                      <Badge tone={section.status === "缺失" ? "warning" : "neutral"}>{section.status}</Badge>
+                      <small>
+                        {section.includedItems}/{section.totalItems} 项 · {section.characters} 字
+                      </small>
+                    </span>
                     <p>{section.reason}</p>
                   </div>
                 ))}
@@ -876,11 +902,7 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                   key === "forbiddenKnowledge"
                 }
               >
-                <summary>
-                  {
-                    CONTEXT_SECTION_LABELS[key as keyof typeof CONTEXT_SECTION_LABELS]
-                  }
-                </summary>
+                <summary>{CONTEXT_SECTION_LABELS[key as keyof typeof CONTEXT_SECTION_LABELS]}</summary>
                 <pre>{value || "无"}</pre>
               </details>
             ))}
@@ -892,22 +914,43 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
             {!revisionProposal ? (
               <>
                 <Field label="修改意见" hint="直接说明哪里不满意、希望怎么改，以及必须保留什么">
-                  <Textarea autoFocus rows={5} disabled={revisionBusy} value={revisionInput.instruction} onChange={(event) => setRevisionInput({ ...revisionInput, instruction: event.target.value })} placeholder="例如：第五章和解太快，把冲突延长到第七章；保留结尾的拥抱，但改成利益合作。" />
+                  <Textarea
+                    autoFocus
+                    rows={5}
+                    disabled={revisionBusy}
+                    value={revisionInput.instruction}
+                    onChange={(event) => setRevisionInput({ ...revisionInput, instruction: event.target.value })}
+                    placeholder="例如：第五章和解太快，把冲突延长到第七章；保留结尾的拥抱，但改成利益合作。"
+                  />
                 </Field>
                 <div className="form-grid two">
+                  {/* biome-ignore lint/a11y/useSemanticElements: role=group+aria-label 已提供分组语义，fieldset 需调整样式 */}
                   <div className="field" role="group" aria-label="修改依据">
                     <span className="field-label">修改依据</span>
-                    <Segmented options={["设定为准", "当前正文为准"] as const} value={revisionInput.authority} disabled={revisionBusy} onChange={(authority) => setRevisionInput({ ...revisionInput, authority })} />
+                    <Segmented
+                      options={["设定为准", "当前正文为准"] as const}
+                      value={revisionInput.authority}
+                      disabled={revisionBusy}
+                      onChange={(authority) => setRevisionInput({ ...revisionInput, authority })}
+                    />
                     <span className="field-hint">选择发生冲突时以哪一侧为准</span>
                   </div>
+                  {/* biome-ignore lint/a11y/useSemanticElements: role=group+aria-label 已提供分组语义，fieldset 需调整样式 */}
                   <div className="field" role="group" aria-label="检查范围">
                     <span className="field-label">检查范围</span>
-                    <Segmented options={["仅选区", "当前章节", "全书联动"] as const} value={revisionInput.scope} disabled={revisionBusy} onChange={(scope) => setRevisionInput({ ...revisionInput, scope })} />
+                    <Segmented
+                      options={["仅选区", "当前章节", "全书联动"] as const}
+                      value={revisionInput.scope}
+                      disabled={revisionBusy}
+                      onChange={(scope) => setRevisionInput({ ...revisionInput, scope })}
+                    />
                   </div>
                 </div>
                 {revisionInput.scope === "仅选区" && (
                   <div className="revision-selection-preview">
-                    <strong>{revisionSelection.text ? `已选 ${revisionSelection.text.length} 字` : "尚未选择正文"}</strong>
+                    <strong>
+                      {revisionSelection.text ? `已选 ${revisionSelection.text.length} 字` : "尚未选择正文"}
+                    </strong>
                     <p>{revisionSelection.text || "关闭对话框，在正文中选中文字后重新点击“修改意见”。"}</p>
                   </div>
                 )}
@@ -915,77 +958,167 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
             ) : (
               <>
                 <div className="revision-proposal-summary">
-                  <div><Badge tone="accent">{revisionProposal.authority}</Badge><Badge tone="neutral">{revisionProposal.scope}</Badge><strong>{revisionRepairItems.length} 项可应用修改</strong></div>
+                  <div>
+                    <Badge tone="accent">{revisionProposal.authority}</Badge>
+                    <Badge tone="neutral">{revisionProposal.scope}</Badge>
+                    <strong>{revisionRepairItems.length} 项可应用修改</strong>
+                  </div>
                   <p>{revisionProposal.summary}</p>
                 </div>
-                {revisionProposal.warnings.length > 0 && <div className="revision-warnings" role="alert"><AlertTriangle size={16} /><span>{revisionProposal.warnings.join("；")}</span></div>}
+                {revisionProposal.warnings.length > 0 && (
+                  <div className="revision-warnings" role="alert">
+                    <AlertTriangle size={16} />
+                    <span>{revisionProposal.warnings.join("；")}</span>
+                  </div>
+                )}
                 {revisionProposal.impacts.length > 0 && (
                   <div className="revision-impact-list">
                     <strong>影响检查</strong>
-                    {revisionProposal.impacts.map((impact, index) => <div key={`${impact.location}-${index}`}><Badge tone={impact.risk === "高" ? "danger" : impact.risk === "中" ? "warning" : "neutral"}>{impact.targetType}</Badge><span><b>{impact.location}</b>{impact.reason}</span></div>)}
+                    {revisionProposal.impacts.map((impact) => (
+                      <div key={`${impact.targetType}-${impact.location}`}>
+                        <Badge tone={impact.risk === "高" ? "danger" : impact.risk === "中" ? "warning" : "neutral"}>
+                          {impact.targetType}
+                        </Badge>
+                        <span>
+                          <b>{impact.location}</b>
+                          {impact.reason}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
                 <div className="revision-repair-list">
                   {revisionRepairItems.map((item) => (
                     <article key={item.id} className={selectedRepairIds.includes(item.id) ? "selected" : ""}>
-                      <label><input type="checkbox" checked={selectedRepairIds.includes(item.id)} onChange={(event) => setSelectedRepairIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.kind} · {item.label}</strong><small>{item.reason}</small></span><Badge tone={item.risk === "高" ? "danger" : item.risk === "中" ? "warning" : "neutral"}>{item.risk}风险</Badge></label>
-                      <details><summary>查看修改前后</summary><div className="revision-before-after"><section><span>修改前</span><pre>{item.before || "无"}</pre></section><section><span>修改后</span><pre>{item.after || "无"}</pre></section></div></details>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedRepairIds.includes(item.id)}
+                          onChange={(event) =>
+                            setSelectedRepairIds((current) =>
+                              event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id),
+                            )
+                          }
+                        />
+                        <span>
+                          <strong>
+                            {item.kind} · {item.label}
+                          </strong>
+                          <small>{item.reason}</small>
+                        </span>
+                        <Badge tone={item.risk === "高" ? "danger" : item.risk === "中" ? "warning" : "neutral"}>
+                          {item.risk}风险
+                        </Badge>
+                      </label>
+                      <details>
+                        <summary>查看修改前后</summary>
+                        <div className="revision-before-after">
+                          <section>
+                            <span>修改前</span>
+                            <pre>{item.before || "无"}</pre>
+                          </section>
+                          <section>
+                            <span>修改后</span>
+                            <pre>{item.after || "无"}</pre>
+                          </section>
+                        </div>
+                      </details>
                     </article>
                   ))}
-                  {!revisionRepairItems.length && <p className="muted-line">没有生成可应用修改。可以调整意见后重新分析。</p>}
+                  {!revisionRepairItems.length && (
+                    <p className="muted-line">没有生成可应用修改。可以调整意见后重新分析。</p>
+                  )}
                 </div>
               </>
             )}
             <div className="modal-actions">
-              <Button variant="secondary" disabled={revisionBusy} onClick={() => revisionProposal ? setRevisionProposal(null) : setRevisionOpen(false)}>{revisionProposal ? "返回修改意见" : "取消"}</Button>
+              <Button
+                variant="secondary"
+                disabled={revisionBusy}
+                onClick={() => (revisionProposal ? setRevisionProposal(null) : setRevisionOpen(false))}
+              >
+                {revisionProposal ? "返回修改意见" : "取消"}
+              </Button>
               {!revisionProposal ? (
-                <Button disabled={revisionBusy || !revisionInput.instruction.trim() || (revisionInput.scope === "仅选区" && !revisionSelection.text)} icon={revisionBusy ? <LoaderCircle className="spin" size={16} /> : <SearchCheck size={16} />} onClick={async () => {
-                  setRevisionBusy(true);
-                  try {
-                    const saved = await saveLatestForAction();
-                    const proposal = await api.analyzeNovelRevision(project.summary.id, {
-                      chapterId: saved.id, ...revisionInput,
-                      selectionStart: revisionInput.scope === "仅选区" ? revisionSelection.start : undefined,
-                      selectionEnd: revisionInput.scope === "仅选区" ? revisionSelection.end : undefined,
-                      selectedText: revisionInput.scope === "仅选区" ? revisionSelection.text : undefined,
-                    });
-                    setRevisionProposal(proposal);
-                    setSelectedRepairIds([
-                      ...proposal.contractRepairs.map((item) => item.id), ...proposal.planRepairs.map((item) => item.id),
-                      ...proposal.chapterRepairs.map((item) => item.id), ...(proposal.textRepair ? [proposal.textRepair.id] : []),
-                    ]);
-                  } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
-                  finally { setRevisionBusy(false); }
-                }}>{revisionBusy ? "分析中" : "分析修改意见"}</Button>
+                <Button
+                  disabled={
+                    revisionBusy ||
+                    !revisionInput.instruction.trim() ||
+                    (revisionInput.scope === "仅选区" && !revisionSelection.text)
+                  }
+                  icon={revisionBusy ? <LoaderCircle className="spin" size={16} /> : <SearchCheck size={16} />}
+                  onClick={async () => {
+                    setRevisionBusy(true);
+                    try {
+                      const saved = await saveLatestForAction();
+                      const proposal = await api.analyzeNovelRevision(project.summary.id, {
+                        chapterId: saved.id,
+                        ...revisionInput,
+                        selectionStart: revisionInput.scope === "仅选区" ? revisionSelection.start : undefined,
+                        selectionEnd: revisionInput.scope === "仅选区" ? revisionSelection.end : undefined,
+                        selectedText: revisionInput.scope === "仅选区" ? revisionSelection.text : undefined,
+                      });
+                      setRevisionProposal(proposal);
+                      setSelectedRepairIds([
+                        ...proposal.contractRepairs.map((item) => item.id),
+                        ...proposal.planRepairs.map((item) => item.id),
+                        ...proposal.chapterRepairs.map((item) => item.id),
+                        ...(proposal.textRepair ? [proposal.textRepair.id] : []),
+                      ]);
+                    } catch (error) {
+                      notify(error instanceof Error ? error.message : String(error), "error");
+                    } finally {
+                      setRevisionBusy(false);
+                    }
+                  }}
+                >
+                  {revisionBusy ? "分析中" : "分析修改意见"}
+                </Button>
               ) : (
-                <Button disabled={revisionBusy || !selectedRepairIds.length} icon={revisionBusy ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />} onClick={async () => {
-                  setRevisionBusy(true);
-                  try {
-                    const result = await api.applyNovelRevision(project.summary.id, revisionProposal, selectedRepairIds);
-                    await reload();
-                    const loaded = await api.getChapter(project.summary.id, revisionProposal.sourceChapterId);
-                    draftRef.current = loaded; setDraft(loaded); lastSavedSignature.current = chapterDraftSignature(loaded); setSaveStatus("saved");
-                    setRevisionOpen(false);
-                    const contractNote = result.appliedTargets.includes("创作设定") ? "；创作设定需要重新审批" : "";
-                    notify(`已应用 ${result.appliedTargets.length} 个目标${result.changeRequestIds.length ? `，建立 ${result.changeRequestIds.length} 条受保护变更记录` : ""}${contractNote}`);
-                  } catch (error) { notify(error instanceof Error ? error.message : String(error), "error"); }
-                  finally { setRevisionBusy(false); }
-                }}>{revisionBusy ? "应用中" : `应用所选 ${selectedRepairIds.length} 项`}</Button>
+                <Button
+                  disabled={revisionBusy || !selectedRepairIds.length}
+                  icon={revisionBusy ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}
+                  onClick={async () => {
+                    setRevisionBusy(true);
+                    try {
+                      const result = await api.applyNovelRevision(
+                        project.summary.id,
+                        revisionProposal,
+                        selectedRepairIds,
+                      );
+                      await reload();
+                      const loaded = await api.getChapter(project.summary.id, revisionProposal.sourceChapterId);
+                      draftRef.current = loaded;
+                      setDraft(loaded);
+                      lastSavedSignature.current = chapterDraftSignature(loaded);
+                      setSaveStatus("saved");
+                      setRevisionOpen(false);
+                      const contractNote = result.appliedTargets.includes("创作设定") ? "；创作设定需要重新审批" : "";
+                      notify(
+                        `已应用 ${result.appliedTargets.length} 个目标${result.changeRequestIds.length ? `，建立 ${result.changeRequestIds.length} 条受保护变更记录` : ""}${contractNote}`,
+                      );
+                    } catch (error) {
+                      notify(error instanceof Error ? error.message : String(error), "error");
+                    } finally {
+                      setRevisionBusy(false);
+                    }
+                  }}
+                >
+                  {revisionBusy ? "应用中" : `应用所选 ${selectedRepairIds.length} 项`}
+                </Button>
               )}
             </div>
           </div>
         </Modal>
       )}
       {historyOpen && (
-        <Modal
-          title={`第${draft.number}章历史版本`}
-          onClose={() => setHistoryOpen(false)}
-        >
+        <Modal title={`第${draft.number}章历史版本`} onClose={() => setHistoryOpen(false)}>
           <div className="revision-list">
             {history.length ? (
               history.map((revision) => {
                 const snapshot = revision.payload as Chapter;
-                const compared = compareRevisionId === revision.id ? diffParagraphs(snapshot.content ?? "", draft.content ?? "") : [];
+                const compared =
+                  compareRevisionId === revision.id ? diffParagraphs(snapshot.content ?? "", draft.content ?? "") : [];
                 return (
                   <article key={revision.id}>
                     <div>
@@ -993,28 +1126,27 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                         v{revision.revision} · {snapshot.title}
                       </strong>
                       <small>
-                        {formatDate(revision.createdAt, true)} ·{" "}
-                        {snapshot.content?.replace(/\s/g, "").length ?? 0}字
+                        {formatDate(revision.createdAt, true)} · {snapshot.content?.replace(/\s/g, "").length ?? 0}字
                       </small>
                     </div>
                     <div className="revision-actions">
-                      <Button variant="ghost" onClick={() => setCompareRevisionId(compareRevisionId === revision.id ? "" : revision.id)}>
+                      <Button
+                        variant="ghost"
+                        onClick={() => setCompareRevisionId(compareRevisionId === revision.id ? "" : revision.id)}
+                      >
                         {compareRevisionId === revision.id ? "收起差异" : "与当前版本比较"}
                       </Button>
                       <Button
                         variant="secondary"
                         onClick={async () => {
-                           await api.restoreRevision(
-                            project.summary.id,
-                            revision.id,
-                           );
-                           await reload();
-                           const restored = await api.getChapter(project.summary.id, draftRef.current.id);
-                           draftRef.current = restored;
-                           lastSavedSignature.current = chapterDraftSignature(restored);
-                           clearRecoveredChapter(project.summary.id, restored);
-                           setDraft(restored);
-                           setSaveStatus("saved");
+                          await api.restoreRevision(project.summary.id, revision.id);
+                          await reload();
+                          const restored = await api.getChapter(project.summary.id, draftRef.current.id);
+                          draftRef.current = restored;
+                          lastSavedSignature.current = chapterDraftSignature(restored);
+                          clearRecoveredChapter(project.summary.id, restored);
+                          setDraft(restored);
+                          setSaveStatus("saved");
                           setHistoryOpen(false);
                           notify(`已从 v${revision.revision} 建立新的当前版本`);
                         }}
@@ -1023,16 +1155,18 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                       </Button>
                     </div>
                     {compared.length > 0 && (
-                      <div className="paragraph-diff" aria-label={`v${revision.revision} 与当前版本的段落差异`}>
+                      <section className="paragraph-diff" aria-label={`v${revision.revision} 与当前版本的段落差异`}>
                         <header>
                           <span>新增 {compared.filter((item) => item.kind === "新增").length}</span>
                           <span>删除 {compared.filter((item) => item.kind === "删除").length}</span>
                           <span>未变 {compared.filter((item) => item.kind === "未变").length}</span>
                         </header>
-                        {compared.map((item, index) => (
-                          <p key={`${item.kind}-${index}`} className={`diff-${item.kind}`}>{item.kind === "新增" ? "+" : item.kind === "删除" ? "-" : " "} {item.text}</p>
+                        {compared.map((item) => (
+                          <p key={`${item.kind}-${item.text}`} className={`diff-${item.kind}`}>
+                            {item.kind === "新增" ? "+" : item.kind === "删除" ? "-" : " "} {item.text}
+                          </p>
                         ))}
-                      </div>
+                      </section>
                     )}
                   </article>
                 );
@@ -1066,16 +1200,12 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
               <div>
                 <span>估算费用</span>
                 <strong>
-                  {batchPreview.estimatedCost
-                    ? `¥${batchPreview.estimatedCost.toFixed(2)}`
-                    : "未填写模型单价"}
+                  {batchPreview.estimatedCost ? `¥${batchPreview.estimatedCost.toFixed(2)}` : "未填写模型单价"}
                 </strong>
               </div>
             </div>
             <p className="inline-warning">{TOKEN_ESTIMATE_WARNING}</p>
-            {batchPreview.blockingReason && (
-              <p className="inline-warning">{batchPreview.blockingReason}</p>
-            )}
+            {batchPreview.blockingReason && <p className="inline-warning">{batchPreview.blockingReason}</p>}
             <div className="chapter-preview">
               {batchPreview.chapters.map((chapter) => (
                 <div key={chapter.id}>
@@ -1094,18 +1224,12 @@ export function WritingPage({ project, api, reload, notify, onDirtyChange }: Com
                 onClick={async () => {
                   setBusy(true);
                   try {
-                    const result = await api.generateChapterBatch(
-                      project.summary.id,
-                      draft.id,
-                    );
+                    const result = await api.generateChapterBatch(project.summary.id, draft.id);
                     setBatchPreview(null);
                     await reload();
                     notify(`已生成 ${result.length} 章待质检草稿`);
                   } catch (error) {
-                    notify(
-                      error instanceof Error ? error.message : String(error),
-                      "error",
-                    );
+                    notify(error instanceof Error ? error.message : String(error), "error");
                   } finally {
                     setBusy(false);
                   }

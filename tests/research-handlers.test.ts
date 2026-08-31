@@ -1,24 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  registerResearchHandlers,
-  type ResearchHandlerDependencies,
-} from "../electron/handlers/research-handlers";
+import { type ResearchHandlerDependencies, registerResearchHandlers } from "../electron/handlers/research-handlers";
 import type { RegisterHandler } from "../electron/handlers/types";
 import type { ImportPreview, RankingSnapshot } from "../src/shared/types";
 
 function createDependencies() {
+  // biome-ignore lint/suspicious/noExplicitAny: 测试桩回调参数宽松
   const handlers = new Map<string, (...args: any[]) => unknown>();
   const register: RegisterHandler = (channel, callback) => {
     handlers.set(channel, callback);
   };
-  const workerRun = vi.fn(async () => ({
-    fileName: "sample.txt",
-    sourceType: "TXT",
-    detectedEncoding: "UTF-8",
-    chapters: [],
-    totalWords: 0,
-    warnings: [],
-  } satisfies ImportPreview));
+  const workerRun = vi.fn(
+    async () =>
+      ({
+        fileName: "sample.txt",
+        sourceType: "TXT",
+        detectedEncoding: "UTF-8",
+        chapters: [],
+        totalWords: 0,
+        warnings: [],
+      }) satisfies ImportPreview,
+  );
   const database = {
     deleteRankingSchedule: vi.fn(),
     getResearchBook: vi.fn(),
@@ -60,16 +61,18 @@ describe("research handlers", () => {
       source: "CSV 手动导入",
       listName: "测试榜",
       status: "成功",
-      entries: [{
-        rank: 1,
-        title: "城,市回声",
-        author: "林舟",
-        genre: "都市脑洞",
-        words: 12_000,
-        status: "连载",
-        tags: ["悬疑", "成长"],
-        sourceUrl: "https://example.com/book",
-      }],
+      entries: [
+        {
+          rank: 1,
+          title: "城,市回声",
+          author: "林舟",
+          genre: "都市脑洞",
+          words: 12_000,
+          status: "连载",
+          tags: ["悬疑", "成长"],
+          sourceUrl: "https://example.com/book",
+        },
+      ],
     });
     expect(snapshot.entries[0].snapshotId).toBe(snapshot.id);
     expect(database.saveRanking).toHaveBeenCalledWith(snapshot);
@@ -116,14 +119,9 @@ describe("research handlers", () => {
       warnings: [],
     } satisfies ImportPreview;
 
-    expect(() =>
-      handlers.get("importResearchBook")!(
-        preview,
-        "都市脑洞",
-        false,
-        false,
-      ),
-    ).toThrow("必须确认拥有材料的合法使用权");
+    expect(() => handlers.get("importResearchBook")!(preview, "都市脑洞", false, false)).toThrow(
+      "必须确认拥有材料的合法使用权",
+    );
     expect(database.saveResearchBook).not.toHaveBeenCalled();
   });
 
@@ -139,12 +137,7 @@ describe("research handlers", () => {
       warnings: [],
     } satisfies ImportPreview;
 
-    const imported = handlers.get("importResearchBook")!(
-      preview,
-      "都市脑洞",
-      true,
-      false,
-    );
+    const imported = handlers.get("importResearchBook")!(preview, "都市脑洞", true, false);
 
     expect(imported).toMatchObject({
       title: "sample",

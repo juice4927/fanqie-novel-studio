@@ -1,4 +1,7 @@
 import { LoaderCircle, ScanText } from "lucide-react";
+import { Badge, Button, Field, Modal, Select, Textarea } from "../components/UI";
+import { formatCount } from "../lib/format";
+import { estimateCjkTextTokens, TOKEN_ESTIMATE_WARNING } from "../shared/token-estimator";
 import type {
   AiSettings,
   Genre,
@@ -8,17 +11,10 @@ import type {
   ResearchBook,
 } from "../shared/types";
 import { GENRES } from "../shared/types";
-import { Badge, Button, Field, Modal, Select, Textarea } from "../components/UI";
-import { formatCount } from "../lib/format";
-import {
-  estimateCjkTextTokens,
-  TOKEN_ESTIMATE_WARNING,
-} from "../shared/token-estimator";
 import styles from "./ResearchPage.module.css";
 
 function splitPastedText(text: string): ImportPreview["chapters"] {
-  const pattern =
-    /^\s*(第[0-9零〇一二三四五六七八九十百千万两]+[章节回]\s*[^\n]{0,40})\s*$/gm;
+  const pattern = /^\s*(第[0-9零〇一二三四五六七八九十百千万两]+[章节回]\s*[^\n]{0,40})\s*$/gm;
   const matches = [...text.matchAll(pattern)];
   if (!matches.length) {
     return [
@@ -31,12 +27,7 @@ function splitPastedText(text: string): ImportPreview["chapters"] {
   }
   return matches
     .map((match, index) => {
-      const content = text
-        .slice(
-          (match.index ?? 0) + match[0].length,
-          matches[index + 1]?.index ?? text.length,
-        )
-        .trim();
+      const content = text.slice((match.index ?? 0) + match[0].length, matches[index + 1]?.index ?? text.length).trim();
       return {
         title: match[1],
         content,
@@ -77,10 +68,7 @@ function PublicSampleModal({
 }: PublicSampleModalProps) {
   if (!entry) return null;
   return (
-    <Modal
-      title="读取公开前10章并拆书"
-      onClose={() => !reading && onClose()}
-    >
+    <Modal title="读取公开前10章并拆书" onClose={() => !reading && onClose()}>
       <div className="form-stack">
         <div className={styles.sourcePreview}>
           <ScanText size={20} />
@@ -106,13 +94,7 @@ function PublicSampleModal({
           </Button>
           <Button
             disabled={reading}
-            icon={
-              reading ? (
-                <LoaderCircle className="spin" size={16} />
-              ) : (
-                <ScanText size={16} />
-              )
-            }
+            icon={reading ? <LoaderCircle className="spin" size={16} /> : <ScanText size={16} />}
             onClick={onImportAndDeconstruct}
           >
             {reading ? "正在读取" : "读取并拆书"}
@@ -131,32 +113,19 @@ interface PasteSampleModalProps {
   onPreview: (preview: ImportPreview) => void;
 }
 
-export function PasteSampleModal({
-  open,
-  text,
-  onTextChange,
-  onClose,
-  onPreview,
-}: PasteSampleModalProps) {
+export function PasteSampleModal({ open, text, onTextChange, onClose, onPreview }: PasteSampleModalProps) {
   if (!open) return null;
   return (
     <Modal title="粘贴样本文本" onClose={onClose}>
       <div className="form-stack">
         <Field label="样本文本">
-          <Textarea
-            rows={16}
-            value={text}
-            onChange={(event) => onTextChange(event.target.value)}
-          />
+          <Textarea rows={16} value={text} onChange={(event) => onTextChange(event.target.value)} />
         </Field>
         <div className="modal-actions">
           <Button variant="secondary" onClick={onClose}>
             取消
           </Button>
-          <Button
-            disabled={text.trim().length < 20}
-            onClick={() => onPreview(buildPastedPreview(text))}
-          >
+          <Button disabled={text.trim().length < 20} onClick={() => onPreview(buildPastedPreview(text))}>
             预览切章
           </Button>
         </div>
@@ -211,7 +180,7 @@ function ImportPreviewModal({
         ))}
         <div className="chapter-preview">
           {preview.chapters.slice(0, 8).map((chapter, index) => (
-            <div key={`${chapter.title}-${index}`}>
+            <div key={chapter.title}>
               <span>{index + 1}</span>
               <strong>{chapter.title}</strong>
               <small>{chapter.wordCount} 字</small>
@@ -220,10 +189,7 @@ function ImportPreviewModal({
         </div>
         <div className="form-grid">
           <Field label="题材">
-            <Select
-              value={genre}
-              onChange={(event) => onGenreChange(event.target.value as Genre)}
-            >
+            <Select value={genre} onChange={(event) => onGenreChange(event.target.value as Genre)}>
               {GENRES.map((item) => (
                 <option key={item}>{item}</option>
               ))}
@@ -234,9 +200,7 @@ function ImportPreviewModal({
           <input
             type="checkbox"
             checked={rightsConfirmed}
-            onChange={(event) =>
-              onRightsConfirmedChange(event.target.checked)
-            }
+            onChange={(event) => onRightsConfirmedChange(event.target.checked)}
           />
           <span>我确认拥有该材料的合法使用权</span>
         </label>
@@ -267,20 +231,14 @@ interface ResearchAnalysisModalProps {
   onClose: () => void;
 }
 
-function ResearchAnalysisModal({
-  book,
-  analyses,
-  onClose,
-}: ResearchAnalysisModalProps) {
+function ResearchAnalysisModal({ book, analyses, onClose }: ResearchAnalysisModalProps) {
   if (!book) return null;
   return (
     <Modal title={`${book.title} · 四层拆解证据`} onClose={onClose} width={820}>
       <div className={styles.analysisCounts}>
         {(["章节", "十章阶段", "分卷", "全书"] as const).map((layer) => (
           <div key={layer}>
-            <strong>
-              {analyses.filter((item) => item.layer === layer).length}
-            </strong>
+            <strong>{analyses.filter((item) => item.layer === layer).length}</strong>
             <span>{layer}</span>
           </div>
         ))}
@@ -292,15 +250,7 @@ function ResearchAnalysisModal({
             .map((item) => (
               <details key={item.id} open={item.layer === "全书"}>
                 <summary>
-                  <Badge
-                    tone={
-                      item.layer === "全书"
-                        ? "accent"
-                        : item.layer === "分卷"
-                          ? "success"
-                          : "neutral"
-                    }
-                  >
+                  <Badge tone={item.layer === "全书" ? "accent" : item.layer === "分卷" ? "success" : "neutral"}>
                     {item.layer}
                   </Badge>
                   <strong>
@@ -315,9 +265,7 @@ function ResearchAnalysisModal({
               </details>
             ))
         ) : (
-          <p className="muted-line">
-            浏览器预览不包含原始研究记录；桌面版拆解后会显示完整证据层。
-          </p>
+          <p className="muted-line">浏览器预览不包含原始研究记录；桌面版拆解后会显示完整证据层。</p>
         )}
       </div>
     </Modal>
@@ -331,18 +279,11 @@ interface CloudDeconstructModalProps {
   onConfirm: () => void;
 }
 
-function CloudDeconstructModal({
-  book,
-  aiSettings,
-  onClose,
-  onConfirm,
-}: CloudDeconstructModalProps) {
+function CloudDeconstructModal({ book, aiSettings, onClose, onConfirm }: CloudDeconstructModalProps) {
   if (!book || !aiSettings) return null;
   const inputTokens = estimateCjkTextTokens(book.wordCount);
   const outputTokens =
-    book.chapterCount * 500 +
-    Math.ceil(book.chapterCount / 10) * 900 +
-    Math.ceil(book.chapterCount / 100) * 1200;
+    book.chapterCount * 500 + Math.ceil(book.chapterCount / 10) * 900 + Math.ceil(book.chapterCount / 100) * 1200;
   const cost =
     (inputTokens / 1_000_000) * aiSettings.inputPricePerMillion +
     (outputTokens / 1_000_000) * aiSettings.outputPricePerMillion;
@@ -373,7 +314,8 @@ function CloudDeconstructModal({
         </div>
       </div>
       <p className="inline-warning">
-        {TOKEN_ESTIMATE_WARNING}。任务按章脱敏，分十章阶段、分卷和全书逐层汇总。实际用量由模型分词与输出长度决定，不设强制费用上限。
+        {TOKEN_ESTIMATE_WARNING}
+        。任务按章脱敏，分十章阶段、分卷和全书逐层汇总。实际用量由模型分词与输出长度决定，不设强制费用上限。
       </p>
       <div className="modal-actions">
         <Button variant="secondary" onClick={onClose}>

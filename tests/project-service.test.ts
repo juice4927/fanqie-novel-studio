@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  prepareProjectCreation,
-  prepareProjectUpdate,
-} from "../src/shared/project-service";
+import { prepareProjectCreation, prepareProjectUpdate } from "../src/shared/project-service";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 

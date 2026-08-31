@@ -1,39 +1,34 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type {
-  Chapter,
-  ChapterFactsExtractionEvent,
-  MetricSnapshot,
-  NovelRevisionProposal,
-} from "../src/shared/types";
-import { WorkspaceDatabase, now } from "./database";
-import { BackgroundWorker } from "./worker-client";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { compileProjectChapterContext } from "../src/shared/context-compiler";
+import {
+  applyContractRepairs,
+  applyTextRepair,
+  chapterRevisionSnapshot,
+  planRevisionSnapshot,
+  sameRevisionSnapshot,
+} from "../src/shared/novel-revision";
+import type { Chapter, ChapterFactsExtractionEvent, NovelRevisionProposal } from "../src/shared/types";
 import { AiService } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
-import { deleteApiCredential, readApiCredential, readAutoBackupCredential, writeApiCredential } from "./credential-store";
-import { compileProjectChapterContext } from "../src/shared/context-compiler";
-import { applyContractRepairs, applyTextRepair, chapterRevisionSnapshot, planRevisionSnapshot, sameRevisionSnapshot } from "../src/shared/novel-revision";
+import { type ChapterGenerationCoordinator, createChapterGenerationCoordinator } from "./chapter-generation-service";
 import {
-  createChapterGenerationCoordinator,
-  type ChapterGenerationCoordinator,
-} from "./chapter-generation-service";
+  deleteApiCredential,
+  readApiCredential,
+  readAutoBackupCredential,
+  writeApiCredential,
+} from "./credential-store";
+import { now, WorkspaceDatabase } from "./database";
+import { registerAiHandlers } from "./handlers/ai-handlers";
+import { registerProjectHandlers } from "./handlers/project-handlers";
+import { type ResearchHandlerRuntime, registerResearchHandlers } from "./handlers/research-handlers";
+import { registerSystemHandlers, type SystemHandlerRuntime } from "./handlers/system-handlers";
+import type { RegisterHandler } from "./handlers/types";
 import { validateIpcArgs } from "./ipc-validation";
 import { StructuredLogger } from "./structured-log";
 import { configureAutoUpdates } from "./update-service";
-import { registerAiHandlers } from "./handlers/ai-handlers";
-import {
-  registerProjectHandlers,
-} from "./handlers/project-handlers";
-import {
-  registerResearchHandlers,
-  type ResearchHandlerRuntime,
-} from "./handlers/research-handlers";
-import {
-  registerSystemHandlers,
-  type SystemHandlerRuntime,
-} from "./handlers/system-handlers";
-import type { RegisterHandler } from "./handlers/types";
+import { BackgroundWorker } from "./worker-client";
 
 let mainWindow: BrowserWindow | null = null;
 let database: WorkspaceDatabase;
@@ -46,33 +41,31 @@ let researchHandlers: ResearchHandlerRuntime;
 let autoBackupTimer: ReturnType<typeof setInterval> | null = null;
 let systemHandlers: SystemHandlerRuntime;
 let logger: StructuredLogger;
-const singleInstanceLockDisabled =
-  process.env.NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
-const hasSingleInstanceLock =
-  singleInstanceLockDisabled || app.requestSingleInstanceLock();
+const singleInstanceLockDisabled = process.env.NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
+const hasSingleInstanceLock = singleInstanceLockDisabled || app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) app.quit();
-else if (!singleInstanceLockDisabled) app.on("second-instance", () => {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-});
+else if (!singleInstanceLockDisabled)
+  app.on("second-instance", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
 
 function getApiKey() {
   return apiCredential;
 }
 
-async function extractFinalizedChapterFacts(
-  projectId: string,
-  chapter: Chapter,
-): Promise<ChapterFactsExtractionEvent> {
+async function extractFinalizedChapterFacts(projectId: string, chapter: Chapter): Promise<ChapterFactsExtractionEvent> {
   try {
     const project = database.getProjectOverview(projectId);
     const candidates = await ai.extractChapterFacts(project, chapter);
-    const existing = new Set(project.facts.map((fact) =>
-      `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`,
-    ));
+    const existing = new Set(
+      project.facts.map(
+        (fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`,
+      ),
+    );
     let candidateCount = 0;
     for (const fact of candidates) {
       const key = `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`;
@@ -96,15 +89,18 @@ async function extractFinalizedChapterFacts(
 function registerHandlers() {
   const handle: RegisterHandler = (channel, callback) =>
     ipcMain.handle(`studio:${channel}`, async (event, ...args) => {
-      if (!mainWindow || event.sender.id !== mainWindow.webContents.id)
-        throw new Error("拒绝来自非主窗口的调用");
+      if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error("拒绝来自非主窗口的调用");
       const startedAt = Date.now();
       try {
         const result = await callback(...validateIpcArgs(channel, args));
         logger.write("info", "ipc.completed", { channel, durationMs: Date.now() - startedAt });
         return result;
       } catch (error) {
-        logger.write("error", "ipc.failed", { channel, durationMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) });
+        logger.write("error", "ipc.failed", {
+          channel,
+          durationMs: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : String(error),
+        });
         throw error;
       }
     });
@@ -119,7 +115,7 @@ function registerHandlers() {
         properties: ["openFile"],
         filters: [{ name: "小说文档", extensions: ["txt", "epub", "docx"] }],
       });
-      return result.canceled ? null : result.filePaths[0] ?? null;
+      return result.canceled ? null : (result.filePaths[0] ?? null);
     },
   });
   systemHandlers = registerSystemHandlers({
@@ -142,7 +138,7 @@ function registerHandlers() {
         defaultPath: defaultFileName,
         filters: [{ name: "加密备份", extensions: ["novelbak"] }],
       });
-      return result.canceled ? null : result.filePath ?? null;
+      return result.canceled ? null : (result.filePath ?? null);
     },
     chooseBackupSource: async () => {
       if (!mainWindow) return null;
@@ -151,7 +147,7 @@ function registerHandlers() {
         properties: ["openFile"],
         filters: [{ name: "加密备份", extensions: ["novelbak"] }],
       });
-      return result.canceled ? null : result.filePaths[0] ?? null;
+      return result.canceled ? null : (result.filePaths[0] ?? null);
     },
     chooseDiagnosticDestination: async (defaultFileName) => {
       if (!mainWindow) return null;
@@ -160,7 +156,7 @@ function registerHandlers() {
         defaultPath: defaultFileName,
         filters: [{ name: "诊断包", extensions: ["zip"] }],
       });
-      return result.canceled ? null : result.filePath ?? null;
+      return result.canceled ? null : (result.filePath ?? null);
     },
     confirmDiagnosticExport: async () => {
       if (!mainWindow) return false;
@@ -182,7 +178,7 @@ function registerHandlers() {
         defaultPath: defaultFileName,
         filters: [{ name: format.toUpperCase(), extensions: [format] }],
       });
-      return result.canceled ? null : result.filePath ?? null;
+      return result.canceled ? null : (result.filePath ?? null);
     },
   });
   registerProjectHandlers({
@@ -206,8 +202,7 @@ function registerHandlers() {
     },
     previewChapterBatch: chapterGeneration.previewBatch,
     generateChapterBatch: chapterGeneration.generateBatch,
-    runLocalQualityCheck: (input) =>
-      worker.run("quality-check", input),
+    runLocalQualityCheck: (input) => worker.run("quality-check", input),
     createId: randomUUID,
     currentTimestamp: now,
     isGenerationActive: chapterGeneration.isActive,
@@ -226,18 +221,13 @@ function registerHandlers() {
       setImmediate(() => {
         void extractFinalizedChapterFacts(projectId, chapter).then((result) => {
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send(
-              "studio:chapter-facts-extracted",
-              result,
-            );
+            mainWindow.webContents.send("studio:chapter-facts-extracted", result);
           }
         });
       });
     },
-    startChapterRetry: (projectId, chapterId) =>
-      chapterGeneration.startOne(projectId, chapterId, undefined, "bypass"),
-    logRetryFailure: (details) =>
-      logger.write("error", "ai.retry.failed", { ...details }),
+    startChapterRetry: (projectId, chapterId) => chapterGeneration.startOne(projectId, chapterId, undefined, "bypass"),
+    logRetryFailure: (details) => logger.write("error", "ai.retry.failed", { ...details }),
   });
   handle("analyzeNovelRevision", (id, input) => ai.analyzeNovelRevision(database.getProject(id), input));
   handle("applyNovelRevision", (id, proposal: NovelRevisionProposal, selectedRepairIds: string[]) => {
@@ -268,7 +258,11 @@ function registerHandlers() {
     const chapterRepairs = proposal.chapterRepairs.filter((item) => selected.has(item.id));
     for (const repair of chapterRepairs) {
       const current = chaptersById.get(repair.targetId);
-      if (!current || current.revision !== repair.baseRevision || !sameRevisionSnapshot(chapterRevisionSnapshot(current), repair.before))
+      if (
+        !current ||
+        current.revision !== repair.baseRevision ||
+        !sameRevisionSnapshot(chapterRevisionSnapshot(current), repair.before)
+      )
         throw new Error(`${repair.location}已变化，请重新分析修改意见`);
     }
     if (proposal.textRepair && selected.has(proposal.textRepair.id)) {
@@ -278,25 +272,41 @@ function registerHandlers() {
     }
 
     const changeRequestIds: string[] = [];
-    const approveProtectedChange = (targetKind: "创作契约" | "规划" | "章节", targetId: string, title: string, before: unknown, after: unknown) => {
+    const approveProtectedChange = (
+      targetKind: "创作契约" | "规划" | "章节",
+      targetId: string,
+      title: string,
+      before: unknown,
+      after: unknown,
+    ) => {
       const change = database.saveChangeRequest(id, {
-        id: "", targetKind, targetId, baseVersion: 0, title,
-        reason: proposal.instruction, beforeValue: JSON.stringify(before), afterValue: JSON.stringify(after),
-        impact: proposal.summary, rollback: "从目标历史版本恢复本次修改前内容",
-        status: "待审批", createdAt: "",
+        id: "",
+        targetKind,
+        targetId,
+        baseVersion: 0,
+        title,
+        reason: proposal.instruction,
+        beforeValue: JSON.stringify(before),
+        afterValue: JSON.stringify(after),
+        impact: proposal.summary,
+        rollback: "从目标历史版本恢复本次修改前内容",
+        status: "待审批",
+        createdAt: "",
       });
       database.decideChangeRequest(id, change.id, "批准");
       changeRequestIds.push(change.id);
     };
     const appliedTargets: string[] = [];
     if (nextContract) {
-      if (project.contract.approved) approveProtectedChange("创作契约", "contract", "AI 修改意见联动创作设定", project.contract, nextContract);
+      if (project.contract.approved)
+        approveProtectedChange("创作契约", "contract", "AI 修改意见联动创作设定", project.contract, nextContract);
       database.saveContract(id, nextContract);
       appliedTargets.push("创作设定");
     }
     for (const repair of planRepairs) {
       const current = plansById.get(repair.targetId)!;
-      if (current.status === "已批准") approveProtectedChange("规划", current.id, `AI 修改意见联动：${current.title}`, repair.before, repair.after);
+      if (current.status === "已批准")
+        approveProtectedChange("规划", current.id, `AI 修改意见联动：${current.title}`, repair.before, repair.after);
       database.savePlan(id, { ...current, ...repair.after });
       appliedTargets.push(repair.location);
     }
@@ -307,7 +317,10 @@ function registerHandlers() {
     for (const chapterId of affectedChapterIds) {
       const current = chaptersById.get(chapterId)!;
       const metadata = chapterRepairs.find((item) => item.targetId === chapterId);
-      const text = proposal.textRepair?.targetId === chapterId && selected.has(proposal.textRepair.id) ? proposal.textRepair : null;
+      const text =
+        proposal.textRepair?.targetId === chapterId && selected.has(proposal.textRepair.id)
+          ? proposal.textRepair
+          : null;
       const next = {
         ...current,
         ...(metadata?.after ?? {}),
@@ -374,51 +387,53 @@ function createWindow() {
   mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
 }
 
-if (hasSingleInstanceLock) app.whenReady().then(async () => {
-  const workspaceRoot =
-    process.env.NOVEL_STUDIO_WORKSPACE ||
-    path.join(app.getPath("documents"), "长篇创作工作台数据");
-  try {
-    apiCredential = await readApiCredential();
-  } catch {
-    apiCredential = "";
-  }
-  database = new WorkspaceDatabase(workspaceRoot);
-  database.pruneAiJobHistory();
-  logger = new StructuredLogger(path.join(app.getPath("userData"), "logs"));
-  logger.write("info", "application.started", { version: app.getVersion(), workspace: workspaceRoot });
-  worker = new BackgroundWorker();
-  ai = new AiService(database, getApiKey, 120_000, 0, (level, event, data) => logger.write(level, event, data));
-  chapterGeneration = createChapterGenerationCoordinator({
-    database,
-    ai,
-    getApiKey,
-    compileContext: compileProjectChapterContext,
+if (hasSingleInstanceLock)
+  app.whenReady().then(async () => {
+    const workspaceRoot =
+      process.env.NOVEL_STUDIO_WORKSPACE || path.join(app.getPath("documents"), "长篇创作工作台数据");
+    try {
+      apiCredential = await readApiCredential();
+    } catch {
+      apiCredential = "";
+    }
+    database = new WorkspaceDatabase(workspaceRoot);
+    database.pruneAiJobHistory();
+    logger = new StructuredLogger(path.join(app.getPath("userData"), "logs"));
+    logger.write("info", "application.started", { version: app.getVersion(), workspace: workspaceRoot });
+    worker = new BackgroundWorker();
+    ai = new AiService(database, getApiKey, 120_000, 0, (level, event, data) => logger.write(level, event, data));
+    chapterGeneration = createChapterGenerationCoordinator({
+      database,
+      ai,
+      getApiKey,
+      compileContext: compileProjectChapterContext,
+    });
+    registerHandlers();
+    void researchHandlers.runDueRankingSchedules();
+    void systemHandlers.runAutomaticBackup();
+    rankingScheduleTimer = setInterval(() => void researchHandlers.runDueRankingSchedules(), 15 * 60 * 1000);
+    autoBackupTimer = setInterval(() => void systemHandlers.runAutomaticBackup(), 15 * 60 * 1000);
+    createWindow();
+    configureAutoUpdates(logger, async () => {
+      database.checkpointAll();
+      const password = await readAutoBackupCredential();
+      if (!password) throw new Error("自动更新前需要先在设置中保存自动备份密码");
+      await createEncryptedBackup(
+        database.root,
+        path.join(database.backupRoot, `pre-update-${app.getVersion()}.novelbak`),
+        password,
+      );
+    });
+    process.on("uncaughtException", (error) =>
+      logger.write("error", "process.uncaughtException", { error: error.message, stack: error.stack }),
+    );
+    process.on("unhandledRejection", (reason) =>
+      logger.write("error", "process.unhandledRejection", { error: String(reason) }),
+    );
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-  registerHandlers();
-  void researchHandlers.runDueRankingSchedules();
-  void systemHandlers.runAutomaticBackup();
-  rankingScheduleTimer = setInterval(
-    () => void researchHandlers.runDueRankingSchedules(),
-    15 * 60 * 1000,
-  );
-  autoBackupTimer = setInterval(
-    () => void systemHandlers.runAutomaticBackup(),
-    15 * 60 * 1000,
-  );
-  createWindow();
-  configureAutoUpdates(logger, async () => {
-    database.checkpointAll();
-    const password = await readAutoBackupCredential();
-    if (!password) throw new Error("自动更新前需要先在设置中保存自动备份密码");
-    await createEncryptedBackup(database.root, path.join(database.backupRoot, `pre-update-${app.getVersion()}.novelbak`), password);
-  });
-  process.on("uncaughtException", (error) => logger.write("error", "process.uncaughtException", { error: error.message, stack: error.stack }));
-  process.on("unhandledRejection", (reason) => logger.write("error", "process.unhandledRejection", { error: String(reason) }));
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
 
 app.on("window-all-closed", () => {
   if (rankingScheduleTimer) clearInterval(rankingScheduleTimer);

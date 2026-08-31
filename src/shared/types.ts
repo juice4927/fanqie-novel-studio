@@ -1,13 +1,6 @@
 import type { GenreComposition, NarrativeGenre } from "./genre-composition";
 
-export const GENRES = [
-  "都市脑洞",
-  "玄幻/仙侠",
-  "历史/架空",
-  "现言甜宠",
-  "古言宅斗",
-  "年代重生",
-] as const;
+export const GENRES = ["都市脑洞", "玄幻/仙侠", "历史/架空", "现言甜宠", "古言宅斗", "年代重生"] as const;
 
 export type Genre = (typeof GENRES)[number];
 export type ProjectStatus =
@@ -21,10 +14,21 @@ export type ProjectStatus =
   | "完结"
   | "归档";
 
-export type ChapterStatus =
-  "章纲" | "草稿" | "待质检" | "待定稿" | "已定稿" | "待发布" | "已发布";
+export type ChapterStatus = "章纲" | "草稿" | "待质检" | "待定稿" | "已定稿" | "待发布" | "已发布";
 
-export const CHAPTER_FUNCTIONS = ["行动", "调查", "关系", "经营", "训练", "生存", "群像", "氛围", "过渡", "揭秘", "高潮"] as const;
+export const CHAPTER_FUNCTIONS = [
+  "行动",
+  "调查",
+  "关系",
+  "经营",
+  "训练",
+  "生存",
+  "群像",
+  "氛围",
+  "过渡",
+  "揭秘",
+  "高潮",
+] as const;
 export type ChapterFunction = (typeof CHAPTER_FUNCTIONS)[number];
 
 export interface ProjectSummary {
@@ -634,7 +638,18 @@ export interface PlanningPlanRepair {
 
 export interface PlanningChapterRepair {
   targetId: string;
-  after: Pick<Chapter, "title" | "outline" | "chapterFunction" | "targetWords" | "chapterPromise" | "expectedPayoff" | "crisis" | "endingExpectation" | "expectationTargetChapter">;
+  after: Pick<
+    Chapter,
+    | "title"
+    | "outline"
+    | "chapterFunction"
+    | "targetWords"
+    | "chapterPromise"
+    | "expectedPayoff"
+    | "crisis"
+    | "endingExpectation"
+    | "expectationTargetChapter"
+  >;
   blockedReason: string | null;
 }
 
@@ -659,8 +674,18 @@ export interface PlanningRepairResult {
 }
 
 export const NOVEL_CONTRACT_FIELDS = [
-  "premise", "protagonistDesire", "protagonistArc", "readerPromise", "coreEmotion", "ending",
-  "worldRules", "keyRelationships", "majorForces", "timelineAnchors", "immutableRules", "prohibitedPatterns",
+  "premise",
+  "protagonistDesire",
+  "protagonistArc",
+  "readerPromise",
+  "coreEmotion",
+  "ending",
+  "worldRules",
+  "keyRelationships",
+  "majorForces",
+  "timelineAnchors",
+  "immutableRules",
+  "prohibitedPatterns",
 ] as const;
 
 export type NovelContractField = (typeof NOVEL_CONTRACT_FIELDS)[number];
@@ -696,7 +721,18 @@ export interface NovelContractRepair {
 }
 
 export type NovelPlanSnapshot = Pick<PlanNode, "title" | "goal" | "conflict" | "outcome" | "targetWords">;
-export type NovelChapterSnapshot = Pick<Chapter, "title" | "outline" | "chapterFunction" | "targetWords" | "chapterPromise" | "expectedPayoff" | "crisis" | "endingExpectation" | "expectationTargetChapter">;
+export type NovelChapterSnapshot = Pick<
+  Chapter,
+  | "title"
+  | "outline"
+  | "chapterFunction"
+  | "targetWords"
+  | "chapterPromise"
+  | "expectedPayoff"
+  | "crisis"
+  | "endingExpectation"
+  | "expectationTargetChapter"
+>;
 
 export interface NovelPlanRepair {
   id: string;
@@ -838,49 +874,36 @@ export interface AppApi {
   reviewPlanning(id: string, input: PlanningReviewInput): Promise<PlanningReviewResult>;
   applyPlanningRepairs(id: string, input: PlanningRepairInput): Promise<PlanningRepairResult>;
   analyzeNovelRevision(id: string, input: NovelRevisionInput): Promise<NovelRevisionProposal>;
-  applyNovelRevision(id: string, proposal: NovelRevisionProposal, selectedRepairIds: string[]): Promise<NovelRevisionApplyResult>;
+  applyNovelRevision(
+    id: string,
+    proposal: NovelRevisionProposal,
+    selectedRepairIds: string[],
+  ): Promise<NovelRevisionApplyResult>;
   saveChapter(id: string, chapter: Chapter, mode?: ChapterSaveMode): Promise<Chapter>;
-  saveExpectation(
-    id: string,
-    expectation: ExpectationEntry,
-  ): Promise<ExpectationEntry>;
-  transitionChapter(
-    id: string,
-    chapterId: string,
-    status: ChapterStatus,
-  ): Promise<ChapterTransitionResult>;
-  onChapterFactsExtracted(
-    listener: (event: ChapterFactsExtractionEvent) => void,
-  ): () => void;
+  saveExpectation(id: string, expectation: ExpectationEntry): Promise<ExpectationEntry>;
+  transitionChapter(id: string, chapterId: string, status: ChapterStatus): Promise<ChapterTransitionResult>;
+  onChapterFactsExtracted(listener: (event: ChapterFactsExtractionEvent) => void): () => void;
   compileContext(id: string, chapterId: string): Promise<ContextPackage>;
   searchProject(id: string, query: string, offset?: number, limit?: number): Promise<SearchHit[]>;
-  listRevisions(
-    id: string,
-    collection: RevisionRecord["collection"],
-    entityId: string,
-  ): Promise<RevisionRecord[]>;
+  listRevisions(id: string, collection: RevisionRecord["collection"], entityId: string): Promise<RevisionRecord[]>;
   restoreRevision(id: string, revisionId: string): Promise<void>;
   runQualityCheck(id: string, chapterId: string): Promise<QualityIssue[]>;
   reviseChapterFromQuality(id: string, chapterId: string): Promise<Chapter>;
   extractChapterFacts(id: string, chapterId: string): Promise<LedgerFact[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
-  resolveIssue(
-    id: string,
-    issueId: string,
-    status: QualityIssue["status"],
-  ): Promise<void>;
+  resolveIssue(id: string, issueId: string, status: QualityIssue["status"]): Promise<void>;
   saveChangeRequest(id: string, change: ChangeRequest): Promise<ChangeRequest>;
-  decideChangeRequest(
-    id: string,
-    changeId: string,
-    decision: "批准" | "拒绝",
-  ): Promise<void>;
+  decideChangeRequest(id: string, changeId: string, decision: "批准" | "拒绝"): Promise<void>;
   saveSchedule(id: string, item: ScheduleItem): Promise<ScheduleItem>;
   listRankings(): Promise<RankingSnapshot[]>;
   importRankingCsv(csvText: string, listName: string): Promise<RankingSnapshot>;
   capturePublicRanking(url: string, listName: string): Promise<RankingSnapshot>;
   listRankingSchedules(): Promise<RankingCaptureSchedule[]>;
-  saveRankingSchedule(input: Omit<RankingCaptureSchedule, "id" | "lastRunAt" | "nextRunAt" | "lastStatus" | "lastError"> & { id?: string }): Promise<RankingCaptureSchedule>;
+  saveRankingSchedule(
+    input: Omit<RankingCaptureSchedule, "id" | "lastRunAt" | "nextRunAt" | "lastStatus" | "lastError"> & {
+      id?: string;
+    },
+  ): Promise<RankingCaptureSchedule>;
   runRankingSchedule(id: string): Promise<RankingSnapshot>;
   deleteRankingSchedule(id: string): Promise<void>;
   getRankingAnalytics(): Promise<RankingAnalytics>;
@@ -892,15 +915,9 @@ export interface AppApi {
     rightsConfirmed: boolean,
     cloudConsent: boolean,
   ): Promise<ResearchBook>;
-  importPublicResearchSample(
-    sourceUrl: string,
-    genre: Genre,
-    cloudConsent: boolean,
-  ): Promise<ResearchBook>;
+  importPublicResearchSample(sourceUrl: string, genre: Genre, cloudConsent: boolean): Promise<ResearchBook>;
   listInsights(): Promise<InsightPack[]>;
-  createInsight(
-    input: Omit<InsightPack, "id" | "createdAt">,
-  ): Promise<InsightPack>;
+  createInsight(input: Omit<InsightPack, "id" | "createdAt">): Promise<InsightPack>;
   deconstructResearchBook(bookId: string): Promise<InsightPack>;
   listResearchAnalyses(bookId: string): Promise<ResearchAnalysisRecord[]>;
   attachInsights(id: string, insightIds: string[]): Promise<void>;
@@ -910,23 +927,14 @@ export interface AppApi {
     chapterId: string,
     onStream?: (event: ChapterDraftStreamEvent) => void,
   ): Promise<Chapter>;
-  previewChapterBatch(
-    id: string,
-    chapterId: string,
-  ): Promise<BatchGenerationPreview>;
+  previewChapterBatch(id: string, chapterId: string): Promise<BatchGenerationPreview>;
   generateChapterBatch(id: string, chapterId: string): Promise<Chapter[]>;
   getAiSettings(): Promise<AiSettings>;
-  saveAiSettings(
-    settings: Omit<AiSettings, "hasApiKey">,
-    apiKey?: string,
-  ): Promise<AiSettings>;
+  saveAiSettings(settings: Omit<AiSettings, "hasApiKey">, apiKey?: string): Promise<AiSettings>;
   listAiJobs(projectId?: string): Promise<AiJobRecord[]>;
   cancelAiJob(id: string): Promise<boolean>;
   retryAiJob(id: string): Promise<AiJobRecord>;
-  exportProject(
-    id: string,
-    format: "txt" | "md" | "docx",
-  ): Promise<string | null>;
+  exportProject(id: string, format: "txt" | "md" | "docx"): Promise<string | null>;
   importMetricsCsv(id: string, csvText: string): Promise<number>;
   getReviewSuggestions(id: string): Promise<ReviewSuggestion[]>;
   saveReviewExperiment(id: string, experiment: ReviewExperiment): Promise<ReviewExperiment>;

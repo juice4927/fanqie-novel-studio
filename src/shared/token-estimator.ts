@@ -26,10 +26,7 @@ export function estimateStructuredRequestTokens(
   textParts: readonly string[],
   overheadTokens = STRUCTURED_REQUEST_OVERHEAD_TOKENS,
 ) {
-  return Math.max(0, Math.ceil(overheadTokens)) + textParts.reduce(
-    (sum, part) => sum + estimateTextTokens(part),
-    0,
-  );
+  return Math.max(0, Math.ceil(overheadTokens)) + textParts.reduce((sum, part) => sum + estimateTextTokens(part), 0);
 }
 
 export function estimateChapterOutputTokens(targetCharacters: number) {

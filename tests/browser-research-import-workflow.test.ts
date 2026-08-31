@@ -31,9 +31,9 @@ describe("browser research import workflow", () => {
     const api = createBrowserApi();
     const booksBefore = await api.listResearchBooks();
 
-    await expect(
-      api.importResearchBook(preview, "都市脑洞", false, false),
-    ).rejects.toThrow("必须确认拥有材料的合法使用权");
+    await expect(api.importResearchBook(preview, "都市脑洞", false, false)).rejects.toThrow(
+      "必须确认拥有材料的合法使用权",
+    );
 
     expect(await api.listResearchBooks()).toEqual(booksBefore);
     expect(localStorage.setItem).not.toHaveBeenCalled();
@@ -42,12 +42,7 @@ describe("browser research import workflow", () => {
   it("keeps local usage rights independent from cloud consent", async () => {
     const api = createBrowserApi();
 
-    const imported = await api.importResearchBook(
-      preview,
-      "都市脑洞",
-      true,
-      false,
-    );
+    const imported = await api.importResearchBook(preview, "都市脑洞", true, false);
 
     expect(imported).toMatchObject({
       title: "sample",

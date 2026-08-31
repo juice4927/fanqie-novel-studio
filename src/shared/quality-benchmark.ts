@@ -59,13 +59,15 @@ export interface QualityBenchmarkSummary {
 }
 
 const compact = (value: string) => value.replace(/\s+/g, "").toLocaleLowerCase("zh-CN");
-const percentage = (numerator: number, denominator: number) => denominator ? numerator / denominator * 100 : 100;
-const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 100;
+const percentage = (numerator: number, denominator: number) => (denominator ? (numerator / denominator) * 100 : 100);
+const average = (values: number[]) =>
+  values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 100;
 
 function normalizeIssues(output: unknown): Array<Required<BenchmarkIssueInput>> {
-  const issues = output && typeof output === "object" && Array.isArray((output as { issues?: unknown }).issues)
-    ? (output as { issues: unknown[] }).issues
-    : [];
+  const issues =
+    output && typeof output === "object" && Array.isArray((output as { issues?: unknown }).issues)
+      ? (output as { issues: unknown[] }).issues
+      : [];
   return issues
     .filter((issue): issue is Record<string, unknown> => Boolean(issue) && typeof issue === "object")
     .map((issue) => ({
@@ -107,19 +109,32 @@ export function evaluateQualityBenchmark(
   const matchedCount = matches.length;
   const falsePositiveCount = unmatchedActual.size;
   const supportedMatches = matches.filter(({ actual: issue }) => evidenceIsSupported(fixture, String(issue.evidence)));
-  const unsupportedEvidenceCount = actual.filter((issue) => !evidenceIsSupported(fixture, String(issue.evidence))).length;
+  const unsupportedEvidenceCount = actual.filter(
+    (issue) => !evidenceIsSupported(fixture, String(issue.evidence)),
+  ).length;
   const correctSeverity = matches.filter(({ expected, actual: issue }) => issue.severity === expected.severity).length;
   const expectedHard = fixture.expectedIssues.filter((issue) => issue.severity === "硬性");
-  const matchedHard = expectedHard.filter((expected) => matches.some((match) => match.expected.id === expected.id && match.actual.severity === "硬性"));
-  const forbiddenHits = actual.filter((issue) => (fixture.forbiddenIssueTerms ?? []).some((term) => compact(`${issue.category}${issue.message}${issue.evidence}`).includes(compact(term))));
+  const matchedHard = expectedHard.filter((expected) =>
+    matches.some((match) => match.expected.id === expected.id && match.actual.severity === "硬性"),
+  );
+  const forbiddenHits = actual.filter((issue) =>
+    (fixture.forbiddenIssueTerms ?? []).some((term) =>
+      compact(`${issue.category}${issue.message}${issue.evidence}`).includes(compact(term)),
+    ),
+  );
 
   const issueRecall = percentage(matchedCount, fixture.expectedIssues.length);
   const precision = percentage(matchedCount, actual.length);
   const severityAccuracy = percentage(correctSeverity, matches.length);
   const evidenceAccuracy = percentage(supportedMatches.length, matches.length);
-  const falsePositiveControl = actual.length ? Math.max(0, 100 - falsePositiveCount / actual.length * 100) : 100;
+  const falsePositiveControl = actual.length ? Math.max(0, 100 - (falsePositiveCount / actual.length) * 100) : 100;
   const hardIssueRecall = percentage(matchedHard.length, expectedHard.length);
-  const totalScore = issueRecall * .35 + precision * .2 + severityAccuracy * .15 + evidenceAccuracy * .2 + falsePositiveControl * .1;
+  const totalScore =
+    issueRecall * 0.35 +
+    precision * 0.2 +
+    severityAccuracy * 0.15 +
+    evidenceAccuracy * 0.2 +
+    falsePositiveControl * 0.1;
   const failures: string[] = [];
 
   if (totalScore < minimumScore) failures.push(`总分 ${totalScore.toFixed(1)} 低于门槛 ${minimumScore}`);
@@ -146,7 +161,10 @@ export function evaluateQualityBenchmark(
   };
 }
 
-export function summarizeQualityBenchmark(scores: QualityBenchmarkScore[], minimumAverageScore = 90): QualityBenchmarkSummary {
+export function summarizeQualityBenchmark(
+  scores: QualityBenchmarkScore[],
+  minimumAverageScore = 90,
+): QualityBenchmarkSummary {
   const summary = {
     fixtureCount: scores.length,
     averageScore: average(scores.map((score) => score.totalScore)),
@@ -160,7 +178,11 @@ export function summarizeQualityBenchmark(scores: QualityBenchmarkScore[], minim
   };
   return {
     ...summary,
-    passed: scores.length > 0 && summary.averageScore >= minimumAverageScore && summary.hardIssueRecall === 100 && summary.failedFixtureIds.length === 0,
+    passed:
+      scores.length > 0 &&
+      summary.averageScore >= minimumAverageScore &&
+      summary.hardIssueRecall === 100 &&
+      summary.failedFixtureIds.length === 0,
   };
 }
 

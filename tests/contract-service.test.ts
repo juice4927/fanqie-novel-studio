@@ -9,9 +9,7 @@ import type { StoryContract } from "../src/shared/types";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 
-function createContract(
-  overrides: Partial<StoryContract> = {},
-): StoryContract {
+function createContract(overrides: Partial<StoryContract> = {}): StoryContract {
   return {
     premise: "主角追查旧城事故",
     protagonistDesire: "查明真相",
@@ -131,9 +129,7 @@ describe("contract workflow rules", () => {
       "主要势力（至少2个）",
       "时间锚点（至少3条）",
     ]);
-    expect(() => approveContractDraft(incomplete, "ignored")).toThrow(
-      "创作契约尚未补全",
-    );
+    expect(() => approveContractDraft(incomplete, "ignored")).toThrow("创作契约尚未补全");
   });
 
   it("approves a complete contract with the supplied timestamp", () => {

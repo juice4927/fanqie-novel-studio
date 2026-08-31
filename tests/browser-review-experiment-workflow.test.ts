@@ -4,9 +4,7 @@ import type { ReviewExperiment } from "../src/shared/types";
 
 const initialTime = "2026-07-31T00:00:00.000Z";
 
-function experiment(
-  overrides: Partial<ReviewExperiment> = {},
-): ReviewExperiment {
+function experiment(overrides: Partial<ReviewExperiment> = {}): ReviewExperiment {
   return {
     id: "",
     title: "调整回报类型",
@@ -52,10 +50,15 @@ describe("browser review experiment workflow", () => {
   it("enforces date ranges and updates project activity", async () => {
     const api = createBrowserApi();
     const [summary] = await api.listProjects();
-    await expect(api.saveReviewExperiment(summary.id, experiment({
-      observationStart: "2026-07-15",
-      observationEnd: "2026-07-14",
-    }))).rejects.toThrow("观察日期范围无效");
+    await expect(
+      api.saveReviewExperiment(
+        summary.id,
+        experiment({
+          observationStart: "2026-07-15",
+          observationEnd: "2026-07-14",
+        }),
+      ),
+    ).rejects.toThrow("观察日期范围无效");
 
     const updatedAt = "2026-08-05T01:00:00.000Z";
     vi.setSystemTime(updatedAt);

@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  registerAiHandlers,
-  type AiHandlerDependencies,
-} from "../electron/handlers/ai-handlers";
 import { serializeChapterAiRetryContext } from "../electron/ai-retry";
+import { type AiHandlerDependencies, registerAiHandlers } from "../electron/handlers/ai-handlers";
 import type { RegisterHandler } from "../electron/handlers/types";
 import type {
   AiJobRecord,
@@ -162,11 +159,7 @@ const insight = {
   createdAt: "2026-07-31T00:00:00.000Z",
 } satisfies InsightPack;
 
-function rankingSnapshot(
-  id: string,
-  capturedAt: string,
-  rank: number,
-): RankingSnapshot {
+function rankingSnapshot(id: string, capturedAt: string, rank: number): RankingSnapshot {
   return {
     id,
     source: "番茄小说官网",
@@ -196,9 +189,8 @@ const rankings = [
   rankingSnapshot("rank-new", "2026-07-30T00:00:00.000Z", 1),
 ];
 
-function createDependencies(
-  completion: Promise<Chapter> = new Promise(() => {}),
-) {
+function createDependencies(completion: Promise<Chapter> = new Promise(() => {})) {
+  // biome-ignore lint/suspicious/noExplicitAny: 测试桩回调参数宽松
   const handlers = new Map<string, (...args: any[]) => unknown>();
   const register: RegisterHandler = (channel, callback) => {
     if (handlers.has(channel)) throw new Error(`重复注册：${channel}`);
@@ -209,12 +201,8 @@ function createDependencies(
   const retryJob = job("retry");
   const database = {
     findOriginalityMatches: vi.fn(() => []),
-    getAiJob: vi.fn((id: string) =>
-      id === sourceJob.id ? sourceJob : id === retryJob.id ? retryJob : undefined,
-    ),
-    getAiJobRetryContext: vi.fn(() =>
-      serializeChapterAiRetryContext("chapter", "project-1", chapter),
-    ),
+    getAiJob: vi.fn((id: string) => (id === sourceJob.id ? sourceJob : id === retryJob.id ? retryJob : undefined)),
+    getAiJobRetryContext: vi.fn(() => serializeChapterAiRetryContext("chapter", "project-1", chapter)),
     getAiSettings: vi.fn(() => ({ ...settings, hasApiKey: false })),
     getChapter: vi.fn(() => chapter),
     getInsights: vi.fn(() => [insight]),
@@ -273,9 +261,7 @@ function createDependencies(
   const createId = vi.fn(() => `generated-${++idSequence}`);
   const currentTimestamp = vi.fn(() => "2026-07-31T01:00:00.000Z");
   const activeProjects = new Set<string>();
-  const isGenerationActive = vi.fn((projectId: string) =>
-    activeProjects.has(projectId),
-  );
+  const isGenerationActive = vi.fn((projectId: string) => activeProjects.has(projectId));
   const markGenerationActive = vi.fn((projectId: string) => {
     activeProjects.add(projectId);
   });
@@ -294,9 +280,7 @@ function createDependencies(
       reviewPlanning: vi.fn(),
       reviseChapter: vi.fn(),
     },
-    compileContext: vi.fn(
-      () => ({ estimatedTokens: 123 }) as ContextPackage,
-    ),
+    compileContext: vi.fn(() => ({ estimatedTokens: 123 }) as ContextPackage),
     generateChapterDraft,
     sendChapterDraftStream,
     previewChapterBatch,
@@ -367,23 +351,13 @@ describe("AI handlers", () => {
   });
 
   it("merges local quality results with semantic fallback and advances drafts", async () => {
-    const {
-      dependencies,
-      handlers,
-      database,
-      ai,
-      saveApiKey,
-      runLocalQualityCheck,
-    } = createDependencies();
+    const { dependencies, handlers, database, ai, saveApiKey, runLocalQualityCheck } = createDependencies();
     database.getProject.mockReturnValue(qualityProject);
     ai.reviewChapter.mockRejectedValue(new Error("cloud unavailable"));
     await saveApiKey("secret");
     registerAiHandlers(dependencies);
 
-    const issues = await handlers.get("runQualityCheck")!(
-      "project-1",
-      qualityChapter.id,
-    );
+    const issues = await handlers.get("runQualityCheck")!("project-1", qualityChapter.id);
 
     expect(runLocalQualityCheck).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -402,44 +376,21 @@ describe("AI handlers", () => {
         evidence: "cloud unavailable",
       }),
     ]);
-    expect(database.saveIssues).toHaveBeenCalledWith(
-      "project-1",
-      qualityChapter.id,
-      issues,
-    );
-    expect(database.transitionChapter).toHaveBeenCalledWith(
-      "project-1",
-      qualityChapter.id,
-      "待质检",
-    );
+    expect(database.saveIssues).toHaveBeenCalledWith("project-1", qualityChapter.id, issues);
+    expect(database.transitionChapter).toHaveBeenCalledWith("project-1", qualityChapter.id, "待质检");
   });
 
   it("holds and releases the project generation lock while revising quality issues", async () => {
-    const {
-      dependencies,
-      handlers,
-      database,
-      ai,
-      markGenerationActive,
-      markGenerationIdle,
-    } = createDependencies();
+    const { dependencies, handlers, database, ai, markGenerationActive, markGenerationIdle } = createDependencies();
     database.getProject.mockReturnValue(qualityProject);
     const revised = { ...qualityChapter, content: "修订后的正文" };
     ai.reviseChapter.mockResolvedValue(revised);
     registerAiHandlers(dependencies);
 
-    await expect(
-      handlers.get("reviseChapterFromQuality")!(
-        "project-1",
-        qualityChapter.id,
-      ),
-    ).resolves.toEqual(revised);
+    await expect(handlers.get("reviseChapterFromQuality")!("project-1", qualityChapter.id)).resolves.toEqual(revised);
 
     expect(markGenerationActive).toHaveBeenCalledWith("project-1");
-    expect(database.saveGeneratedChapter).toHaveBeenCalledWith(
-      "project-1",
-      revised,
-    );
+    expect(database.saveGeneratedChapter).toHaveBeenCalledWith("project-1", revised);
     expect(markGenerationIdle).toHaveBeenCalledWith("project-1");
     expect(markGenerationActive.mock.invocationCallOrder[0]).toBeLessThan(
       markGenerationIdle.mock.invocationCallOrder[0],
@@ -458,64 +409,34 @@ describe("AI handlers", () => {
     } = createDependencies();
     registerAiHandlers(dependencies);
 
-    await expect(
-      handlers.get("generateChapterDraft")!(
-        "project-1",
-        chapter.id,
-        "stream-1",
-      ),
-    ).resolves.toBe(chapter);
-    expect(generateChapterDraft).toHaveBeenCalledWith(
-      "project-1",
-      chapter.id,
-      expect.any(Function),
-    );
+    await expect(handlers.get("generateChapterDraft")!("project-1", chapter.id, "stream-1")).resolves.toBe(chapter);
+    expect(generateChapterDraft).toHaveBeenCalledWith("project-1", chapter.id, expect.any(Function));
     expect(sendChapterDraftStream).toHaveBeenCalledWith("stream-1", {
       type: "delta",
       attempt: 1,
       delta: "生成片段",
     });
 
-    expect(
-      handlers.get("previewChapterBatch")!("project-1", chapter.id),
-    ).toBe(batchPreview);
-    expect(previewChapterBatch).toHaveBeenCalledWith(
-      planningProject,
-      { ...settings, hasApiKey: false },
-      chapter.id,
-    );
-    await expect(
-      handlers.get("generateChapterBatch")!("project-1", chapter.id),
-    ).resolves.toEqual([chapter]);
-    expect(generateChapterBatch).toHaveBeenCalledWith(
-      "project-1",
-      chapter.id,
-    );
+    expect(handlers.get("previewChapterBatch")!("project-1", chapter.id)).toBe(batchPreview);
+    expect(previewChapterBatch).toHaveBeenCalledWith(planningProject, { ...settings, hasApiKey: false }, chapter.id);
+    await expect(handlers.get("generateChapterBatch")!("project-1", chapter.id)).resolves.toEqual([chapter]);
+    expect(generateChapterBatch).toHaveBeenCalledWith("project-1", chapter.id);
   });
 
   it("returns chapter transitions immediately and queues finalized fact extraction", async () => {
-    const {
-      dependencies,
-      handlers,
-      saveApiKey,
-      queueFinalizedFactExtraction,
-    } = createDependencies();
+    const { dependencies, handlers, saveApiKey, queueFinalizedFactExtraction } = createDependencies();
     registerAiHandlers(dependencies);
 
-    expect(
-      handlers.get("transitionChapter")!("project-1", chapter.id, "草稿"),
-    ).toMatchObject({ ledgerExtraction: { status: "不适用" } });
-    expect(
-      handlers.get("transitionChapter")!("project-1", chapter.id, "已定稿"),
-    ).toMatchObject({ ledgerExtraction: { status: "未配置" } });
+    expect(handlers.get("transitionChapter")!("project-1", chapter.id, "草稿")).toMatchObject({
+      ledgerExtraction: { status: "不适用" },
+    });
+    expect(handlers.get("transitionChapter")!("project-1", chapter.id, "已定稿")).toMatchObject({
+      ledgerExtraction: { status: "未配置" },
+    });
     expect(queueFinalizedFactExtraction).not.toHaveBeenCalled();
 
     await saveApiKey("secret");
-    const finalized = handlers.get("transitionChapter")!(
-      "project-1",
-      chapter.id,
-      "已定稿",
-    );
+    const finalized = handlers.get("transitionChapter")!("project-1", chapter.id, "已定稿");
 
     expect(finalized).toMatchObject({
       chapter: { id: chapter.id, status: "已定稿" },
@@ -528,8 +449,7 @@ describe("AI handlers", () => {
   });
 
   it("compiles chapter context with relevant facts from the database", () => {
-    const { dependencies, handlers, database, compileContext } =
-      createDependencies();
+    const { dependencies, handlers, database, compileContext } = createDependencies();
     registerAiHandlers(dependencies);
 
     expect(handlers.get("compileContext")!("project-1", chapter.id)).toEqual({
@@ -542,25 +462,18 @@ describe("AI handlers", () => {
       `${chapter.title} ${chapter.outline}`,
       chapter.number,
     );
-    expect(compileContext).toHaveBeenCalledWith(
-      planningProject,
-      chapter,
-      [existingFact],
-    );
+    expect(compileContext).toHaveBeenCalledWith(planningProject, chapter, [existingFact]);
   });
 
   it("rejects context compilation when the chapter is missing", () => {
-    const { dependencies, handlers, database, compileContext } =
-      createDependencies();
+    const { dependencies, handlers, database, compileContext } = createDependencies();
     database.getProject.mockReturnValue({
       ...planningProject,
       chapters: [],
     });
     registerAiHandlers(dependencies);
 
-    expect(() =>
-      handlers.get("compileContext")!("project-1", "missing-chapter"),
-    ).toThrow("章节不存在");
+    expect(() => handlers.get("compileContext")!("project-1", "missing-chapter")).toThrow("章节不存在");
     expect(database.searchRelevantFacts).not.toHaveBeenCalled();
     expect(compileContext).not.toHaveBeenCalled();
   });
@@ -570,14 +483,9 @@ describe("AI handlers", () => {
     database.getChapter.mockReturnValue({ ...chapter, content: " \n\t" });
     registerAiHandlers(dependencies);
 
-    await expect(
-      handlers.get("extractChapterFacts")!("project-1", chapter.id),
-    ).rejects.toThrow("章节还没有正文");
+    await expect(handlers.get("extractChapterFacts")!("project-1", chapter.id)).rejects.toThrow("章节还没有正文");
     expect(database.getProjectOverview).toHaveBeenCalledWith("project-1");
-    expect(database.getChapter).toHaveBeenCalledWith(
-      "project-1",
-      chapter.id,
-    );
+    expect(database.getChapter).toHaveBeenCalledWith("project-1", chapter.id);
     expect(database.searchRelevantFacts).not.toHaveBeenCalled();
     expect(ai.extractChapterFacts).not.toHaveBeenCalled();
     expect(database.saveFact).not.toHaveBeenCalled();
@@ -619,24 +527,16 @@ describe("AI handlers", () => {
       { ...newFact, id: "fact-duplicate" },
     ]);
 
-    await expect(
-      handlers.get("extractChapterFacts")!("project-1", chapter.id),
-    ).resolves.toEqual([savedFact]);
+    await expect(handlers.get("extractChapterFacts")!("project-1", chapter.id)).resolves.toEqual([savedFact]);
     expect(database.getProjectOverview).toHaveBeenCalledWith("project-1");
-    expect(database.getChapter).toHaveBeenCalledWith(
-      "project-1",
-      chapter.id,
-    );
+    expect(database.getChapter).toHaveBeenCalledWith("project-1", chapter.id);
     expect(database.searchRelevantFacts).toHaveBeenCalledWith(
       "project-1",
       `${chapter.title}\n${chapter.outline}\n${"甲".repeat(4_000)}`,
       chapter.number,
       40,
     );
-    expect(ai.extractChapterFacts).toHaveBeenCalledWith(
-      { ...projectOverview, facts: [existingFact] },
-      contentChapter,
-    );
+    expect(ai.extractChapterFacts).toHaveBeenCalledWith({ ...projectOverview, facts: [existingFact] }, contentChapter);
     expect(database.saveFact).toHaveBeenCalledTimes(1);
     expect(database.saveFact).toHaveBeenCalledWith("project-1", newFact);
     expect(database.getProject).not.toHaveBeenCalled();
@@ -672,33 +572,25 @@ describe("AI handlers", () => {
       title: "新章纲",
     };
     const generatedPlan = { ...plan, id: "plan-3", title: "新粗纲" };
-    ai.generatePlanning.mockImplementation(
-      async (_project, input, onChapterBatch) => {
-        expect(input).toEqual({
-          mode: "后续章纲",
-          chapterCount: 10,
-          fromChapter: 3,
-        });
-        const batch = {
-          startChapter: 3,
-          plans: [generatedPlan],
-          chapters: [generatedChapter],
-        };
-        await onChapterBatch?.(batch);
-        return batch;
-      },
-    );
+    ai.generatePlanning.mockImplementation(async (_project, input, onChapterBatch) => {
+      expect(input).toEqual({
+        mode: "后续章纲",
+        chapterCount: 10,
+        fromChapter: 3,
+      });
+      const batch = {
+        startChapter: 3,
+        plans: [generatedPlan],
+        chapters: [generatedChapter],
+      };
+      await onChapterBatch?.(batch);
+      return batch;
+    });
 
-    const result = await handlers.get("generatePlanningDraft")!(
-      "project-1",
-      { mode: "后续章纲", chapterCount: 10 },
-    );
+    const result = await handlers.get("generatePlanningDraft")!("project-1", { mode: "后续章纲", chapterCount: 10 });
 
     expect(database.savePlan).toHaveBeenCalledWith("project-1", generatedPlan);
-    expect(database.saveChapter).toHaveBeenCalledWith(
-      "project-1",
-      generatedChapter,
-    );
+    expect(database.saveChapter).toHaveBeenCalledWith("project-1", generatedChapter);
     expect(result).toEqual({
       startChapter: 3,
       plans: [generatedPlan],
@@ -763,9 +655,7 @@ describe("AI handlers", () => {
         batchMode: chapter.batchMode,
       }),
     );
-    expect(database.saveChapter.mock.calls[0][1]).not.toHaveProperty(
-      "chapterFunction",
-    );
+    expect(database.saveChapter.mock.calls[0][1]).not.toHaveProperty("chapterFunction");
     expect(result).toEqual({
       appliedPlanIds: [plan.id],
       appliedChapterIds: [chapter.id],
@@ -773,8 +663,7 @@ describe("AI handlers", () => {
   });
 
   it("persists a supplied credential before reporting masked settings", async () => {
-    const { dependencies, handlers, database, saveApiKey } =
-      createDependencies();
+    const { dependencies, handlers, database, saveApiKey } = createDependencies();
     registerAiHandlers(dependencies);
 
     expect(handlers.get("getAiSettings")!()).toMatchObject({
@@ -811,18 +700,10 @@ describe("AI handlers", () => {
 
   it("returns the new retry job immediately and logs later failure", async () => {
     const completion = Promise.reject(new Error("retry failed"));
-    const {
-      dependencies,
-      handlers,
-      startChapterRetry,
-      logRetryFailure,
-      retryJob,
-    } = createDependencies(completion);
+    const { dependencies, handlers, startChapterRetry, logRetryFailure, retryJob } = createDependencies(completion);
     registerAiHandlers(dependencies);
 
-    await expect(handlers.get("retryAiJob")!("source")).resolves.toBe(
-      retryJob,
-    );
+    await expect(handlers.get("retryAiJob")!("source")).resolves.toBe(retryJob);
     expect(startChapterRetry).toHaveBeenCalledWith("project-1", "chapter-2");
     await Promise.resolve();
     expect(logRetryFailure).toHaveBeenCalledWith({

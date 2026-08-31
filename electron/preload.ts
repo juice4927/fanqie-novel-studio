@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppApi, ChapterDraftStreamEvent, ChapterFactsExtractionEvent } from "../src/shared/types";
 
-const invoke = <T>(channel: string, ...args: unknown[]) => ipcRenderer.invoke(`studio:${channel}`, ...args) as Promise<T>;
+const invoke = <T>(channel: string, ...args: unknown[]) =>
+  ipcRenderer.invoke(`studio:${channel}`, ...args) as Promise<T>;
 
 const api: AppApi = {
   getDashboard: () => invoke("getDashboard"),
@@ -22,7 +23,8 @@ const api: AppApi = {
   reviewPlanning: (id, input) => invoke("reviewPlanning", id, input),
   applyPlanningRepairs: (id, input) => invoke("applyPlanningRepairs", id, input),
   analyzeNovelRevision: (id, input) => invoke("analyzeNovelRevision", id, input),
-  applyNovelRevision: (id, proposal, selectedRepairIds) => invoke("applyNovelRevision", id, proposal, selectedRepairIds),
+  applyNovelRevision: (id, proposal, selectedRepairIds) =>
+    invoke("applyNovelRevision", id, proposal, selectedRepairIds),
   saveChapter: (id, chapter, mode) => invoke("saveChapter", id, chapter, mode),
   saveExpectation: (id, expectation) => invoke("saveExpectation", id, expectation),
   transitionChapter: (id, chapterId, status) => invoke("transitionChapter", id, chapterId, status),
@@ -53,8 +55,10 @@ const api: AppApi = {
   getRankingAnalytics: () => invoke("getRankingAnalytics"),
   listResearchBooks: () => invoke("listResearchBooks"),
   previewResearchFile: () => invoke("previewResearchFile"),
-  importResearchBook: (preview, genre, rightsConfirmed, cloudConsent) => invoke("importResearchBook", preview, genre, rightsConfirmed, cloudConsent),
-  importPublicResearchSample: (sourceUrl, genre, cloudConsent) => invoke("importPublicResearchSample", sourceUrl, genre, cloudConsent),
+  importResearchBook: (preview, genre, rightsConfirmed, cloudConsent) =>
+    invoke("importResearchBook", preview, genre, rightsConfirmed, cloudConsent),
+  importPublicResearchSample: (sourceUrl, genre, cloudConsent) =>
+    invoke("importPublicResearchSample", sourceUrl, genre, cloudConsent),
   listInsights: () => invoke("listInsights"),
   createInsight: (input) => invoke("createInsight", input),
   deconstructResearchBook: (bookId) => invoke("deconstructResearchBook", bookId),
@@ -63,7 +67,10 @@ const api: AppApi = {
   generateConcepts: (id) => invoke("generateConcepts", id),
   generateChapterDraft: async (id, chapterId, onStream) => {
     const streamId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const listener = (_event: Electron.IpcRendererEvent, payload: { streamId: string; event: ChapterDraftStreamEvent }) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { streamId: string; event: ChapterDraftStreamEvent },
+    ) => {
       if (payload.streamId === streamId) onStream?.(payload.event);
     };
     ipcRenderer.on("studio:chapter-draft-stream", listener);

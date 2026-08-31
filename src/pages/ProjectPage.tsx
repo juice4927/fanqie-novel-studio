@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   BookMarked,
@@ -11,33 +10,21 @@ import {
   NotebookTabs,
   SearchCheck,
 } from "lucide-react";
-import type {
-  AppApi,
-  InsightPack,
-  ProjectDetail,
-  ProjectStatus,
-} from "../shared/types";
-import { GENRE_PLUGINS } from "../shared/genre-plugins";
+import { useCallback, useEffect, useState } from "react";
 import { Select } from "../components/UI";
-import { PlanningPage } from "./PlanningWorkspace";
-import { WritingPage } from "./WritingWorkspace";
+import { GENRE_PLUGINS } from "../shared/genre-plugins";
+import type { AppApi, InsightPack, ProjectDetail, ProjectStatus } from "../shared/types";
 import { LedgerPage } from "./LedgerWorkspace";
-import { QualityPage } from "./QualityWorkspace";
-import { PublishingPage } from "./PublishingWorkspace";
+import { PlanningPage } from "./PlanningWorkspace";
 import { ProjectDashboard } from "./ProjectDashboard";
+import styles from "./ProjectPage.module.css";
+import { PublishingPage } from "./PublishingWorkspace";
+import { QualityPage } from "./QualityWorkspace";
 import { ReviewPage } from "./ReviewWorkspace";
 import { StoryBiblePage } from "./StoryBibleWorkspace";
-import styles from "./ProjectPage.module.css";
+import { WritingPage } from "./WritingWorkspace";
 
-type ProjectTab =
-  | "驾驶舱"
-  | "故事圣经"
-  | "规划台"
-  | "写作台"
-  | "状态账本"
-  | "质检中心"
-  | "发布日历"
-  | "数据复盘";
+type ProjectTab = "驾驶舱" | "故事圣经" | "规划台" | "写作台" | "状态账本" | "质检中心" | "发布日历" | "数据复盘";
 const TABS: Array<{ id: ProjectTab; icon: typeof BookMarked }> = [
   { id: "驾驶舱", icon: BookMarked },
   { id: "故事圣经", icon: NotebookTabs },
@@ -69,19 +56,16 @@ export function ProjectPage({
   const [writingDirty, setWritingDirty] = useState(false);
   const confirmLeaveWriting = () => !writingDirty || window.confirm("当前章节还有未保存内容，确定离开写作台吗？");
 
-  const reload = async () => {
-    const [detail, allInsights] = await Promise.all([
-      api.getProject(projectId),
-      api.listInsights(),
-    ]);
+  const reload = useCallback(async () => {
+    const [detail, allInsights] = await Promise.all([api.getProject(projectId), api.listInsights()]);
     setProject(detail);
     setInsights(allInsights);
     setLoading(false);
-  };
+  }, [api, projectId]);
   useEffect(() => {
     setLoading(true);
     void reload();
-  }, [projectId]);
+  }, [reload]);
 
   if (loading || !project)
     return (
@@ -94,37 +78,38 @@ export function ProjectPage({
   return (
     <div className={styles.shell}>
       <aside className={styles.subnav}>
-        <button className={styles.backLink} onClick={() => { if (confirmLeaveWriting()) onBack(); }}>
+        <button
+          type="button"
+          className={styles.backLink}
+          onClick={() => {
+            if (confirmLeaveWriting()) onBack();
+          }}
+        >
           <ArrowLeft size={16} />
           返回多书总览
         </button>
         <div className={styles.identity}>
-          <div className={styles.avatar}>
-            {project.summary.title.slice(0, 1)}
-          </div>
+          <div className={styles.avatar}>{project.summary.title.slice(0, 1)}</div>
           <strong>{project.summary.title}</strong>
           <span>{project.summary.genre}</span>
         </div>
         <nav className={styles.nav}>
           {TABS.map((item) => (
             <button
+              type="button"
               key={item.id}
               className={`${styles.navButton}${tab === item.id ? ` ${styles.active}` : ""}`}
-              onClick={() => { if (item.id === tab || confirmLeaveWriting()) setTab(item.id); }}
+              onClick={() => {
+                if (item.id === tab || confirmLeaveWriting()) setTab(item.id);
+              }}
             >
               <item.icon size={17} />
               {item.id}
-              {item.id === "质检中心" &&
-                project.issues.filter((issue) => issue.status === "待处理")
-                  .length > 0 && (
-                  <i className={styles.issueCount}>
-                    {
-                      project.issues.filter(
-                        (issue) => issue.status === "待处理",
-                      ).length
-                    }
-                  </i>
-                )}
+              {item.id === "质检中心" && project.issues.filter((issue) => issue.status === "待处理").length > 0 && (
+                <i className={styles.issueCount}>
+                  {project.issues.filter((issue) => issue.status === "待处理").length}
+                </i>
+              )}
             </button>
           ))}
         </nav>
@@ -143,19 +128,11 @@ export function ProjectPage({
               }
             }}
           >
-            {[
-              "研究中",
-              "候选立项",
-              "设定中",
-              "大纲审批",
-              "连载准备",
-              "连载中",
-              "暂停",
-              "完结",
-              "归档",
-            ].map((status) => (
-              <option key={status}>{status}</option>
-            ))}
+            {["研究中", "候选立项", "设定中", "大纲审批", "连载准备", "连载中", "暂停", "完结", "归档"].map(
+              (status) => (
+                <option key={status}>{status}</option>
+              ),
+            )}
           </Select>
         </div>
       </aside>
@@ -168,66 +145,20 @@ export function ProjectPage({
             api={api}
             reload={reload}
             notify={notify}
-            onNavigate={(next) => { if (confirmLeaveWriting()) setTab(next); }}
+            onNavigate={(next) => {
+              if (confirmLeaveWriting()) setTab(next);
+            }}
           />
         )}
-        {tab === "故事圣经" && (
-          <StoryBiblePage
-            project={project}
-            api={api}
-            reload={reload}
-            notify={notify}
-          />
-        )}
-        {tab === "规划台" && (
-          <PlanningPage
-            project={project}
-            api={api}
-            reload={reload}
-            notify={notify}
-          />
-        )}
+        {tab === "故事圣经" && <StoryBiblePage project={project} api={api} reload={reload} notify={notify} />}
+        {tab === "规划台" && <PlanningPage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "写作台" && (
-          <WritingPage
-            project={project}
-            api={api}
-            reload={reload}
-            notify={notify}
-            onDirtyChange={setWritingDirty}
-          />
+          <WritingPage project={project} api={api} reload={reload} notify={notify} onDirtyChange={setWritingDirty} />
         )}
-        {tab === "状态账本" && (
-          <LedgerPage
-            project={project}
-            api={api}
-            reload={reload}
-            notify={notify}
-          />
-        )}
-        {tab === "质检中心" && (
-          <QualityPage
-            project={project}
-            api={api}
-            reload={reload}
-            notify={notify}
-          />
-        )}
-        {tab === "发布日历" && (
-          <PublishingPage
-            project={project}
-            api={api}
-            reload={reload}
-            notify={notify}
-          />
-        )}
-        {tab === "数据复盘" && (
-          <ReviewPage
-            project={project}
-            api={api}
-            reload={reload}
-            notify={notify}
-          />
-        )}
+        {tab === "状态账本" && <LedgerPage project={project} api={api} reload={reload} notify={notify} />}
+        {tab === "质检中心" && <QualityPage project={project} api={api} reload={reload} notify={notify} />}
+        {tab === "发布日历" && <PublishingPage project={project} api={api} reload={reload} notify={notify} />}
+        {tab === "数据复盘" && <ReviewPage project={project} api={api} reload={reload} notify={notify} />}
       </main>
     </div>
   );

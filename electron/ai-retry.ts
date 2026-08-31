@@ -67,19 +67,14 @@ export function validateChapterAiRetrySource(
     throw new Error("该任务的重试上下文已损坏，请返回原操作重试");
   }
   const result = ChapterAiRetryContextSchema.safeParse(parsed);
-  if (!result.success)
-    throw new Error("该任务使用旧版或无效的重试上下文，请返回原操作重试");
-  if (sourceJob.projectId !== result.data.projectId)
-    throw new Error("AI 任务与重试项目不匹配，请返回原操作重试");
+  if (!result.success) throw new Error("该任务使用旧版或无效的重试上下文，请返回原操作重试");
+  if (sourceJob.projectId !== result.data.projectId) throw new Error("AI 任务与重试项目不匹配，请返回原操作重试");
   return result.data;
 }
 
 export function assertChapterRetrySnapshot(context: ChapterAiRetryContext, chapter: Chapter) {
   if (chapter.id !== context.chapterId) throw new Error("重试目标章节不匹配");
-  if (
-    chapter.revision !== context.revision ||
-    chapterGenerationFingerprint(chapter) !== context.fingerprint
-  ) {
+  if (chapter.revision !== context.revision || chapterGenerationFingerprint(chapter) !== context.fingerprint) {
     throw new Error("该章节自任务失败后已被修改，为避免覆盖新版本，请从章节工作区重新生成");
   }
 }

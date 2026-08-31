@@ -7,19 +7,9 @@ import {
   localDayEndExclusive,
   visibleProjectSummaries,
 } from "../src/shared/dashboard-policy";
-import type {
-  ProjectDetail,
-  ProjectStatus,
-  ProjectSummary,
-  QualityIssue,
-  ScheduleItem,
-} from "../src/shared/types";
+import type { ProjectDetail, ProjectStatus, ProjectSummary, QualityIssue, ScheduleItem } from "../src/shared/types";
 
-function projectSummary(
-  id: string,
-  status: ProjectStatus,
-  overrides: Partial<ProjectSummary> = {},
-): ProjectSummary {
+function projectSummary(id: string, status: ProjectStatus, overrides: Partial<ProjectSummary> = {}): ProjectSummary {
   return {
     id,
     title: id,
@@ -38,11 +28,7 @@ function projectSummary(
   };
 }
 
-function schedule(
-  id: string,
-  publishAt: string,
-  status: ScheduleItem["status"] = "待发布",
-): ScheduleItem {
+function schedule(id: string, publishAt: string, status: ScheduleItem["status"] = "待发布"): ScheduleItem {
   return {
     id,
     projectId: "project",
@@ -69,11 +55,7 @@ function issue(id: string, createdAt: string): QualityIssue {
   };
 }
 
-function detail(
-  summary: ProjectSummary,
-  schedules: ScheduleItem[],
-  issues: QualityIssue[],
-): ProjectDetail {
+function detail(summary: ProjectSummary, schedules: ScheduleItem[], issues: QualityIssue[]): ProjectDetail {
   return { summary, schedule: schedules, issues } as ProjectDetail;
 }
 
@@ -86,20 +68,25 @@ describe("dashboard policy", () => {
     const tomorrow = new Date(2026, 7, 1, 0).toISOString();
     expect(cutoff).toBe(tomorrow);
 
-    const activity = collectDashboardActivity([
-      detail(projectSummary("visible", "连载中"), [
-        schedule("overdue", overdue),
-        schedule("offset-earlier", "2026-07-31T09:00:00+08:00"),
-        schedule("utc-later", "2026-07-31T02:00:00.000Z"),
-        schedule("same-b", todayLate),
-        schedule("same-a", todayLate),
-        schedule("tomorrow", tomorrow),
-        schedule("published", overdue, "已发布"),
-      ], []),
-      detail(projectSummary("archived", "归档"), [
-        schedule("archived", overdue),
-      ], []),
-    ], cutoff);
+    const activity = collectDashboardActivity(
+      [
+        detail(
+          projectSummary("visible", "连载中"),
+          [
+            schedule("overdue", overdue),
+            schedule("offset-earlier", "2026-07-31T09:00:00+08:00"),
+            schedule("utc-later", "2026-07-31T02:00:00.000Z"),
+            schedule("same-b", todayLate),
+            schedule("same-a", todayLate),
+            schedule("tomorrow", tomorrow),
+            schedule("published", overdue, "已发布"),
+          ],
+          [],
+        ),
+        detail(projectSummary("archived", "归档"), [schedule("archived", overdue)], []),
+      ],
+      cutoff,
+    );
 
     expect(activity.dueToday.map((item) => item.id)).toEqual([
       "overdue",
@@ -122,9 +109,7 @@ describe("dashboard policy", () => {
       "完结",
       "归档",
     ];
-    const projects = statuses.map((status, index) =>
-      projectSummary(`project-${index}`, status),
-    );
+    const projects = statuses.map((status, index) => projectSummary(`project-${index}`, status));
 
     const dashboard = assembleDashboard(projects, {
       dueToday: [],
@@ -138,23 +123,25 @@ describe("dashboard policy", () => {
       totalWords: 800,
       stockChapters: 8,
     });
-    expect(visibleProjectSummaries([
-      projectSummary("b", "研究中"),
-      projectSummary("a", "研究中"),
-    ]).map((project) => project.id)).toEqual(["a", "b"]);
+    expect(
+      visibleProjectSummaries([projectSummary("b", "研究中"), projectSummary("a", "研究中")]).map(
+        (project) => project.id,
+      ),
+    ).toEqual(["a", "b"]);
   });
 
   it("limits visible alerts without changing the pending issue count", () => {
     const issues = Array.from({ length: 15 }, (_, index) =>
-      issue(`issue-${String(index).padStart(2, "0")}`, new Date(
-        Date.UTC(2026, 6, 31, 0, index),
-      ).toISOString()),
+      issue(`issue-${String(index).padStart(2, "0")}`, new Date(Date.UTC(2026, 6, 31, 0, index)).toISOString()),
     );
     const archivedIssue = issue("archived", "2026-08-01T00:00:00.000Z");
-    const activity = collectDashboardActivity([
-      detail(projectSummary("visible", "连载中"), [], issues),
-      detail(projectSummary("archived", "归档"), [], [archivedIssue]),
-    ], "2026-08-01T00:00:00.000Z");
+    const activity = collectDashboardActivity(
+      [
+        detail(projectSummary("visible", "连载中"), [], issues),
+        detail(projectSummary("archived", "归档"), [], [archivedIssue]),
+      ],
+      "2026-08-01T00:00:00.000Z",
+    );
 
     expect(activity.pendingIssues).toBe(15);
     expect(activity.activeAlerts).toHaveLength(12);
@@ -163,32 +150,35 @@ describe("dashboard policy", () => {
   });
 
   it("warns about low stock only while serializing, with hard issues taking precedence", () => {
-    expect(deriveProjectRisk({
-      status: "连载准备",
-      stockChapters: 0,
-      safeStockLine: 10,
-      pendingHardIssues: 0,
-    })).toBe("正常");
-    expect(deriveProjectRisk({
-      status: "连载中",
-      stockChapters: 0,
-      safeStockLine: 10,
-      pendingHardIssues: 0,
-    })).toBe("注意");
-    expect(deriveProjectRisk({
-      status: "暂停",
-      stockChapters: 20,
-      safeStockLine: 10,
-      pendingHardIssues: 1,
-    })).toBe("告警");
+    expect(
+      deriveProjectRisk({
+        status: "连载准备",
+        stockChapters: 0,
+        safeStockLine: 10,
+        pendingHardIssues: 0,
+      }),
+    ).toBe("正常");
+    expect(
+      deriveProjectRisk({
+        status: "连载中",
+        stockChapters: 0,
+        safeStockLine: 10,
+        pendingHardIssues: 0,
+      }),
+    ).toBe("注意");
+    expect(
+      deriveProjectRisk({
+        status: "暂停",
+        stockChapters: 20,
+        safeStockLine: 10,
+        pendingHardIssues: 1,
+      }),
+    ).toBe("告警");
   });
 
   it("requires absolute ISO timestamps at schedule and dashboard boundaries", () => {
-    expect(() => assertSchedulePublishAt("2026-07-31T20:00:00"))
-      .toThrow("带时区");
-    expect(() => assertSchedulePublishAt("2026-07-31T20:00:00+08:00"))
-      .not.toThrow();
-    expect(() => collectDashboardActivity([], "invalid"))
-      .toThrow("仪表盘截止时间无效");
+    expect(() => assertSchedulePublishAt("2026-07-31T20:00:00")).toThrow("带时区");
+    expect(() => assertSchedulePublishAt("2026-07-31T20:00:00+08:00")).not.toThrow();
+    expect(() => collectDashboardActivity([], "invalid")).toThrow("仪表盘截止时间无效");
   });
 });

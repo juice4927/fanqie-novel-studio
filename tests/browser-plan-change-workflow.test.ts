@@ -48,9 +48,9 @@ describe("browser plan and change workflow", () => {
 
     const first = await api.saveChangeRequest(summary.id, changeRequest(plan.id));
     expect(first.baseVersion).toBe(2);
-    const persisted = JSON.parse(
-      vi.mocked(localStorage.setItem).mock.calls.at(-1)![1],
-    ) as { planVersions?: Record<string, number> };
+    const persisted = JSON.parse(vi.mocked(localStorage.setItem).mock.calls.at(-1)![1]) as {
+      planVersions?: Record<string, number>;
+    };
     delete persisted.planVersions;
     vi.stubGlobal("localStorage", {
       getItem: vi.fn(() => JSON.stringify(persisted)),
@@ -61,10 +61,7 @@ describe("browser plan and change workflow", () => {
       length: 1,
     });
     const migratedApi = createBrowserApi();
-    expect((await migratedApi.saveChangeRequest(
-      summary.id,
-      changeRequest(plan.id),
-    )).baseVersion).toBe(2);
+    expect((await migratedApi.saveChangeRequest(summary.id, changeRequest(plan.id))).baseVersion).toBe(2);
 
     await api.decideChangeRequest(summary.id, first.id, "批准");
     const edited = await api.savePlan(summary.id, {
@@ -72,9 +69,7 @@ describe("browser plan and change workflow", () => {
       goal: "建立并验证能力规则",
     });
     expect(edited.status).toBe("待审批");
-    expect((await api.getProject(summary.id)).changes.find(
-      (item) => item.id === first.id,
-    )?.status).toBe("已应用");
+    expect((await api.getProject(summary.id)).changes.find((item) => item.id === first.id)?.status).toBe("已应用");
 
     const second = await api.saveChangeRequest(summary.id, changeRequest(plan.id));
     expect(second.baseVersion).toBe(3);
@@ -86,15 +81,15 @@ describe("browser plan and change workflow", () => {
   it("rejects invalid targets and missing decisions", async () => {
     const api = createBrowserApi();
     const [summary] = await api.listProjects();
-    await expect(api.saveChangeRequest(summary.id, {
-      ...changeRequest("forged"),
-      targetKind: "创作契约",
-    })).rejects.toThrow("创作契约目标无效");
     await expect(
-      api.saveChangeRequest(summary.id, changeRequest("missing-plan")),
-    ).rejects.toThrow("变更目标规划不存在");
-    await expect(
-      api.decideChangeRequest(summary.id, "missing-change", "批准"),
-    ).rejects.toThrow("变更单不存在");
+      api.saveChangeRequest(summary.id, {
+        ...changeRequest("forged"),
+        targetKind: "创作契约",
+      }),
+    ).rejects.toThrow("创作契约目标无效");
+    await expect(api.saveChangeRequest(summary.id, changeRequest("missing-plan"))).rejects.toThrow(
+      "变更目标规划不存在",
+    );
+    await expect(api.decideChangeRequest(summary.id, "missing-change", "批准")).rejects.toThrow("变更单不存在");
   });
 });

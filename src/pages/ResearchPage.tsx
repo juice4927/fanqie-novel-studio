@@ -1,11 +1,7 @@
-import { useEffect, useState } from "react";
-import {
-  ClipboardPaste,
-  FileInput,
-  Link2,
-  Clock3,
-  Upload,
-} from "lucide-react";
+import { ClipboardPaste, Clock3, FileInput, Link2, Upload } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Button, Segmented } from "../components/UI";
+import { FANQIE_CATEGORY_PROFILES } from "../shared/fanqie-taxonomy";
 import type {
   AiSettings,
   AppApi,
@@ -13,27 +9,25 @@ import type {
   ImportPreview,
   InsightPack,
   RankingAnalytics,
+  RankingCaptureSchedule,
   RankingEntry,
   RankingSnapshot,
-  RankingCaptureSchedule,
   ResearchAnalysisRecord,
   ResearchBook,
 } from "../shared/types";
 import { GENRES } from "../shared/types";
-import { Button, Segmented } from "../components/UI";
-import { FANQIE_CATEGORY_PROFILES } from "../shared/fanqie-taxonomy";
 import { ResearchBooksView } from "./ResearchBooksView";
 import { ResearchInsightsView } from "./ResearchInsightsView";
 import { ResearchKnowledgeView } from "./ResearchKnowledgeView";
+import styles from "./ResearchPage.module.css";
 import {
   FANQIE_CATEGORIES,
-  ResearchRankingModals,
   type FanqieGender,
   type FanqieRankKind,
+  ResearchRankingModals,
 } from "./ResearchRankingModals";
 import { ResearchRankingView } from "./ResearchRankingView";
 import { ResearchSampleModals } from "./ResearchSampleModals";
-import styles from "./ResearchPage.module.css";
 
 type ResearchTab = "榜单快照" | "样本拆书" | "脱敏洞察" | "商业知识";
 
@@ -72,18 +66,13 @@ export function ResearchPage({
   const [readingPublicSample, setReadingPublicSample] = useState(false);
   const [analysisBook, setAnalysisBook] = useState<ResearchBook | null>(null);
   const [analyses, setAnalyses] = useState<ResearchAnalysisRecord[]>([]);
-  const [pendingDeconstruct, setPendingDeconstruct] =
-    useState<ResearchBook | null>(null);
+  const [pendingDeconstruct, setPendingDeconstruct] = useState<ResearchBook | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
   const fanqieCategories = FANQIE_CATEGORIES[fanqieGender];
   const fanqieCategory = fanqieCategories.find(([id]) => id === fanqieCategoryId) ?? fanqieCategories[0];
   const publicUrl = `https://fanqienovel.com/rank/${fanqieGender === "男频" ? 1 : 0}_${fanqieRankKind === "阅读榜" ? 2 : 1}_${fanqieCategory[0]}`;
 
-  const selectFanqieRanking = (
-    gender: FanqieGender,
-    kind: FanqieRankKind,
-    categoryId: string,
-  ) => {
+  const selectFanqieRanking = (gender: FanqieGender, kind: FanqieRankKind, categoryId: string) => {
     const categories = FANQIE_CATEGORIES[gender];
     const category = categories.find(([id]) => id === categoryId) ?? categories[0];
     setFanqieGender(gender);
@@ -92,24 +81,23 @@ export function ResearchPage({
     setRankingName(`番茄${gender}${kind}·${category[1]}`);
   };
 
-  const reload = async () => {
-    const [rankingData, rankingAnalytics, bookData, insightData, schedules] =
-      await Promise.all([
-        api.listRankings(),
-        api.getRankingAnalytics(),
-        api.listResearchBooks(),
-        api.listInsights(),
-        api.listRankingSchedules(),
-      ]);
+  const reload = useCallback(async () => {
+    const [rankingData, rankingAnalytics, bookData, insightData, schedules] = await Promise.all([
+      api.listRankings(),
+      api.getRankingAnalytics(),
+      api.listResearchBooks(),
+      api.listInsights(),
+      api.listRankingSchedules(),
+    ]);
     setRankings(rankingData);
     setAnalytics(rankingAnalytics);
     setBooks(bookData);
     setInsights(insightData);
     setRankingSchedules(schedules);
-  };
+  }, [api]);
   useEffect(() => {
     void reload();
-  }, []);
+  }, [reload]);
 
   const chooseFile = async () => {
     try {
@@ -228,10 +216,7 @@ export function ResearchPage({
     }
   };
 
-  const toggleRankingSchedule = async (
-    schedule: RankingCaptureSchedule,
-    enabled: boolean,
-  ) => {
+  const toggleRankingSchedule = async (schedule: RankingCaptureSchedule, enabled: boolean) => {
     try {
       await api.saveRankingSchedule({
         id: schedule.id,
@@ -275,43 +260,24 @@ export function ResearchPage({
         </div>
       </header>
       <div className="toolbar-row">
-        <Segmented
-          options={["榜单快照", "样本拆书", "脱敏洞察", "商业知识"] as const}
-          value={tab}
-          onChange={setTab}
-        />
+        <Segmented options={["榜单快照", "样本拆书", "脱敏洞察", "商业知识"] as const} value={tab} onChange={setTab} />
         <div className={styles.toolbarActions}>
           {tab === "榜单快照" && (
             <>
-              <Button
-                variant="secondary"
-                icon={<Clock3 size={17} />}
-                onClick={() => setScheduleModal(true)}
-              >
+              <Button variant="secondary" icon={<Clock3 size={17} />} onClick={() => setScheduleModal(true)}>
                 定时采榜
               </Button>
-              <Button
-                variant="secondary"
-                icon={<Link2 size={17} />}
-                onClick={() => setPublicModal(true)}
-              >
+              <Button variant="secondary" icon={<Link2 size={17} />} onClick={() => setPublicModal(true)}>
                 采集公开页
               </Button>
-              <Button
-                icon={<Upload size={17} />}
-                onClick={() => setRankingModal(true)}
-              >
+              <Button icon={<Upload size={17} />} onClick={() => setRankingModal(true)}>
                 导入榜单 CSV
               </Button>
             </>
           )}
           {tab === "样本拆书" && (
             <>
-              <Button
-                variant="secondary"
-                icon={<ClipboardPaste size={17} />}
-                onClick={() => setPasteModal(true)}
-              >
+              <Button variant="secondary" icon={<ClipboardPaste size={17} />} onClick={() => setPasteModal(true)}>
                 粘贴文本
               </Button>
               <Button icon={<FileInput size={17} />} onClick={chooseFile}>
@@ -345,7 +311,6 @@ export function ResearchPage({
       {tab === "脱敏洞察" && <ResearchInsightsView insights={insights} />}
       {tab === "商业知识" && <ResearchKnowledgeView />}
 
-
       <ResearchRankingModals
         importModal={{
           open: rankingModal,
@@ -377,8 +342,7 @@ export function ResearchPage({
           onFrequencyChange: setScheduleFrequency,
           onClose: () => setScheduleModal(false),
           onAdd: () => void addRankingSchedule(),
-          onToggle: (schedule, enabled) =>
-            void toggleRankingSchedule(schedule, enabled),
+          onToggle: (schedule, enabled) => void toggleRankingSchedule(schedule, enabled),
           onRun: (schedule) => void runRankingSchedule(schedule),
           onDelete: (schedule) => void deleteRankingSchedule(schedule),
         }}
@@ -390,8 +354,7 @@ export function ResearchPage({
           reading: readingPublicSample,
           onCloudConsentChange: setPublicSampleCloud,
           onClose: () => setPublicSampleEntry(null),
-          onImportAndDeconstruct: () =>
-            void importAndDeconstructPublicSample(),
+          onImportAndDeconstruct: () => void importAndDeconstructPublicSample(),
         }}
         pasteModal={{
           open: pasteModal,

@@ -4,12 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "../src/pages/SettingsPage";
-import type {
-  AiJobRecord,
-  AiSettings,
-  AppApi,
-  AutoBackupSettings,
-} from "../src/shared/types";
+import type { AiJobRecord, AiSettings, AppApi, AutoBackupSettings } from "../src/shared/types";
 
 const settings: AiSettings = {
   protocol: "openai-compatible",
@@ -35,11 +30,7 @@ const autoBackup: AutoBackupSettings = {
 
 afterEach(() => cleanup());
 
-function createJob(
-  id: string,
-  inputSummary: string,
-  overrides: Partial<AiJobRecord> = {},
-): AiJobRecord {
+function createJob(id: string, inputSummary: string, overrides: Partial<AiJobRecord> = {}): AiJobRecord {
   return {
     id,
     projectId: "project-1",
@@ -89,14 +80,16 @@ describe("settings AI task center", () => {
     await userEvent.type(screen.getByLabelText(/Anthropic API 密钥/), "sk-ant-test");
     await userEvent.click(screen.getByRole("button", { name: "保存模型设置" }));
 
-    await waitFor(() => expect(saveAiSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        protocol: "anthropic-messages",
-        baseUrl: "https://api.anthropic.com/v1",
-        model: "claude-current-model",
-      }),
-      "sk-ant-test",
-    ));
+    await waitFor(() =>
+      expect(saveAiSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          protocol: "anthropic-messages",
+          baseUrl: "https://api.anthropic.com/v1",
+          model: "claude-current-model",
+        }),
+        "sk-ant-test",
+      ),
+    );
     expect(notify).toHaveBeenCalledWith("模型设置已保存");
   });
 
@@ -134,19 +127,17 @@ describe("settings AI task center", () => {
     const sourceSummary = await screen.findByText("原失败任务");
     const sourceArticle = sourceSummary.closest("article");
     expect(sourceArticle).not.toBeNull();
-    await userEvent.click(
-      within(sourceArticle!).getByRole("button", { name: "重试" }),
-    );
+    await userEvent.click(within(sourceArticle!).getByRole("button", { name: "重试" }));
 
     expect(await screen.findByText("新重试任务")).toBeTruthy();
     expect(screen.getByText("原失败任务")).toBeTruthy();
     expect(screen.queryByText("旧重试记录")).toBeNull();
     expect(screen.getAllByText("新重试任务")).toHaveLength(1);
-    expect(
-      [...container.querySelectorAll(".ai-job-list strong")].map(
-        (element) => element.textContent,
-      ),
-    ).toEqual(["同时运行的更新任务", "新重试任务", "原失败任务"]);
+    expect([...container.querySelectorAll(".ai-job-list strong")].map((element) => element.textContent)).toEqual([
+      "同时运行的更新任务",
+      "新重试任务",
+      "原失败任务",
+    ]);
     expect(retryAiJob).toHaveBeenCalledWith("job-source");
     expect(listAiJobs).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith("AI 任务已重新开始");
@@ -168,13 +159,10 @@ describe("settings AI task center", () => {
     render(<SettingsPage api={api} notify={notify} />);
 
     await userEvent.click(
-      within((await screen.findByText("原失败任务")).closest("article")!)
-        .getByRole("button", { name: "重试" }),
+      within((await screen.findByText("原失败任务")).closest("article")!).getByRole("button", { name: "重试" }),
     );
 
-    await waitFor(() =>
-      expect(notify).toHaveBeenCalledWith("重试启动失败", "error"),
-    );
+    await waitFor(() => expect(notify).toHaveBeenCalledWith("重试启动失败", "error"));
     expect(screen.getByText("原失败任务")).toBeTruthy();
     expect(listAiJobs).toHaveBeenCalledTimes(1);
   });

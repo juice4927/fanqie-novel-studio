@@ -1,11 +1,10 @@
+import { Check, LoaderCircle, LockKeyhole, Save, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import {
-  Check,
-  LoaderCircle,
-  LockKeyhole,
-  Save,
-  Sparkles,
-} from "lucide-react";
+import { Badge, Button, Field, Input, Select, Textarea } from "../components/UI";
+import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
+import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
+import { GENRE_ELEMENT_GROUPS, NARRATIVE_GENRES } from "../shared/genre-composition";
+import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import type {
   AestheticProfile,
   AestheticProfileSuggestion,
@@ -13,24 +12,6 @@ import type {
   ProjectDetail,
   StoryContract,
 } from "../shared/types";
-import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
-import { GENRE_PLUGINS } from "../shared/genre-plugins";
-import {
-  FANQIE_CATEGORY_PROFILES,
-  getFanqieCategoryProfile,
-} from "../shared/fanqie-taxonomy";
-import {
-  GENRE_ELEMENT_GROUPS,
-  NARRATIVE_GENRES,
-} from "../shared/genre-composition";
-import {
-  Badge,
-  Button,
-  Field,
-  Input,
-  Select,
-  Textarea,
-} from "../components/UI";
 
 interface StoryBiblePageProps {
   project: ProjectDetail;
@@ -46,42 +27,41 @@ function splitLines(value: string) {
     .filter(Boolean);
 }
 
+const normalizeContract = (value: StoryContract): StoryContract => ({
+  ...value,
+  secondaryGenres: value.secondaryGenres ?? [],
+  genreElements: value.genreElements ?? [],
+  customGenreDirection: value.customGenreDirection ?? "",
+  audience: value.audience ?? "",
+  commercialHook: value.commercialHook ?? "",
+  openingMechanism: value.openingMechanism ?? "",
+  growthCarrier: value.growthCarrier ?? "",
+  primaryPayoff: value.primaryPayoff ?? "",
+  longFormEngine: value.longFormEngine ?? "",
+  protagonistArc: value.protagonistArc ?? "",
+  keyRelationships: value.keyRelationships ?? [],
+  worldRules: value.worldRules ?? [],
+  majorForces: value.majorForces ?? [],
+  timelineAnchors: value.timelineAnchors ?? [],
+  majorStateChanges: value.majorStateChanges ?? { include: [], exclude: [] },
+  aestheticProfile: normalizeAestheticProfile(value.aestheticProfile),
+});
+
 export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageProps) {
-  const normalizeContract = (value: StoryContract): StoryContract => ({
-    ...value,
-    secondaryGenres: value.secondaryGenres ?? [],
-    genreElements: value.genreElements ?? [],
-    customGenreDirection: value.customGenreDirection ?? "",
-    audience: value.audience ?? "",
-    commercialHook: value.commercialHook ?? "",
-    openingMechanism: value.openingMechanism ?? "",
-    growthCarrier: value.growthCarrier ?? "",
-    primaryPayoff: value.primaryPayoff ?? "",
-    longFormEngine: value.longFormEngine ?? "",
-    protagonistArc: value.protagonistArc ?? "",
-    keyRelationships: value.keyRelationships ?? [],
-    worldRules: value.worldRules ?? [],
-    majorForces: value.majorForces ?? [],
-    timelineAnchors: value.timelineAnchors ?? [],
-    majorStateChanges: value.majorStateChanges ?? { include: [], exclude: [] },
-    aestheticProfile: normalizeAestheticProfile(value.aestheticProfile),
-  });
   const [contract, setContract] = useState<StoryContract>(() => normalizeContract(project.contract));
   const [aestheticSuggestion, setAestheticSuggestion] = useState<AestheticProfileSuggestion | null>(null);
   const [optimizingAesthetic, setOptimizingAesthetic] = useState(false);
   useEffect(() => setContract(normalizeContract(project.contract)), [project.contract]);
   const set = (key: keyof StoryContract, value: string | string[]) =>
     setContract((current) => ({ ...current, [key]: value }));
-  const setAesthetic = <K extends keyof AestheticProfile,>(
-    key: K,
-    value: AestheticProfile[K],
-  ) => setContract((current) => ({
-    ...current,
-    aestheticProfile: {
-      ...normalizeAestheticProfile(current.aestheticProfile),
-      [key]: value,
-    },
-  }));
+  const setAesthetic = <K extends keyof AestheticProfile>(key: K, value: AestheticProfile[K]) =>
+    setContract((current) => ({
+      ...current,
+      aestheticProfile: {
+        ...normalizeAestheticProfile(current.aestheticProfile),
+        [key]: value,
+      },
+    }));
   const save = async () => {
     try {
       const previousVersion = contract.version;
@@ -89,11 +69,7 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
       setContract(saved);
       setAestheticSuggestion(null);
       await reload();
-      notify(
-        saved.version === previousVersion
-          ? "创作契约内容未变"
-          : `创作契约已保存为 v${saved.version}`,
-      );
+      notify(saved.version === previousVersion ? "创作契约内容未变" : `创作契约已保存为 v${saved.version}`);
     } catch (error) {
       notify(String(error), "error");
     }
@@ -126,9 +102,7 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
         </div>
         <div className="heading-actions">
           <Badge tone={contract.approved ? "success" : "warning"}>
-            {contract.approved
-              ? `已审批 · v${contract.version}`
-              : `待审批 · v${contract.version}`}
+            {contract.approved ? `已审批 · v${contract.version}` : `待审批 · v${contract.version}`}
           </Badge>
           <Button variant="secondary" icon={<Save size={16} />} onClick={save}>
             保存契约
@@ -142,10 +116,7 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
                 await reload();
                 notify("创作契约已锁定审批");
               } catch (error) {
-                notify(
-                  error instanceof Error ? error.message : String(error),
-                  "error",
-                );
+                notify(error instanceof Error ? error.message : String(error), "error");
               }
             }}
           >
@@ -154,10 +125,7 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
         </div>
       </header>
       <section className="section-band bible-form">
-        <Field
-          label="番茄目标分类"
-          hint="把番茄官方细分类映射到本项目的生成、规划与质检规则"
-        >
+        <Field label="番茄目标分类" hint="把番茄官方细分类映射到本项目的生成、规划与质检规则">
           <Select
             value={contract.fanqieCategoryKey ?? ""}
             onChange={(event) => {
@@ -166,34 +134,52 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
                 ...current,
                 fanqieCategoryKey: event.target.value,
                 genreSubtype: current.genreSubtype || profile?.recommendedSubtype || "",
-                secondaryGenres: current.secondaryGenres?.length ? current.secondaryGenres : profile?.narrativeGenres ?? [],
-                genreElements: current.genreElements?.length ? current.genreElements : profile?.genreElements ?? [],
+                secondaryGenres: current.secondaryGenres?.length
+                  ? current.secondaryGenres
+                  : (profile?.narrativeGenres ?? []),
+                genreElements: current.genreElements?.length ? current.genreElements : (profile?.genreElements ?? []),
               }));
             }}
           >
             <option value="">尚未选择</option>
             {(["男频", "女频"] as const).map((channel) => (
               <optgroup key={channel} label={channel}>
-                {compatibleFanqieCategories.filter((item) => item.channel === channel).map((profile) => (
-                  <option key={profile.key} value={profile.key}>{profile.name}</option>
-                ))}
+                {compatibleFanqieCategories
+                  .filter((item) => item.channel === channel)
+                  .map((profile) => (
+                    <option key={profile.key} value={profile.key}>
+                      {profile.name}
+                    </option>
+                  ))}
               </optgroup>
             ))}
           </Select>
         </Field>
         {selectedFanqieCategory && (
           <div className="fanqie-category-summary">
-            <div><span>核心幻想</span><strong>{selectedFanqieCategory.coreFantasy}</strong></div>
-            <div><span>目标读者</span><strong>{selectedFanqieCategory.audience}</strong></div>
-            <div><span>开篇抓手</span><strong>{selectedFanqieCategory.openingFocus}</strong></div>
-            <div><span>禁忌边界</span><strong>{selectedFanqieCategory.taboo}</strong></div>
-            <div><span>叙事主轴</span><strong>{selectedFanqieCategory.narrativeGenres.join(" + ")}</strong></div>
+            <div>
+              <span>核心幻想</span>
+              <strong>{selectedFanqieCategory.coreFantasy}</strong>
+            </div>
+            <div>
+              <span>目标读者</span>
+              <strong>{selectedFanqieCategory.audience}</strong>
+            </div>
+            <div>
+              <span>开篇抓手</span>
+              <strong>{selectedFanqieCategory.openingFocus}</strong>
+            </div>
+            <div>
+              <span>禁忌边界</span>
+              <strong>{selectedFanqieCategory.taboo}</strong>
+            </div>
+            <div>
+              <span>叙事主轴</span>
+              <strong>{selectedFanqieCategory.narrativeGenres.join(" + ")}</strong>
+            </div>
           </div>
         )}
-        <Field
-          label="题材子类型"
-          hint="可采用推荐项，也可输入更贴合作品的原创概括"
-        >
+        <Field label="题材子类型" hint="可采用推荐项，也可输入更贴合作品的原创概括">
           <Input
             list="genre-subtype-options"
             value={contract.genreSubtype ?? ""}
@@ -206,47 +192,93 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
             ))}
           </datalist>
         </Field>
-        {contract.genreSubtype &&
-          genrePlugin.subtypes.find(
-            (item) => item.name === contract.genreSubtype,
-          ) && (
-            <div className="subtype-summary">
-              {(() => {
-                const subtype = genrePlugin.subtypes.find(
-                  (item) => item.name === contract.genreSubtype,
-                )!;
-                return (
-                  <>
-                    <div>
-                      <span>核心幻想</span>
-                      <strong>{subtype.coreFantasy}</strong>
-                    </div>
-                    <div>
-                      <span>目标读者</span>
-                      <strong>{subtype.targetAudience}</strong>
-                    </div>
-                    <div>
-                      <span>禁忌边界</span>
-                      <strong>{subtype.tabooBoundary}</strong>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          )}
+        {contract.genreSubtype && genrePlugin.subtypes.find((item) => item.name === contract.genreSubtype) && (
+          <div className="subtype-summary">
+            {(() => {
+              const subtype = genrePlugin.subtypes.find((item) => item.name === contract.genreSubtype)!;
+              return (
+                <>
+                  <div>
+                    <span>核心幻想</span>
+                    <strong>{subtype.coreFantasy}</strong>
+                  </div>
+                  <div>
+                    <span>目标读者</span>
+                    <strong>{subtype.targetAudience}</strong>
+                  </div>
+                  <div>
+                    <span>禁忌边界</span>
+                    <strong>{subtype.tabooBoundary}</strong>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
         <div className="genre-composer contract-genre-composer">
           <Field label="复合叙事类型" hint="最多选择 3 项；只描述故事如何运转，不改变平台分类">
             <div className="genre-option-grid">
-              {NARRATIVE_GENRES.map((genre) => <label key={genre} className="check-row"><input type="checkbox" checked={contract.secondaryGenres?.includes(genre) ?? false} disabled={!(contract.secondaryGenres?.includes(genre)) && (contract.secondaryGenres?.length ?? 0) >= 3} onChange={() => setContract((current) => { const selected = current.secondaryGenres ?? []; return { ...current, secondaryGenres: selected.includes(genre) ? selected.filter((item) => item !== genre) : [...selected, genre] }; })} />{genre}</label>)}
+              {NARRATIVE_GENRES.map((genre) => (
+                <label key={genre} className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={contract.secondaryGenres?.includes(genre) ?? false}
+                    disabled={
+                      !contract.secondaryGenres?.includes(genre) && (contract.secondaryGenres?.length ?? 0) >= 3
+                    }
+                    onChange={() =>
+                      setContract((current) => {
+                        const selected = current.secondaryGenres ?? [];
+                        return {
+                          ...current,
+                          secondaryGenres: selected.includes(genre)
+                            ? selected.filter((item) => item !== genre)
+                            : [...selected, genre],
+                        };
+                      })
+                    }
+                  />
+                  {genre}
+                </label>
+              ))}
             </div>
           </Field>
-          {GENRE_ELEMENT_GROUPS.map((group) => <Field key={group.label} label={group.label} hint="按需选择，规则编译时不会要求全部同时出现">
-            <div className="genre-option-grid">
-              {group.elements.map((element) => <label key={element} className="check-row"><input type="checkbox" checked={contract.genreElements?.includes(element) ?? false} disabled={!(contract.genreElements?.includes(element)) && (contract.genreElements?.length ?? 0) >= 8} onChange={() => setContract((current) => { const selected = current.genreElements ?? []; return { ...current, genreElements: selected.includes(element) ? selected.filter((item) => item !== element) : [...selected, element] }; })} />{element}</label>)}
-            </div>
-          </Field>)}
+          {GENRE_ELEMENT_GROUPS.map((group) => (
+            <Field key={group.label} label={group.label} hint="按需选择，规则编译时不会要求全部同时出现">
+              <div className="genre-option-grid">
+                {group.elements.map((element) => (
+                  <label key={element} className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={contract.genreElements?.includes(element) ?? false}
+                      disabled={
+                        !contract.genreElements?.includes(element) && (contract.genreElements?.length ?? 0) >= 8
+                      }
+                      onChange={() =>
+                        setContract((current) => {
+                          const selected = current.genreElements ?? [];
+                          return {
+                            ...current,
+                            genreElements: selected.includes(element)
+                              ? selected.filter((item) => item !== element)
+                              : [...selected, element],
+                          };
+                        })
+                      }
+                    />
+                    {element}
+                  </label>
+                ))}
+              </div>
+            </Field>
+          ))}
           <Field label="自定义创作方向" hint="优先于题材惯例，用来写混合逻辑、反套路方向和明确边界">
-            <Textarea rows={3} value={contract.customGenreDirection ?? ""} onChange={(event) => set("customGenreDirection", event.target.value)} placeholder="例如：以基层医疗案件推动群像成长，不使用系统，不把恋爱作为主线" />
+            <Textarea
+              rows={3}
+              value={contract.customGenreDirection ?? ""}
+              onChange={(event) => set("customGenreDirection", event.target.value)}
+              placeholder="例如：以基层医疗案件推动群像成长，不使用系统，不把恋爱作为主线"
+            />
           </Field>
         </div>
         <div className="form-grid two">
@@ -298,22 +330,52 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
         </div>
         <div className="form-grid two">
           <Field label="目标读者">
-            <Textarea rows={3} value={contract.audience ?? ""} onChange={(event) => set("audience", event.target.value)} placeholder="谁会追读，以及他们最在意什么" />
+            <Textarea
+              rows={3}
+              value={contract.audience ?? ""}
+              onChange={(event) => set("audience", event.target.value)}
+              placeholder="谁会追读，以及他们最在意什么"
+            />
           </Field>
           <Field label="商业钩子">
-            <Textarea rows={3} value={contract.commercialHook ?? ""} onChange={(event) => set("commercialHook", event.target.value)} placeholder="一句话说明最容易被感知的独特卖点" />
+            <Textarea
+              rows={3}
+              value={contract.commercialHook ?? ""}
+              onChange={(event) => set("commercialHook", event.target.value)}
+              placeholder="一句话说明最容易被感知的独特卖点"
+            />
           </Field>
           <Field label="开局机制">
-            <Textarea rows={3} value={contract.openingMechanism ?? ""} onChange={(event) => set("openingMechanism", event.target.value)} placeholder="什么具体事件打破原有生活并迫使主角行动" />
+            <Textarea
+              rows={3}
+              value={contract.openingMechanism ?? ""}
+              onChange={(event) => set("openingMechanism", event.target.value)}
+              placeholder="什么具体事件打破原有生活并迫使主角行动"
+            />
           </Field>
           <Field label="成长载体">
-            <Textarea rows={3} value={contract.growthCarrier ?? ""} onChange={(event) => set("growthCarrier", event.target.value)} placeholder="能力、关系、认知、资源或事业如何积累" />
+            <Textarea
+              rows={3}
+              value={contract.growthCarrier ?? ""}
+              onChange={(event) => set("growthCarrier", event.target.value)}
+              placeholder="能力、关系、认知、资源或事业如何积累"
+            />
           </Field>
           <Field label="核心回报">
-            <Textarea rows={3} value={contract.primaryPayoff ?? ""} onChange={(event) => set("primaryPayoff", event.target.value)} placeholder="读者最主要看到什么状态改变" />
+            <Textarea
+              rows={3}
+              value={contract.primaryPayoff ?? ""}
+              onChange={(event) => set("primaryPayoff", event.target.value)}
+              placeholder="读者最主要看到什么状态改变"
+            />
           </Field>
           <Field label="长篇发动机">
-            <Textarea rows={3} value={contract.longFormEngine ?? ""} onChange={(event) => set("longFormEngine", event.target.value)} placeholder="至少三轮冲突、关系或世界范围如何变化" />
+            <Textarea
+              rows={3}
+              value={contract.longFormEngine ?? ""}
+              onChange={(event) => set("longFormEngine", event.target.value)}
+              placeholder="至少三轮冲突、关系或世界范围如何变化"
+            />
           </Field>
         </div>
         <div className="bible-subsection-heading">
@@ -323,17 +385,37 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
           </div>
         </div>
         <Field label="主角弧光">
-          <Textarea rows={3} value={contract.protagonistArc ?? ""} onChange={(event) => set("protagonistArc", event.target.value)} placeholder="起点认知、关键转变、代价与终局状态" />
+          <Textarea
+            rows={3}
+            value={contract.protagonistArc ?? ""}
+            onChange={(event) => set("protagonistArc", event.target.value)}
+            placeholder="起点认知、关键转变、代价与终局状态"
+          />
         </Field>
         <div className="form-grid two">
-          {([
-            ["keyRelationships", "关键关系", "每行一条：人物双方、初始张力与不可替代作用"],
-            ["worldRules", "世界规则", "每行一条：能力、职业、社会或超自然规则及边界"],
-            ["majorForces", "主要势力", "每行一条：势力目标、资源与冲突位置"],
-            ["timelineAnchors", "时间锚点", "每行一条：故事前史或未来必须发生的节点"],
-          ] as const).map(([key, label, placeholder]) => (
+          {(
+            [
+              ["keyRelationships", "关键关系", "每行一条：人物双方、初始张力与不可替代作用"],
+              ["worldRules", "世界规则", "每行一条：能力、职业、社会或超自然规则及边界"],
+              ["majorForces", "主要势力", "每行一条：势力目标、资源与冲突位置"],
+              ["timelineAnchors", "时间锚点", "每行一条：故事前史或未来必须发生的节点"],
+            ] as const
+          ).map(([key, label, placeholder]) => (
             <Field key={key} label={label} hint="每行一条">
-              <Textarea rows={4} value={(contract[key] ?? []).join("\n")} onChange={(event) => set(key, event.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} placeholder={placeholder} />
+              <Textarea
+                rows={4}
+                value={(contract[key] ?? []).join("\n")}
+                onChange={(event) =>
+                  set(
+                    key,
+                    event.target.value
+                      .split("\n")
+                      .map((item) => item.trim())
+                      .filter(Boolean),
+                  )
+                }
+                placeholder={placeholder}
+              />
             </Field>
           ))}
         </div>
@@ -359,16 +441,39 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
             </div>
             <p>{aestheticSuggestion.diagnosis}</p>
             <ul>
-              {aestheticSuggestion.rationale.map((item) => <li key={item}>{item}</li>)}
+              {aestheticSuggestion.rationale.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
             </ul>
             <dl className="aesthetic-proposal-preview">
-              <div><dt>叙事距离</dt><dd>{aestheticSuggestion.profile.narrativeDistance}</dd></div>
-              <div><dt>情绪温度</dt><dd>{aestheticSuggestion.profile.emotionalTemperature}</dd></div>
-              <div><dt>文字质地</dt><dd>{aestheticSuggestion.profile.proseTexture}</dd></div>
-              <div><dt>对话风格</dt><dd>{aestheticSuggestion.profile.dialogueStyle}</dd></div>
-              <div><dt>情绪表达</dt><dd>{aestheticSuggestion.profile.emotionalExpression}</dd></div>
-              <div><dt>标志手法</dt><dd>{aestheticSuggestion.profile.signatureTechniques.join("；")}</dd></div>
-              <div><dt>审美避用</dt><dd>{aestheticSuggestion.profile.avoidPatterns.join("；")}</dd></div>
+              <div>
+                <dt>叙事距离</dt>
+                <dd>{aestheticSuggestion.profile.narrativeDistance}</dd>
+              </div>
+              <div>
+                <dt>情绪温度</dt>
+                <dd>{aestheticSuggestion.profile.emotionalTemperature}</dd>
+              </div>
+              <div>
+                <dt>文字质地</dt>
+                <dd>{aestheticSuggestion.profile.proseTexture}</dd>
+              </div>
+              <div>
+                <dt>对话风格</dt>
+                <dd>{aestheticSuggestion.profile.dialogueStyle}</dd>
+              </div>
+              <div>
+                <dt>情绪表达</dt>
+                <dd>{aestheticSuggestion.profile.emotionalExpression}</dd>
+              </div>
+              <div>
+                <dt>标志手法</dt>
+                <dd>{aestheticSuggestion.profile.signatureTechniques.join("；")}</dd>
+              </div>
+              <div>
+                <dt>审美避用</dt>
+                <dd>{aestheticSuggestion.profile.avoidPatterns.join("；")}</dd>
+              </div>
             </dl>
             {contract.approved && (
               <p className="aesthetic-approval-note">
@@ -405,10 +510,9 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
           <Field label="叙事距离" hint="镜头与人物内心的常态距离">
             <Select
               value={contract.aestheticProfile!.narrativeDistance}
-              onChange={(event) => setAesthetic(
-                "narrativeDistance",
-                event.target.value as AestheticProfile["narrativeDistance"],
-              )}
+              onChange={(event) =>
+                setAesthetic("narrativeDistance", event.target.value as AestheticProfile["narrativeDistance"])
+              }
             >
               <option value="贴身">贴身</option>
               <option value="适中">适中</option>
@@ -418,10 +522,9 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
           <Field label="情绪温度" hint="本地质检会据此调整温度阈值">
             <Select
               value={contract.aestheticProfile!.emotionalTemperature}
-              onChange={(event) => setAesthetic(
-                "emotionalTemperature",
-                event.target.value as AestheticProfile["emotionalTemperature"],
-              )}
+              onChange={(event) =>
+                setAesthetic("emotionalTemperature", event.target.value as AestheticProfile["emotionalTemperature"])
+              }
             >
               <option value="冷峻">冷峻</option>
               <option value="克制">克制</option>
@@ -475,18 +578,14 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
             <Textarea
               rows={7}
               value={contract.immutableRules.join("\n")}
-              onChange={(event) =>
-                set("immutableRules", splitLines(event.target.value))
-              }
+              onChange={(event) => set("immutableRules", splitLines(event.target.value))}
             />
           </Field>
           <Field label="禁写清单" hint="每行一条；命中正文将触发硬性门禁">
             <Textarea
               rows={7}
               value={contract.prohibitedPatterns.join("\n")}
-              onChange={(event) =>
-                set("prohibitedPatterns", splitLines(event.target.value))
-              }
+              onChange={(event) => set("prohibitedPatterns", splitLines(event.target.value))}
             />
           </Field>
         </div>
@@ -495,20 +594,24 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
             <Textarea
               rows={5}
               value={contract.majorStateChanges!.include.join("\n")}
-              onChange={(event) => setContract((current) => ({
-                ...current,
-                majorStateChanges: { ...current.majorStateChanges!, include: splitLines(event.target.value) },
-              }))}
+              onChange={(event) =>
+                setContract((current) => ({
+                  ...current,
+                  majorStateChanges: { ...current.majorStateChanges!, include: splitLines(event.target.value) },
+                }))
+              }
             />
           </Field>
           <Field label="重大状态忽略词" hint="每行一条；用于移除主题材默认词">
             <Textarea
               rows={5}
               value={contract.majorStateChanges!.exclude.join("\n")}
-              onChange={(event) => setContract((current) => ({
-                ...current,
-                majorStateChanges: { ...current.majorStateChanges!, exclude: splitLines(event.target.value) },
-              }))}
+              onChange={(event) =>
+                setContract((current) => ({
+                  ...current,
+                  majorStateChanges: { ...current.majorStateChanges!, exclude: splitLines(event.target.value) },
+                }))
+              }
             />
           </Field>
         </div>

@@ -1,8 +1,6 @@
 import type { Genre, ImportPreview, ResearchBook } from "./types";
 
-export function assertLocalResearchImportRights(
-  rightsConfirmed: boolean,
-): void {
+export function assertLocalResearchImportRights(rightsConfirmed: boolean): void {
   if (!rightsConfirmed) {
     throw new Error("必须确认拥有材料的合法使用权");
   }

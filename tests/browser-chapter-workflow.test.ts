@@ -49,11 +49,7 @@ describe("browser chapter workflow", () => {
 
     const transitionedAt = "2026-08-02T02:00:00.000Z";
     vi.setSystemTime(transitionedAt);
-    const transitioned = await api.transitionChapter(
-      summary.id,
-      chapter.id,
-      "待质检",
-    );
+    const transitioned = await api.transitionChapter(summary.id, chapter.id, "待质检");
     const afterTransition = await api.getProject(summary.id);
 
     expect(transitioned.chapter).toMatchObject({
@@ -72,9 +68,7 @@ describe("browser chapter workflow", () => {
     expect(finalized.summaries.map((item) => item.layer)).toEqual(
       expect.arrayContaining(["场景", "章节", "十章阶段", "分卷", "全书"]),
     );
-    expect(
-      finalized.summaries.find((item) => item.layer === "章节"),
-    ).toMatchObject({
+    expect(finalized.summaries.find((item) => item.layer === "章节")).toMatchObject({
       id: `chapter:${chapter.id}`,
       version: 1,
       updatedAt: finalizedAt,

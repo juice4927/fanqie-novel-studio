@@ -1,7 +1,7 @@
 import { Lightbulb } from "lucide-react";
-import type { InsightPack } from "../shared/types";
 import { Badge, EmptyState } from "../components/UI";
 import { formatDate } from "../lib/format";
+import type { InsightPack } from "../shared/types";
 import styles from "./ResearchPage.module.css";
 
 export function ResearchInsightsView({ insights }: { insights: InsightPack[] }) {
@@ -14,13 +14,7 @@ export function ResearchInsightsView({ insights }: { insights: InsightPack[] }) 
               <div className={styles.insightTop}>
                 <Badge tone="accent">{insight.genre}</Badge>
                 <Badge
-                  tone={
-                    insight.confidence === "高"
-                      ? "success"
-                      : insight.confidence === "中"
-                        ? "warning"
-                        : "neutral"
-                  }
+                  tone={insight.confidence === "高" ? "success" : insight.confidence === "中" ? "warning" : "neutral"}
                 >
                   {insight.confidence}可信度
                 </Badge>

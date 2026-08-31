@@ -1,10 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
-import { aiEndpoint, JsonStringFieldExtractor, parseAnthropicOutput, parseResponsesOutput, providerError, readAnthropicStream, readChatCompletionStream, readResponsesStream, rejectsResponsesApi, rejectsStreaming, usesResponsesApi } from "../electron/ai-provider";
+import {
+  aiEndpoint,
+  JsonStringFieldExtractor,
+  parseAnthropicOutput,
+  parseResponsesOutput,
+  providerError,
+  readAnthropicStream,
+  readChatCompletionStream,
+  readResponsesStream,
+  rejectsResponsesApi,
+  rejectsStreaming,
+  usesResponsesApi,
+} from "../electron/ai-provider";
 
 describe("OpenAI-compatible streaming", () => {
   it("extracts and decodes a JSON content string across arbitrary deltas", () => {
     let content = "";
-    const extractor = new JsonStringFieldExtractor("content", (delta) => { content += delta; });
+    const extractor = new JsonStringFieldExtractor("content", (delta) => {
+      content += delta;
+    });
     for (const part of ['{"title":"标题","con', 'tent":"第一段\\n第', '二段\\u3002","other":1}']) extractor.push(part);
     expect(content).toBe("第一段\n第二段。");
   });
@@ -16,12 +30,14 @@ describe("OpenAI-compatible streaming", () => {
       '\n\r\ndata: {"choices":[{"delta":{"content":"1}"}}],"usage":{"prompt_tokens":7,"completion_tokens":3}}\n\n',
       "data: [DONE]\n\n",
     ];
-    const response = new Response(new ReadableStream({
-      start(controller) {
-        for (const part of parts) controller.enqueue(encoder.encode(part));
-        controller.close();
-      },
-    }));
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const part of parts) controller.enqueue(encoder.encode(part));
+          controller.close();
+        },
+      }),
+    );
     const activity = vi.fn();
 
     const result = await readChatCompletionStream(response, activity);
@@ -31,12 +47,14 @@ describe("OpenAI-compatible streaming", () => {
   });
 
   it("accepts multiple complete data lines in one SSE event", async () => {
-    const response = new Response([
-      'data: {"choices":[{"delta":{"content":"{\\"ok\\":"}}]}',
-      'data: {"choices":[{"delta":{"content":"true}"}}]}',
-      "",
-      "",
-    ].join("\n"));
+    const response = new Response(
+      [
+        'data: {"choices":[{"delta":{"content":"{\\"ok\\":"}}]}',
+        'data: {"choices":[{"delta":{"content":"true}"}}]}',
+        "",
+        "",
+      ].join("\n"),
+    );
 
     await expect(readChatCompletionStream(response, vi.fn())).resolves.toMatchObject({
       content: '{"ok":true}',
@@ -51,20 +69,27 @@ describe("OpenAI-compatible streaming", () => {
 
 describe("Anthropic Messages API", () => {
   it("builds the messages endpoint without inferring from the model name", () => {
-    expect(aiEndpoint("https://api.anthropic.com/v1", "claude-sonnet", false, "anthropic-messages"))
-      .toBe("https://api.anthropic.com/v1/messages");
-    expect(aiEndpoint("https://api.anthropic.com", "claude-sonnet", false, "anthropic-messages"))
-      .toBe("https://api.anthropic.com/v1/messages");
-    expect(aiEndpoint("https://proxy.invalid/v1", "claude-sonnet", false, "openai-compatible"))
-      .toBe("https://proxy.invalid/v1/chat/completions");
+    expect(aiEndpoint("https://api.anthropic.com/v1", "claude-sonnet", false, "anthropic-messages")).toBe(
+      "https://api.anthropic.com/v1/messages",
+    );
+    expect(aiEndpoint("https://api.anthropic.com", "claude-sonnet", false, "anthropic-messages")).toBe(
+      "https://api.anthropic.com/v1/messages",
+    );
+    expect(aiEndpoint("https://proxy.invalid/v1", "claude-sonnet", false, "openai-compatible")).toBe(
+      "https://proxy.invalid/v1/chat/completions",
+    );
   });
 
   it("reads all text blocks from a non-streaming message", () => {
-    expect(parseAnthropicOutput({ content: [
-      { type: "text", text: '{"ok":' },
-      { type: "tool_use", id: "ignored" },
-      { type: "text", text: "true}" },
-    ] })).toBe('{"ok":true}');
+    expect(
+      parseAnthropicOutput({
+        content: [
+          { type: "text", text: '{"ok":' },
+          { type: "tool_use", id: "ignored" },
+          { type: "text", text: "true}" },
+        ],
+      }),
+    ).toBe('{"ok":true}');
   });
 
   it("reassembles text deltas and combines input/output usage", async () => {
@@ -75,12 +100,14 @@ describe("Anthropic Messages API", () => {
       '\nevent: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"true}"}}\n\n',
       'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}\n\n',
     ];
-    const response = new Response(new ReadableStream({
-      start(controller) {
-        for (const part of parts) controller.enqueue(encoder.encode(part));
-        controller.close();
-      },
-    }));
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const part of parts) controller.enqueue(encoder.encode(part));
+          controller.close();
+        },
+      }),
+    );
 
     await expect(readAnthropicStream(response, vi.fn())).resolves.toEqual({
       content: '{"ok":true}',
@@ -112,7 +139,9 @@ describe("Responses API", () => {
   });
 
   it("reads output text from a non-streaming response", () => {
-    expect(parseResponsesOutput({ output: [{ content: [{ type: "output_text", text: "{\"ok\":true}" }] }] })).toBe('{"ok":true}');
+    expect(parseResponsesOutput({ output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }] })).toBe(
+      '{"ok":true}',
+    );
   });
 
   it("reassembles typed Responses SSE events and usage", async () => {
@@ -123,12 +152,14 @@ describe("Responses API", () => {
       'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"1}"}\n\n',
       'event: response.completed\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":4}}}\n\n',
     ];
-    const response = new Response(new ReadableStream({
-      start(controller) {
-        for (const part of parts) controller.enqueue(encoder.encode(part));
-        controller.close();
-      },
-    }));
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const part of parts) controller.enqueue(encoder.encode(part));
+          controller.close();
+        },
+      }),
+    );
 
     await expect(readResponsesStream(response, vi.fn())).resolves.toEqual({
       content: '{"value":1}',
@@ -137,7 +168,9 @@ describe("Responses API", () => {
   });
 
   it("surfaces failed Responses events", async () => {
-    const response = new Response('data: {"type":"response.failed","response":{"error":{"message":"context limit"}}}\n\n');
+    const response = new Response(
+      'data: {"type":"response.failed","response":{"error":{"message":"context limit"}}}\n\n',
+    );
     await expect(readResponsesStream(response, vi.fn())).rejects.toThrow("context limit");
   });
 });

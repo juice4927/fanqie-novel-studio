@@ -22,16 +22,10 @@ describe("local research book preparation", () => {
     ["/samples/旧城回声.tar.gz", "旧城回声.tar"],
     [".手稿", ".手稿"],
   ])("normalizes the title from %s", (fileName, title) => {
-    const book = prepareLocalResearchBook(
-      createPreview(fileName),
-      "都市脑洞",
-      true,
-      false,
-      {
-        createId: () => "book-1",
-        currentTimestamp: () => "2026-07-31T00:00:00.000Z",
-      },
-    );
+    const book = prepareLocalResearchBook(createPreview(fileName), "都市脑洞", true, false, {
+      createId: () => "book-1",
+      currentTimestamp: () => "2026-07-31T00:00:00.000Z",
+    });
 
     expect(book).toMatchObject({
       id: "book-1",
@@ -52,13 +46,7 @@ describe("local research book preparation", () => {
     const currentTimestamp = vi.fn(() => "2026-07-31T00:00:00.000Z");
 
     expect(() =>
-      prepareLocalResearchBook(
-        createPreview("sample.txt"),
-        "都市脑洞",
-        false,
-        false,
-        { createId, currentTimestamp },
-      ),
+      prepareLocalResearchBook(createPreview("sample.txt"), "都市脑洞", false, false, { createId, currentTimestamp }),
     ).toThrow("必须确认拥有材料的合法使用权");
     expect(createId).not.toHaveBeenCalled();
     expect(currentTimestamp).not.toHaveBeenCalled();

@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
 import path from "node:path";
+import { expect, test } from "@playwright/test";
 
 const screenshotRoot = process.env.SCREENSHOT_DIR;
 
@@ -15,35 +15,17 @@ test.beforeEach(async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("navigates through research and the complete project workflow", async ({
-  page,
-}, testInfo) => {
-  await expect(
-    page.locator(".project-row").filter({ hasText: "回声备忘录" }),
-  ).toBeVisible();
+test("navigates through research and the complete project workflow", async ({ page }, testInfo) => {
+  await expect(page.locator(".project-row").filter({ hasText: "回声备忘录" })).toBeVisible();
   await page.getByRole("button", { name: "市场研究" }).click();
-  await expect(
-    page.getByRole("heading", { name: "榜单、样本与洞察" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "榜单、样本与洞察" })).toBeVisible();
   await page.getByRole("button", { name: "商业知识" }).click();
-  await expect(
-    page.getByText("cn-web-fiction.2026-07.v5-motif-balance"),
-  ).toBeVisible();
-  for (const genre of [
-    "都市脑洞",
-    "玄幻/仙侠",
-    "历史/架空",
-    "现言甜宠",
-    "古言宅斗",
-    "年代重生",
-  ])
+  await expect(page.getByText("cn-web-fiction.2026-07.v5-motif-balance")).toBeVisible();
+  for (const genre of ["都市脑洞", "玄幻/仙侠", "历史/架空", "现言甜宠", "古言宅斗", "年代重生"])
     await expect(page.getByText(genre, { exact: true }).first()).toBeVisible();
   if (screenshotRoot)
     await page.screenshot({
-      path: path.join(
-        screenshotRoot,
-        `${testInfo.project.name}-genre-knowledge.png`,
-      ),
+      path: path.join(screenshotRoot, `${testInfo.project.name}-genre-knowledge.png`),
       fullPage: true,
     });
   await page.getByRole("button", { name: "样本拆书" }).click();
@@ -51,22 +33,13 @@ test("navigates through research and the complete project workflow", async ({
   await page.getByRole("button", { name: "多书总览" }).click();
   await page.locator(".project-row").filter({ hasText: "回声备忘录" }).click();
   await expect(page.getByRole("heading", { name: "回声备忘录" })).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "题材节奏参考" }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("六个常见功能仅作工具；本书实际阶段由已审批宏观规划决定。"),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "题材节奏参考" })).toBeVisible();
+  await expect(page.getByText("六个常见功能仅作工具；本书实际阶段由已审批宏观规划决定。")).toBeVisible();
   for (const stage of ["开篇", "追读", "扩张", "中期", "高潮", "收束"])
-    await expect(
-      page.getByRole("heading", { name: stage, exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: stage, exact: true })).toBeVisible();
   if (screenshotRoot)
     await page.screenshot({
-      path: path.join(
-        screenshotRoot,
-        `${testInfo.project.name}-genre-stages.png`,
-      ),
+      path: path.join(screenshotRoot, `${testInfo.project.name}-genre-stages.png`),
       fullPage: true,
     });
   await page.getByRole("button", { name: /规划台/ }).click();
@@ -74,7 +47,11 @@ test("navigates through research and the complete project workflow", async ({
   await expect(page.getByRole("dialog", { name: "AI 审核规划合理性" })).toBeVisible();
   await expect(page.getByText("AI 只生成带证据的修复提案，不会直接覆盖规划。")).toBeVisible();
   await expect(page.getByLabel("审核章数")).toHaveValue("30");
-  await page.getByRole("dialog", { name: "AI 审核规划合理性" }).locator(".modal-actions").getByRole("button", { name: "关闭" }).click();
+  await page
+    .getByRole("dialog", { name: "AI 审核规划合理性" })
+    .locator(".modal-actions")
+    .getByRole("button", { name: "关闭" })
+    .click();
   await page.getByRole("button", { name: /写作台/ }).click();
   await expect(page.getByPlaceholder("检索正文")).toBeVisible();
   await expect(page.getByText("本章承诺", { exact: true })).toBeVisible();
@@ -94,8 +71,13 @@ test("navigates through research and the complete project workflow", async ({
   await page.getByRole("button", { name: /状态账本/ }).click();
   await page.getByRole("button", { name: /写作台/ }).click();
   await page.locator(".chapter-scroll button").filter({ hasText: "回声的代价" }).click();
-  await expect(page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。")).toHaveValue("自动保存回归文本：雨落在旧城的玻璃窗上。");
-  await manuscript.evaluate((element: HTMLTextAreaElement) => { element.focus(); element.setSelectionRange(0, 6); });
+  await expect(page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。")).toHaveValue(
+    "自动保存回归文本：雨落在旧城的玻璃窗上。",
+  );
+  await manuscript.evaluate((element: HTMLTextAreaElement) => {
+    element.focus();
+    element.setSelectionRange(0, 6);
+  });
   await page.getByRole("button", { name: "修改意见" }).click();
   const revisionDialog = page.getByRole("dialog", { name: "AI 修改意见" });
   await expect(revisionDialog).toBeVisible();
@@ -106,18 +88,10 @@ test("navigates through research and the complete project workflow", async ({
   await page.getByPlaceholder("检索正文").fill("红伞");
   await expect(page.getByText("停电后的第七分钟").first()).toBeVisible();
   const layout = await page.evaluate(() => {
-    const chapterList = document
-      .querySelector(".chapter-list")!
-      .getBoundingClientRect();
-    const editorToolbar = document
-      .querySelector(".editor-toolbar")!
-      .getBoundingClientRect();
-    const actions = document
-      .querySelector(".writing-actions")!
-      .getBoundingClientRect();
-    const body = document
-      .querySelector(".editor-body")!
-      .getBoundingClientRect();
+    const chapterList = document.querySelector(".chapter-list")!.getBoundingClientRect();
+    const editorToolbar = document.querySelector(".editor-toolbar")!.getBoundingClientRect();
+    const actions = document.querySelector(".writing-actions")!.getBoundingClientRect();
+    const body = document.querySelector(".editor-body")!.getBoundingClientRect();
     return {
       chapterBottom: chapterList.bottom,
       editorTop: editorToolbar.top,
@@ -131,9 +105,7 @@ test("navigates through research and the complete project workflow", async ({
     expect(layout.actionsBottom).toBeLessThanOrEqual(layout.bodyTop + 1);
   }
   const overflow = await page.evaluate(
-    () =>
-      document.documentElement.scrollWidth -
-      document.documentElement.clientWidth,
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
   if (screenshotRoot)
@@ -142,37 +114,24 @@ test("navigates through research and the complete project workflow", async ({
       fullPage: true,
     });
   await page.getByRole("button", { name: /状态账本/ }).click();
-  await expect(
-    page.getByRole("heading", { name: "都市脑洞专属账本" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "都市脑洞专属账本" })).toBeVisible();
   await expect(page.getByRole("button", { name: /能力规则表/ })).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "期待 / 兑现账本" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "期待 / 兑现账本" })).toBeVisible();
   await expect(page.getByText("红伞女孩为何也能听见回声")).toBeVisible();
   const ledgerOverflow = await page.evaluate(
-    () =>
-      document.documentElement.scrollWidth -
-      document.documentElement.clientWidth,
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(ledgerOverflow).toBeLessThanOrEqual(1);
   if (screenshotRoot)
     await page.screenshot({
-      path: path.join(
-        screenshotRoot,
-        `${testInfo.project.name}-expectation-ledger.png`,
-      ),
+      path: path.join(screenshotRoot, `${testInfo.project.name}-expectation-ledger.png`),
       fullPage: true,
     });
 });
 
-test("keeps the dashboard readable without viewport overflow", async ({
-  page,
-}, testInfo) => {
+test("keeps the dashboard readable without viewport overflow", async ({ page }, testInfo) => {
   const overflow = await page.evaluate(
-    () =>
-      document.documentElement.scrollWidth -
-      document.documentElement.clientWidth,
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
   await expect(page.getByText("活跃作品")).toBeVisible();
@@ -193,7 +152,9 @@ test("shows automatic backup controls without exposing stored secrets", async ({
   await page.getByRole("button", { name: "运行健康检查" }).click();
   await expect(page.getByRole("article").getByText("浏览器预览数据", { exact: true })).toBeVisible();
   await expect(page.getByText("localStorage 数据可读取；SQLite 完整性检查仅在桌面版可用")).toBeVisible();
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
   expect(overflow).toBeLessThanOrEqual(1);
 });
 

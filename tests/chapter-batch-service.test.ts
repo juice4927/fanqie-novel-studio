@@ -1,13 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
-import type {
-  Chapter,
-  LedgerFact,
-  PlanNode,
-  ProjectDetail,
-  QualityIssue,
-  StoryContract,
-} from "../src/shared/types";
+import type { Chapter, LedgerFact, PlanNode, ProjectDetail, QualityIssue, StoryContract } from "../src/shared/types";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 
@@ -28,11 +21,7 @@ function createChapter(number: number): Chapter {
   };
 }
 
-function createFact(
-  id: string,
-  value: string,
-  confidence: LedgerFact["confidence"] = "已确认",
-): LedgerFact {
+function createFact(id: string, value: string, confidence: LedgerFact["confidence"] = "已确认"): LedgerFact {
   return {
     id,
     kind: "人物",
@@ -108,55 +97,71 @@ const gateCases: GateCase[] = [
   },
   {
     name: "requires five-chapter mode on the start chapter",
-    mutate: (project) => { project.chapters[0].batchMode = "逐章"; },
+    mutate: (project) => {
+      project.chapters[0].batchMode = "逐章";
+    },
     expectedReason: "请先保存“五章批次”模式",
   },
   {
     name: "requires an approved contract",
-    mutate: (project) => { project.contract.approved = false; },
+    mutate: (project) => {
+      project.contract.approved = false;
+    },
     expectedReason: "创作契约审批后才能生成正文",
   },
   {
     name: "blocks unresolved ledger conflicts",
-    mutate: (project) => { project.facts = [createFact("conflict", "医院", "有冲突")]; },
+    mutate: (project) => {
+      project.facts = [createFact("conflict", "医院", "有冲突")];
+    },
     expectedReason: "状态账本存在冲突事实，已自动恢复逐章模式",
   },
   {
     name: "requires five consecutive chapter numbers",
-    mutate: (project) => { project.chapters[4].number = 6; },
+    mutate: (project) => {
+      project.chapters[4].number = 6;
+    },
     expectedReason: "需要从当前章开始预先建立连续五章及其章纲",
   },
   {
     name: "requires every selected chapter to stay in batch mode",
-    mutate: (project) => { project.chapters[2].batchMode = "逐章"; },
+    mutate: (project) => {
+      project.chapters[2].batchMode = "逐章";
+    },
     expectedReason: "第3章处于逐章模式",
   },
   {
     name: "blocks key chapters",
-    mutate: (project) => { project.chapters[1].isKeyChapter = true; },
+    mutate: (project) => {
+      project.chapters[1].isKeyChapter = true;
+    },
     expectedReason: "第2章是关键章，必须逐章审批",
   },
   {
     name: "blocks volume boundaries",
     mutate: (project) => {
-      project.plans = [{
-        id: "volume-1",
-        kind: "分卷",
-        title: "第一卷",
-        ordinal: 1,
-        goal: "建立规则",
-        conflict: "资源不足",
-        outcome: "进入下一阶段",
-        targetWords: 12_500,
-        status: "已批准",
-        parentId: null,
-      } satisfies PlanNode];
+      project.plans = [
+        {
+          id: "volume-1",
+          kind: "分卷",
+          title: "第一卷",
+          ordinal: 1,
+          goal: "建立规则",
+          conflict: "资源不足",
+          outcome: "进入下一阶段",
+          targetWords: 12_500,
+          status: "已批准",
+          parentId: null,
+        } satisfies PlanNode,
+      ];
     },
     expectedReason: "第1章位于卷首或卷末，必须逐章审批",
   },
   {
     name: "blocks major state changes",
-    mutate: (project) => { project.chapters[3].outline = "主角身份揭露"; },
+    mutate: (project) => {
+      project.chapters[3].outline = "主角身份揭露";
+    },
     expectedReason: "第4章包含重大状态变化，必须逐章审批",
   },
   {
@@ -178,37 +183,40 @@ const gateCases: GateCase[] = [
   {
     name: "blocks active hard issues",
     mutate: (project) => {
-      project.issues = [{
-        id: "issue-1",
-        projectId: project.summary.id,
-        chapterId: "chapter-2",
-        severity: "硬性",
-        category: "连续性",
-        message: "事实冲突",
-        evidence: "",
-        status: "待处理",
-        createdAt: timestamp,
-      } satisfies QualityIssue];
+      project.issues = [
+        {
+          id: "issue-1",
+          projectId: project.summary.id,
+          chapterId: "chapter-2",
+          severity: "硬性",
+          category: "连续性",
+          message: "事实冲突",
+          evidence: "",
+          status: "待处理",
+          createdAt: timestamp,
+        } satisfies QualityIssue,
+      ];
     },
     expectedReason: "第2章有未解决的硬性告警",
   },
   {
     name: "requires every outline",
-    mutate: (project) => { project.chapters[2].outline = "  "; },
+    mutate: (project) => {
+      project.chapters[2].outline = "  ";
+    },
     expectedReason: "第3章尚未填写章纲",
   },
   {
     name: "blocks protected chapters",
-    mutate: (project) => { project.chapters[1].status = "已定稿"; },
+    mutate: (project) => {
+      project.chapters[1].status = "已定稿";
+    },
     expectedReason: "第2章已经定稿或进入发布流程",
   },
   {
     name: "blocks hard pre-writing constraints",
     mutate: (project) => {
-      project.facts = [
-        createFact("place-1", "医院"),
-        createFact("place-2", "车站"),
-      ];
+      project.facts = [createFact("place-1", "医院"), createFact("place-2", "车站")];
     },
     expectedReason: "第1章写前约束失败：林舟 的“所在地点”在第1章同时存在多个已确认值",
   },

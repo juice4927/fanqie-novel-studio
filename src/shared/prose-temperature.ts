@@ -10,7 +10,8 @@ export interface ProseTemperatureMetrics {
   lowTemperature: boolean;
 }
 
-const EMBODIED_EMOTION = /心跳|心口|胸口|喉咙|喉结|呼吸|喘息|发抖|颤|僵住|发麻|发白|脸色|血色|眼泪|落泪|哭|笑|咬牙|攥紧|肩头一缩|膝盖一软|惊|怒|害怕|恐惧|欢喜|悲苦|慌乱|茫然|惶恐|绝望|委屈|愤怒|心疼|庆幸|轻松|不安/g;
+const EMBODIED_EMOTION =
+  /心跳|心口|胸口|喉咙|喉结|呼吸|喘息|发抖|颤|僵住|发麻|发白|脸色|血色|眼泪|落泪|哭|笑|咬牙|攥紧|肩头一缩|膝盖一软|惊|怒|害怕|恐惧|欢喜|悲苦|慌乱|茫然|惶恐|绝望|委屈|愤怒|心疼|庆幸|轻松|不安/g;
 const SENSORY = /冰冷|滚烫|温热|刺痛|疼|痛|腥|臭|香|潮湿|黏|粗糙|刺眼|灼|甜|苦|咸|风声|雨声|烟气|火光|泥水|血腥/g;
 const INTERACTION = /抱住|扶起|拉住|护住|递给|推开|握住|搂紧|拍了拍|顶撞|争辩|道歉|安慰|哀求|怒骂|低声劝|相视|对视/g;
 const RESTRAINT_TURNS = /没有|并未|只是|仍然|仍旧|却没有|沉默片刻|看了.{0,6}一眼|声音(?:不高|低沉|平稳)|微微|缓缓/g;
@@ -35,8 +36,10 @@ export function analyzeProseTemperature(
 ): ProseTemperatureMetrics {
   const characters = [...text].filter((char) => !/\s/.test(char)).length;
   const scale = Math.max(characters / 1000, 0.001);
-  const dialogueCharacters = [...text.matchAll(/“([^”]*)”/g)]
-    .reduce((total, match) => total + [...match[1]].filter((char) => !/\s/.test(char)).length, 0);
+  const dialogueCharacters = [...text.matchAll(/“([^”]*)”/g)].reduce(
+    (total, match) => total + [...match[1]].filter((char) => !/\s/.test(char)).length,
+    0,
+  );
   const embodiedEmotionCount = count(text, EMBODIED_EMOTION);
   const sensoryCount = count(text, SENSORY);
   const interactionCount = count(text, INTERACTION);
@@ -54,9 +57,8 @@ export function analyzeProseTemperature(
     embodiedEmotionPerThousand,
     sensoryPerThousand,
     lowTemperature:
-      characters >= 1200 &&
-      embodiedEmotionPerThousand < threshold.embodied &&
-      sensoryPerThousand < threshold.sensory,
+      characters >= 1200 && embodiedEmotionPerThousand < threshold.embodied && sensoryPerThousand < threshold.sensory,
   };
 }
+
 import type { AestheticProfile } from "./types";

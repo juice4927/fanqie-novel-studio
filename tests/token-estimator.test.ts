@@ -13,9 +13,7 @@ describe("token estimates", () => {
     expect(estimateTextTokens("北仓控制方")).toBe(5);
     expect(estimateTextTokens("tokenEstimate1234")).toBe(5);
     expect(estimateTextTokens("北仓 token1234！")).toBe(6);
-    expect(estimateStructuredRequestTokens(["北仓", "token1234"])).toBe(
-      STRUCTURED_REQUEST_OVERHEAD_TOKENS + 2 + 3,
-    );
+    expect(estimateStructuredRequestTokens(["北仓", "token1234"])).toBe(STRUCTURED_REQUEST_OVERHEAD_TOKENS + 2 + 3);
   });
 
   it("uses chapter target length instead of a fixed output size", () => {

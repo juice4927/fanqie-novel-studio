@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
-import { WorkspaceDatabase, now } from "../electron/database";
+import { now, WorkspaceDatabase } from "../electron/database";
 
 it("holds ten isolated three-million-character projects", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "novel-scale-test-"));
@@ -12,10 +12,27 @@ it("holds ten isolated three-million-character projects", async () => {
   let firstChapterId = "";
   try {
     for (let book = 1; book <= 10; book += 1) {
-      const project = database.createProject({ title: `容量作品${book}`, genre: book % 2 ? "都市脑洞" : "现言甜宠", targetWords: 3000000, updateCadence: "每日2章" });
+      const project = database.createProject({
+        title: `容量作品${book}`,
+        genre: book % 2 ? "都市脑洞" : "现言甜宠",
+        targetWords: 3000000,
+        updateCadence: "每日2章",
+      });
       if (book === 1) firstProjectId = project.id;
       for (let chapter = 1; chapter <= 1500; chapter += 1) {
-        const saved = database.saveChapter(project.id, { id: "", number: chapter, title: `第${chapter}章`, outline: `目标：推进作品${book}第${chapter}章`, content: body, wordCount: 0, status: "草稿", batchMode: "五章批次", isKeyChapter: false, revision: 0, updatedAt: now() });
+        const saved = database.saveChapter(project.id, {
+          id: "",
+          number: chapter,
+          title: `第${chapter}章`,
+          outline: `目标：推进作品${book}第${chapter}章`,
+          content: body,
+          wordCount: 0,
+          status: "草稿",
+          batchMode: "五章批次",
+          isKeyChapter: false,
+          revision: 0,
+          updatedAt: now(),
+        });
         if (book === 1 && chapter === 1) firstChapterId = saved.id;
         if (chapter % 100 === 0) await new Promise<void>((resolve) => setImmediate(resolve));
       }

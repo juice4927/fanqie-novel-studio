@@ -11,22 +11,13 @@ export interface PreparedPlanSave {
   noOp: boolean;
 }
 
-export function preparePlanSave(
-  previous: PlanNode | undefined,
-  candidate: PlanNode,
-  planId: string,
-): PreparedPlanSave {
+export function preparePlanSave(previous: PlanNode | undefined, candidate: PlanNode, planId: string): PreparedPlanSave {
   const next: PlanNode = {
     ...candidate,
     id: planId,
-    status:
-      previous?.status ??
-      (candidate.status === "待审批" ? "待审批" : "草稿"),
+    status: previous?.status ?? (candidate.status === "待审批" ? "待审批" : "草稿"),
   };
-  const contentChanged = previous
-    ? JSON.stringify(planContent(next)) !==
-      JSON.stringify(planContent(previous))
-    : true;
+  const contentChanged = previous ? JSON.stringify(planContent(next)) !== JSON.stringify(planContent(previous)) : true;
   const protectedEdit = previous?.status === "已批准" && contentChanged;
   if (protectedEdit) next.status = "待审批";
   return {
@@ -36,10 +27,7 @@ export function preparePlanSave(
   };
 }
 
-export function approvePlanDraft(
-  plan: PlanNode | undefined,
-  contract: Pick<StoryContract, "approved">,
-) {
+export function approvePlanDraft(plan: PlanNode | undefined, contract: Pick<StoryContract, "approved">) {
   if (!plan) throw new Error("规划节点不存在");
   if (!contract.approved) throw new Error("必须先审批创作契约");
   return { ...plan, status: "已批准" as const };

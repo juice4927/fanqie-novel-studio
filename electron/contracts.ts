@@ -1,3 +1,4 @@
+import type { GenrePluginDefinition } from "../src/shared/genre-plugins";
 import type {
   Chapter,
   ContextPackage,
@@ -6,7 +7,6 @@ import type {
   QualityIssue,
   RankingSnapshot,
 } from "../src/shared/types";
-import type { GenrePluginDefinition } from "../src/shared/genre-plugins";
 
 export interface RankingSourceAdapter {
   readonly id: string;

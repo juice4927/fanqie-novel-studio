@@ -1,9 +1,6 @@
 import { BookOpenText, ExternalLink } from "lucide-react";
 import { Badge } from "../components/UI";
-import {
-  COMMERCIAL_KNOWLEDGE_SOURCES,
-  COMMERCIAL_KNOWLEDGE_VERSION,
-} from "../shared/commercial-knowledge";
+import { COMMERCIAL_KNOWLEDGE_SOURCES, COMMERCIAL_KNOWLEDGE_VERSION } from "../shared/commercial-knowledge";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import { GENRES } from "../shared/types";
 import styles from "./ResearchPage.module.css";
@@ -72,9 +69,7 @@ export function ResearchKnowledgeView() {
         {COMMERCIAL_KNOWLEDGE_SOURCES.map((source) => (
           <a key={source.url} href={source.url} target="_blank" rel="noreferrer">
             <span>
-              <Badge tone={source.authority === "平台官方" ? "accent" : "neutral"}>
-                {source.authority}
-              </Badge>
+              <Badge tone={source.authority === "平台官方" ? "accent" : "neutral"}>{source.authority}</Badge>
               <strong>{source.title}</strong>
               <small>{source.appliesTo}</small>
             </span>

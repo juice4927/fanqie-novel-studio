@@ -10,9 +10,23 @@ export interface StoryConstraintFinding {
 }
 
 const compact = (value: string) => value.replace(/\s+/g, "");
-const activeAt = (fact: LedgerFact, chapterNumber: number) => fact.validFromChapter <= chapterNumber && (fact.validToChapter === null || fact.validToChapter >= chapterNumber);
+const activeAt = (fact: LedgerFact, chapterNumber: number) =>
+  fact.validFromChapter <= chapterNumber && (fact.validToChapter === null || fact.validToChapter >= chapterNumber);
 
-const CHINESE_DIGITS: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+const CHINESE_DIGITS: Record<string, number> = {
+  零: 0,
+  〇: 0,
+  一: 1,
+  二: 2,
+  两: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+};
 
 export function parseStoryNumber(value: string): number | null {
   const arabic = value.match(/\d+(?:\.\d+)?\s*([十百千万亿])?/);
@@ -38,26 +52,32 @@ export function parseStoryNumber(value: string): number | null {
     }
   }
   const omittedTail = text.match(/万([一二两三四五六七八九])$/);
-  if (omittedTail && !text.includes("零"))
-    return total + section + CHINESE_DIGITS[omittedTail[1]] * 1_000;
+  if (omittedTail && !text.includes("零")) return total + section + CHINESE_DIGITS[omittedTail[1]] * 1_000;
   return total + section + digit;
 }
 
 function resourceLabel(fact: LedgerFact) {
-  const clean = (value: string) => compact(value)
-    .replace(/[零〇一二两三四五六七八九十百千万\d.,，.]/g, "")
-    .replace(/余额|数量|库存|剩余|现有|持有|当前|仅|共|为/g, "")
-    .replace(/枚|块|个|份|张|瓶|斤|两|元/g, "");
+  const clean = (value: string) =>
+    compact(value)
+      .replace(/[零〇一二两三四五六七八九十百千万\d.,，.]/g, "")
+      .replace(/余额|数量|库存|剩余|现有|持有|当前|仅|共|为/g, "")
+      .replace(/枚|块|个|份|张|瓶|斤|两|元/g, "");
   return clean(fact.predicate) || clean(fact.value);
 }
 
-export function evaluateStoryConstraints(facts: readonly LedgerFact[], chapter: Pick<Chapter, "number" | "outline">): StoryConstraintFinding[] {
+export function evaluateStoryConstraints(
+  facts: readonly LedgerFact[],
+  chapter: Pick<Chapter, "number" | "outline">,
+): StoryConstraintFinding[] {
   const active = facts.filter((fact) => activeAt(fact, chapter.number));
   const findings: StoryConstraintFinding[] = [];
   const seen = new Set<string>();
   const add = (finding: StoryConstraintFinding) => {
     const key = `${finding.category}:${finding.factIds.slice().sort().join(",")}:${finding.message}`;
-    if (!seen.has(key)) { seen.add(key); findings.push(finding); }
+    if (!seen.has(key)) {
+      seen.add(key);
+      findings.push(finding);
+    }
   };
 
   for (const fact of active.filter((item) => item.confidence === "有冲突")) {
@@ -81,7 +101,10 @@ export function evaluateStoryConstraints(facts: readonly LedgerFact[], chapter: 
     const values = new Set(group.map((fact) => compact(fact.value)));
     if (values.size <= 1) continue;
     add({
-      id: `overlap:${group.map((fact) => fact.id).sort().join(":")}`,
+      id: `overlap:${group
+        .map((fact) => fact.id)
+        .sort()
+        .join(":")}`,
       severity: "硬性",
       category: "状态冲突",
       message: `${group[0].subject} 的“${group[0].predicate}”在第${chapter.number}章同时存在多个已确认值`,
@@ -90,7 +113,8 @@ export function evaluateStoryConstraints(facts: readonly LedgerFact[], chapter: 
     });
   }
 
-  const spendPattern = /(?:消耗|支付|花费|交出|用掉|扣除)(?:了)?([零〇一二两三四五六七八九十百千万\d.]+)(枚|块|个|份|张|瓶|斤|两|元)?([\p{Script=Han}]{1,10})?/gu;
+  const spendPattern =
+    /(?:消耗|支付|花费|交出|用掉|扣除)(?:了)?([零〇一二两三四五六七八九十百千万\d.]+)(枚|块|个|份|张|瓶|斤|两|元)?([\p{Script=Han}]{1,10})?/gu;
   const spends = [...chapter.outline.matchAll(spendPattern)];
   for (const fact of confirmed.filter((item) => item.kind === "资源")) {
     const available = parseStoryNumber(fact.value);
@@ -99,7 +123,12 @@ export function evaluateStoryConstraints(facts: readonly LedgerFact[], chapter: 
     for (const spend of spends) {
       const amount = parseStoryNumber(spend[1]);
       const describedResource = compact(`${spend[2] ?? ""}${spend[3] ?? ""}`);
-      if (amount === null || amount <= available || (!describedResource.includes(label) && !label.includes(describedResource))) continue;
+      if (
+        amount === null ||
+        amount <= available ||
+        (!describedResource.includes(label) && !label.includes(describedResource))
+      )
+        continue;
       add({
         id: `resource:${fact.id}:${spend.index}`,
         severity: "硬性",
@@ -111,7 +140,9 @@ export function evaluateStoryConstraints(facts: readonly LedgerFact[], chapter: 
     }
   }
 
-  for (const fact of confirmed.filter((item) => item.kind === "秘密" && item.knowledgeScope.trim() && !/公开|所有人/.test(item.knowledgeScope))) {
+  for (const fact of confirmed.filter(
+    (item) => item.kind === "秘密" && item.knowledgeScope.trim() && !/公开|所有人/.test(item.knowledgeScope),
+  )) {
     const secret = compact(fact.value);
     if (secret.length < 2 || !compact(chapter.outline).includes(secret)) continue;
     add({

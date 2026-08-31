@@ -25,23 +25,21 @@ describe("ranking CSV parser", () => {
       id: "ranking-1",
       capturedAt: "2026-07-31T08:00:00.000Z",
       status: "成功",
-      entries: [{
-        id: "ranking-2",
-        snapshotId: "ranking-1",
-        rank: 2,
-        title: "Example",
-        words: 1_234,
-        tags: ["悬疑", "成长"],
-      }],
+      entries: [
+        {
+          id: "ranking-2",
+          snapshotId: "ranking-1",
+          rank: 2,
+          title: "Example",
+          words: 1_234,
+          tags: ["悬疑", "成长"],
+        },
+      ],
     });
   });
 
   it("reports recoverable row shape errors as a partial success", () => {
-    const snapshot = parseRankingCsv(
-      "rank,title\n1,Example,unexpected",
-      "Malformed list",
-      options(),
-    );
+    const snapshot = parseRankingCsv("rank,title\n1,Example,unexpected", "Malformed list", options());
 
     expect(snapshot.status).toBe("部分成功");
     expect(snapshot.error).toBeTruthy();
@@ -49,7 +47,11 @@ describe("ranking CSV parser", () => {
   });
 
   it("parses decorated Chinese units and rejects unsafe links", () => {
-    const snapshot = parseRankingCsv("书名,字数,链接\n甲,约1.2万,javascript:alert(1)\n乙,1.5亿,https://example.com/book", "单位", options());
+    const snapshot = parseRankingCsv(
+      "书名,字数,链接\n甲,约1.2万,javascript:alert(1)\n乙,1.5亿,https://example.com/book",
+      "单位",
+      options(),
+    );
     expect(snapshot.entries.map((entry) => entry.words)).toEqual([12_000, 150_000_000]);
     expect(snapshot.entries.map((entry) => entry.sourceUrl)).toEqual(["", "https://example.com/book"]);
   });

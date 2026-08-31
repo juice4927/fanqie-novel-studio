@@ -1,16 +1,10 @@
 import { describe, expect, it } from "vitest";
-import {
-  prepareQualityIssueSave,
-  resolveQualityIssue,
-} from "../src/shared/quality-issue-service";
+import { prepareQualityIssueSave, resolveQualityIssue } from "../src/shared/quality-issue-service";
 import type { QualityIssue } from "../src/shared/types";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
 
-function issue(
-  id: string,
-  overrides: Partial<QualityIssue> = {},
-): QualityIssue {
+function issue(id: string, overrides: Partial<QualityIssue> = {}): QualityIssue {
   return {
     id,
     projectId: "project-1",
@@ -46,11 +40,7 @@ describe("quality issue save rules", () => {
       message: "新的硬性问题",
     });
 
-    const plan = prepareQualityIssueSave(
-      [previous],
-      "chapter-1",
-      [incoming],
-    );
+    const plan = prepareQualityIssueSave([previous], "chapter-1", [incoming]);
 
     expect(plan.upserts).toEqual([incoming]);
     expect(plan.forceSequentialReview).toBe(true);
@@ -68,10 +58,9 @@ describe("quality issue save rules", () => {
   });
 
   it("rejects missing issues and ignored hard issues", () => {
-    expect(() => resolveQualityIssue(undefined, "已解决"))
-      .toThrow("质检项不存在");
-    expect(() =>
-      resolveQualityIssue(issue("hard", { severity: "硬性" }), "已忽略"),
-    ).toThrow("硬性质检项不能忽略，必须解决后才能继续");
+    expect(() => resolveQualityIssue(undefined, "已解决")).toThrow("质检项不存在");
+    expect(() => resolveQualityIssue(issue("hard", { severity: "硬性" }), "已忽略")).toThrow(
+      "硬性质检项不能忽略，必须解决后才能继续",
+    );
   });
 });

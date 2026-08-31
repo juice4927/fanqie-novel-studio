@@ -7,7 +7,9 @@ beforeEach(() => {
   storedState = null;
   vi.stubGlobal("localStorage", {
     getItem: vi.fn(() => storedState),
-    setItem: vi.fn((_key: string, value: string) => { storedState = value; }),
+    setItem: vi.fn((_key: string, value: string) => {
+      storedState = value;
+    }),
     removeItem: vi.fn(),
     clear: vi.fn(),
     key: vi.fn(() => null),
@@ -36,12 +38,15 @@ describe("browser AI settings", () => {
     const api = createBrowserApi();
     const current = await api.getAiSettings();
     const { hasApiKey: _hasApiKey, ...input } = current;
-    const saved = await api.saveAiSettings({
-      ...input,
-      protocol: "anthropic-messages",
-      baseUrl: "https://api.anthropic.com/v1",
-      model: "claude-model",
-    }, "sk-ant-test");
+    const saved = await api.saveAiSettings(
+      {
+        ...input,
+        protocol: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com/v1",
+        model: "claude-model",
+      },
+      "sk-ant-test",
+    );
 
     expect(saved).toMatchObject({
       protocol: "anthropic-messages",

@@ -10,8 +10,7 @@ export class HashBigramEmbeddingProvider implements EmbeddingProvider {
   readonly id = HASH_BIGRAM_PROVIDER_ID;
 
   constructor(readonly dimensions = 192) {
-    if (!Number.isInteger(dimensions) || dimensions <= 0)
-      throw new Error("嵌入向量维度必须是正整数");
+    if (!Number.isInteger(dimensions) || dimensions <= 0) throw new Error("嵌入向量维度必须是正整数");
   }
 
   embed(texts: readonly string[]) {
@@ -36,13 +35,11 @@ export class HashBigramEmbeddingProvider implements EmbeddingProvider {
 export function validateEmbeddingVector(provider: EmbeddingProvider, vector: readonly number[]) {
   if (vector.length !== provider.dimensions)
     throw new Error(`嵌入向量维度不匹配：${provider.id} 应为 ${provider.dimensions} 维，实际为 ${vector.length} 维`);
-  if (vector.some((value) => !Number.isFinite(value)))
-    throw new Error(`嵌入向量包含无效数值：${provider.id}`);
+  if (vector.some((value) => !Number.isFinite(value))) throw new Error(`嵌入向量包含无效数值：${provider.id}`);
 }
 
 export function cosineSimilarity(left: readonly number[], right: readonly number[]) {
-  if (left.length !== right.length)
-    throw new Error(`不能比较不同维度的向量：${left.length} 与 ${right.length}`);
+  if (left.length !== right.length) throw new Error(`不能比较不同维度的向量：${left.length} 与 ${right.length}`);
   let score = 0;
   for (let index = 0; index < left.length; index += 1) score += left[index] * right[index];
   return score;

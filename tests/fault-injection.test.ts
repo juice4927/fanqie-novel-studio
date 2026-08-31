@@ -15,29 +15,58 @@ afterEach(() => {
 
 describe("real boundary fault injection", () => {
   it("reports a genuinely corrupted project database", async () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "novel-corrupt-")); roots.push(root);
+    const root = mkdtempSync(path.join(os.tmpdir(), "novel-corrupt-"));
+    roots.push(root);
     const db = new WorkspaceDatabase(root);
-    const project = db.createProject({ title: "损坏测试", genre: "都市脑洞", targetWords: 100000, updateCadence: "每日1章" });
+    const project = db.createProject({
+      title: "损坏测试",
+      genre: "都市脑洞",
+      targetWords: 100000,
+      updateCadence: "每日1章",
+    });
     db.close();
     writeFileSync(path.join(root, "projects", project.id, "project.sqlite"), Buffer.from("not a sqlite database"));
     const report = await scanSystemHealth(root);
     expect(report.status).toBe("错误");
-    expect(report.checks.find((check) => check.id === `project-integrity-${project.id}`)).toMatchObject({ status: "错误" });
+    expect(report.checks.find((check) => check.id === `project-integrity-${project.id}`)).toMatchObject({
+      status: "错误",
+    });
   });
 
   it("rolls back chapter writes interrupted before commit", () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "novel-power-")); roots.push(root);
+    const root = mkdtempSync(path.join(os.tmpdir(), "novel-power-"));
+    roots.push(root);
     const db = new WorkspaceDatabase(root);
-    const project = db.createProject({ title: "断电测试", genre: "都市脑洞", targetWords: 100000, updateCadence: "每日1章" });
+    const project = db.createProject({
+      title: "断电测试",
+      genre: "都市脑洞",
+      targetWords: 100000,
+      updateCadence: "每日1章",
+    });
     process.env.NOVEL_STUDIO_FAULTS = "power-loss-before-commit";
-    expect(() => db.saveChapter(project.id, { id: "", number: 1, title: "第一章", outline: "推进", content: "正文", wordCount: 0, status: "草稿", batchMode: "逐章", isKeyChapter: false, revision: 0, updatedAt: new Date().toISOString() })).toThrow("power loss");
+    expect(() =>
+      db.saveChapter(project.id, {
+        id: "",
+        number: 1,
+        title: "第一章",
+        outline: "推进",
+        content: "正文",
+        wordCount: 0,
+        status: "草稿",
+        batchMode: "逐章",
+        isKeyChapter: false,
+        revision: 0,
+        updatedAt: new Date().toISOString(),
+      }),
+    ).toThrow("power loss");
     delete process.env.NOVEL_STUDIO_FAULTS;
     expect(db.getProject(project.id).chapters).toHaveLength(0);
     db.close();
   });
 
   it("surfaces disk-full and credential-service failures without partial success", async () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "novel-full-")); roots.push(root);
+    const root = mkdtempSync(path.join(os.tmpdir(), "novel-full-"));
+    roots.push(root);
     const backup = path.join(root, "failed.novelbak");
     writeFileSync(backup, "previous-valid-backup");
     process.env.NOVEL_STUDIO_FAULTS = "disk-full";

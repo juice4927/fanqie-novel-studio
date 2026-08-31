@@ -1,71 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  BookMarked,
-  BookOpenCheck,
-  BrainCircuit,
-  CalendarDays,
-  Check,
-  ChevronRight,
-  CircleDot,
-  ClipboardCheck,
-  FileOutput,
-  GitPullRequestArrow,
-  Layers3,
-  LoaderCircle,
-  History,
-  LockKeyhole,
-  NotebookTabs,
-  Plus,
-  Save,
-  Search,
-  SearchCheck,
-  Send,
-  ShieldCheck,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
-import type {
-  AppApi,
-  BatchGenerationPreview,
-  ChangeRequest,
-  Chapter,
-  ChapterStatus,
-  ConceptCandidate,
-  ContextPackage,
-  InsightPack,
-  ExpectationEntry,
-  LedgerFact,
-  LedgerKind,
-  PlanNode,
-  PlanningGenerationInput,
-  ProjectDetail,
-  ProjectStatus,
-  ScheduleItem,
-  StoryContract,
-  ReviewSuggestion,
-  SearchHit,
-  RevisionRecord,
-} from "../shared/types";
-import { AutosaveCoordinator, chapterDraftSignature, clearRecoveredChapter, readRecoveredChapter, writeRecoveredChapter } from "../lib/chapter-draft";
-import { GENRE_PLUGINS, GENRE_STAGES } from "../shared/genre-plugins";
-import type { GenrePluginDefinition } from "../shared/genre-plugins";
-import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
-import {
-  Badge,
-  Button,
-  EmptyState,
-  Field,
-  IconButton,
-  Input,
-  Modal,
-  Segmented,
-  Select,
-  Textarea,
-} from "../components/UI";
-import { formatCount, formatDate } from "../lib/format";
-import { summarizeMetrics } from "../shared/metrics";
+import { BookMarked, CalendarDays, FileOutput, Plus, Send, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { Badge, Button, EmptyState, Field, IconButton, Input, Modal, Select } from "../components/UI";
+import { formatDate } from "../lib/format";
+import type { AppApi, Chapter, ProjectDetail, ScheduleItem } from "../shared/types";
 
 export interface CommonProjectProps {
   project: ProjectDetail;
@@ -73,22 +10,46 @@ export interface CommonProjectProps {
   reload: () => Promise<void>;
   notify: (message: string, tone?: "success" | "error") => void;
 }
-const EMPTY_CHAPTER = (number: number): Chapter => ({
-  id: "", number, title: "", outline: "", content: "", wordCount: 0,
-  status: "章纲", batchMode: "逐章", isKeyChapter: false, chapterPromise: "",
-  expectedPayoff: "", crisis: "", endingExpectation: "", expectationTargetChapter: null,
-  endingExpectationId: null, linkedExpectationIds: [], revision: 0, updatedAt: new Date().toISOString(),
+const _EMPTY_CHAPTER = (number: number): Chapter => ({
+  id: "",
+  number,
+  title: "",
+  outline: "",
+  content: "",
+  wordCount: 0,
+  status: "章纲",
+  batchMode: "逐章",
+  isKeyChapter: false,
+  chapterPromise: "",
+  expectedPayoff: "",
+  crisis: "",
+  endingExpectation: "",
+  expectationTargetChapter: null,
+  endingExpectationId: null,
+  linkedExpectationIds: [],
+  revision: 0,
+  updatedAt: new Date().toISOString(),
 });
-const splitLines = (value: string) => value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
-const issueTone = (value: string) => value === "硬性" ? "danger" : value === "警告" ? "warning" : "neutral";
-function LightbulbIcon() { return <span className="mini-icon"><Sparkles size={16} /></span>; }
-function UploadIcon() { return <FileOutput size={16} />; }
+const _splitLines = (value: string) =>
+  value
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+const _issueTone = (value: string) => (value === "硬性" ? "danger" : value === "警告" ? "warning" : "neutral");
+function _LightbulbIcon() {
+  return (
+    <span className="mini-icon">
+      <Sparkles size={16} />
+    </span>
+  );
+}
+function _UploadIcon() {
+  return <FileOutput size={16} />;
+}
 
 export function PublishingPage({ project, api, reload, notify }: CommonProjectProps) {
   const [modal, setModal] = useState(false);
-  const draftable = project.chapters.filter(
-    (chapter) => chapter.status === "已定稿" || chapter.status === "待发布",
-  );
+  const draftable = project.chapters.filter((chapter) => chapter.status === "已定稿" || chapter.status === "待发布");
   const [chapterId, setChapterId] = useState(draftable[0]?.id ?? "");
   const [publishAt, setPublishAt] = useState("");
   const doExport = async (format: "txt" | "md" | "docx") => {
@@ -109,11 +70,7 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
         </div>
         <div className="heading-actions">
           <div className="export-menu">
-            <Button
-              variant="secondary"
-              icon={<FileOutput size={16} />}
-              onClick={() => doExport("txt")}
-            >
+            <Button variant="secondary" icon={<FileOutput size={16} />} onClick={() => doExport("txt")}>
               导出 TXT
             </Button>
             <IconButton label="导出 Markdown" onClick={() => doExport("md")}>
@@ -178,9 +135,7 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
                     {item.projectTitle} · {formatDate(item.publishAt, true)}
                   </span>
                 </div>
-                <Badge tone={item.status === "已发布" ? "success" : "warning"}>
-                  {item.status}
-                </Badge>
+                <Badge tone={item.status === "已发布" ? "success" : "warning"}>{item.status}</Badge>
                 {item.status === "待发布" && (
                   <Button
                     variant="secondary"
@@ -210,10 +165,7 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
             title="尚未安排发布"
             description="只有已定稿章节可以进入发布排期。"
             action={
-              <Button
-                disabled={!draftable.length}
-                onClick={() => setModal(true)}
-              >
+              <Button disabled={!draftable.length} onClick={() => setModal(true)}>
                 安排第一章
               </Button>
             }
@@ -224,10 +176,7 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
         <Modal title="安排章节发布" onClose={() => setModal(false)}>
           <div className="form-stack">
             <Field label="已定稿章节">
-              <Select
-                value={chapterId}
-                onChange={(event) => setChapterId(event.target.value)}
-              >
+              <Select value={chapterId} onChange={(event) => setChapterId(event.target.value)}>
                 <option value="">选择章节</option>
                 {draftable.map((chapter) => (
                   <option value={chapter.id} key={chapter.id}>
@@ -237,11 +186,7 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
               </Select>
             </Field>
             <Field label="计划发布时间">
-              <Input
-                type="datetime-local"
-                value={publishAt}
-                onChange={(event) => setPublishAt(event.target.value)}
-              />
+              <Input type="datetime-local" value={publishAt} onChange={(event) => setPublishAt(event.target.value)} />
             </Field>
             <div className="modal-actions">
               <Button variant="secondary" onClick={() => setModal(false)}>
@@ -250,10 +195,8 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
               <Button
                 disabled={!chapterId || !publishAt}
                 onClick={async () => {
-                  const chapter = project.chapters.find(
-                    (item) => item.id === chapterId,
-                  )!;
-                   const item: ScheduleItem = {
+                  const chapter = project.chapters.find((item) => item.id === chapterId)!;
+                  const item: ScheduleItem = {
                     id: "",
                     projectId: project.summary.id,
                     projectTitle: project.summary.title,

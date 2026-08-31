@@ -20,10 +20,14 @@ const context = (): ContextPackage => ({
 describe("context diagnostics", () => {
   it("explains included, truncated and missing context without changing model input", () => {
     const value = context();
-    value.diagnostics = buildContextDiagnostics(value, {
-      rollingOutline: { includedItems: 2, totalItems: 6 },
-      relevantFacts: { includedItems: 2, totalItems: 2 },
-    }, ["状态账本存在冲突事实"]);
+    value.diagnostics = buildContextDiagnostics(
+      value,
+      {
+        rollingOutline: { includedItems: 2, totalItems: 6 },
+        relevantFacts: { includedItems: 2, totalItems: 2 },
+      },
+      ["状态账本存在冲突事实"],
+    );
 
     expect(value.diagnostics.sections.find((item) => item.key === "rollingOutline")?.status).toBe("已截断");
     expect(value.diagnostics.sections.find((item) => item.key === "volumeGoal")?.status).toBe("缺失");

@@ -33,19 +33,14 @@ describe("browser quality workflow", () => {
     const second = await api.runQualityCheck("demo-project", "demo-chapter-1");
     const project = await api.getProject("demo-project");
 
-    expect(project.issues.find((item) => item.id === "issue-1")?.status)
-      .toBe("已解决");
-    expect(project.issues.find((item) => item.id === first[0].id)?.status)
-      .toBe("已解决");
-    expect(project.issues.find((item) => item.id === second[0].id)?.status)
-      .toBe("待处理");
-    expect(project.issues.filter((item) => item.status === "待处理"))
-      .toHaveLength(second.length);
+    expect(project.issues.find((item) => item.id === "issue-1")?.status).toBe("已解决");
+    expect(project.issues.find((item) => item.id === first[0].id)?.status).toBe("已解决");
+    expect(project.issues.find((item) => item.id === second[0].id)?.status).toBe("待处理");
+    expect(project.issues.filter((item) => item.status === "待处理")).toHaveLength(second.length);
     expect(project.summary.updatedAt).toBe(savedAt);
 
     await api.resolveIssue("demo-project", second[0].id, "已忽略");
-    await expect(api.resolveIssue("demo-project", "missing", "已解决"))
-      .rejects.toThrow("质检项不存在");
+    await expect(api.resolveIssue("demo-project", "missing", "已解决")).rejects.toThrow("质检项不存在");
   });
 
   it("forces sequential review and rejects ignoring a hard result", async () => {
@@ -57,17 +52,14 @@ describe("browser quality workflow", () => {
     storedState = JSON.stringify(state);
 
     const reloaded = createBrowserApi();
-    const issues = await reloaded.runQualityCheck(
-      "demo-project",
-      "demo-chapter-1",
-    );
+    const issues = await reloaded.runQualityCheck("demo-project", "demo-chapter-1");
     const hardIssue = issues.find((item) => item.severity === "硬性")!;
     const project = await reloaded.getProject("demo-project");
 
     expect(project.chapters[0].batchMode).toBe("逐章");
-    await expect(
-      reloaded.resolveIssue("demo-project", hardIssue.id, "已忽略"),
-    ).rejects.toThrow("硬性质检项不能忽略，必须解决后才能继续");
+    await expect(reloaded.resolveIssue("demo-project", hardIssue.id, "已忽略")).rejects.toThrow(
+      "硬性质检项不能忽略，必须解决后才能继续",
+    );
   });
 
   it("versions a draft when quality checking advances its status", async () => {
@@ -91,7 +83,6 @@ describe("browser quality workflow", () => {
       updatedAt: checkedAt,
     });
     expect(reloaded.summary.updatedAt).toBe(checkedAt);
-    await expect(api.runQualityCheck("demo-project", "missing"))
-      .rejects.toThrow("章节不存在");
+    await expect(api.runQualityCheck("demo-project", "missing")).rejects.toThrow("章节不存在");
   });
 });
