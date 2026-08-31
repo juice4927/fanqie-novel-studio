@@ -128,6 +128,7 @@ Anthropic 支持使用官方 API 密钥，不读取或复用 Claude Code / Claud
 留存可使用数字或百分号格式。分析只报告时间相关性，不将波动表述为确定因果。
 
 ## 本地开发
+工程优化路线图见 [docs/OPTIMIZATION_EXECUTION.md](docs/OPTIMIZATION_EXECUTION.md)。
 
 建议使用 Node.js 22 LTS、Windows 10/11 和 SSD：
 
