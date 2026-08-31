@@ -1,20 +1,13 @@
 import type { GenreComposition, NarrativeGenre } from "./genre-composition";
+import type { ProjectStatus as ProjectStatusValue, ChapterStatus as ChapterStatusValue } from "./status-constants";
+import { AI_JOB_STATUSES, CHAPTER_STATUSES, CHANGE_REQUEST_STATUSES, CONTRACT_STATUSES, EXPECTATION_STATUSES, PLAN_STATUSES, PROJECT_STATUSES, QUALITY_SEVERITIES, QUALITY_STATUSES, RESEARCH_BOOK_STATUSES, REVIEW_EXPERIMENT_STATUSES, SCHEDULE_STATUSES } from "./status-constants";
 
 export const GENRES = ["都市脑洞", "玄幻/仙侠", "历史/架空", "现言甜宠", "古言宅斗", "年代重生"] as const;
 
 export type Genre = (typeof GENRES)[number];
-export type ProjectStatus =
-  | "研究中"
-  | "候选立项"
-  | "设定中"
-  | "大纲审批"
-  | "连载准备"
-  | "连载中"
-  | "暂停"
-  | "完结"
-  | "归档";
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
-export type ChapterStatus = "章纲" | "草稿" | "待质检" | "待定稿" | "已定稿" | "待发布" | "已发布";
+export type ChapterStatus = (typeof CHAPTER_STATUSES)[number];
 
 export const CHAPTER_FUNCTIONS = [
   "行动",
