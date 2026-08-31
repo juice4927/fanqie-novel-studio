@@ -23,13 +23,17 @@ release\win-unpacked\长篇创作工作台.exe
 ## 首次配置
 
 1. 打开“系统设置”。
-2. 填写 API 基础地址和模型名。`gpt-*` 模型自动使用 Responses API，其他模型使用兼容 Chat Completions 协议。
+2. 选择模型接口协议并填写 API 基础地址和模型名：
+   - `OpenAI / 兼容接口`：`gpt-*` 模型优先使用 Responses API，其他模型使用兼容 Chat Completions；通过 OpenRouter、OneAPI 等兼容网关调用 Claude 也选择此项。
+   - `Anthropic Claude`：直接调用 Anthropic Messages API，默认基础地址为 `https://api.anthropic.com/v1`，模型名填写 Anthropic 控制台当前可用的模型 ID。
 3. 填写输入、输出单价，用于批量任务执行前估算费用。
 4. 长任务总时限默认 10 分钟，可在 5、10、15 分钟之间选择；长任务流式响应连续 180 秒无数据会提前停止。
 5. 保存 API 密钥。密钥存入 Windows Credential Manager，不写入 SQLite、日志、项目目录或备份包。
 6. 在“多书总览”新建作品。每本书会立即建立独立目录、`project.sqlite`、FTS5 索引和语义向量表。
 
 不配置 API 密钥时，榜单、导入、本地统计、规划、正文编辑、质检、排期、导出和备份仍可使用；语义拆书和 AI 写作不可用。
+
+Anthropic 支持使用官方 API 密钥，不读取或复用 Claude Code / Claude Max 的登录态与订阅凭据。调用本机 Claude Code CLI 属于独立集成，不在当前模型接口范围内。
 
 相关事实检索使用本地汉字相似度索引，不调用云端向量模型，也不会为检索上传正文或账本。
 
@@ -173,3 +177,7 @@ Windows 发布流水线需要配置 `WINDOWS_CERTIFICATE_BASE64`、`WINDOWS_CERT
 数据复盘可建立运营实验，分别记录假设、计划改动、影响章节、基线期、观察期、主指标、成功标准和干扰因素。实验结束时必须填写结论并选择保留、撤销或继续观察；实验记录不会自动修改正文、契约或章纲，剧情调整仍需通过变更单。
 
 故障注入仅在 `NODE_ENV=test` 生效，可通过 `NOVEL_STUDIO_FAULTS` 启用 `disk-full`、`power-loss-before-commit` 或 `credential-unavailable`。测试还会写入真实损坏的 SQLite 文件验证健康诊断不中断。
+
+## 开源许可
+
+本项目基于 [MIT License](LICENSE) 开源。欢迎以 issue、PR 或讨论区形式参与；涉及领域规则（门禁链、质检提示词、知识库）的改动请先阅读 [AGENTS.md](AGENTS.md)。

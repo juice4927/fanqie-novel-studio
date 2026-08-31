@@ -8,3 +8,15 @@ test-results/
 playwright-report/
 *.log
 .DS_Store
+
+# Codex desktop metadata
+.reasonix/
+
+# Coverage and build info
+coverage/
+*.tsbuildinfo
+dist-ssr/
+
+# IDE / editor
+.idea/
+.vscode/

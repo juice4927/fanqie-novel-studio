@@ -3,7 +3,10 @@
   "version": "0.1.6",
   "private": true,
   "description": "本地优先的番茄小说长篇创作工作台",
-  "author": "Novel Studio Team",
+  "author": {
+    "name": "juice4927",
+    "url": "https://github.com/juice4927"
+  },
   "main": "dist-electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -78,5 +81,28 @@
       "createDesktopShortcut": true,
       "deleteAppDataOnUninstall": false
     }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juice4927/fanqie-novel-studio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/juice4927/fanqie-novel-studio/issues"
+  },
+  "homepage": "https://github.com/juice4927/fanqie-novel-studio#readme",
+  "keywords": [
+    "fanqie",
+    "novel-writing",
+    "writing-workbench",
+    "electron",
+    "react",
+    "typescript",
+    "sqlite",
+    "ai-writing",
+    "web-novel"
+  ],
+  "engines": {
+    "node": ">=22"
   }
 }
