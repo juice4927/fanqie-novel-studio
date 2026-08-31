@@ -7,7 +7,7 @@ import {
 } from "../src/lib/chapter-draft";
 import type { Chapter } from "../src/shared/types";
 
-const chapter = (content: string, id = "chapter-1"): Chapter => ({
+const chapter = (content: string, id = "chapter-1", updatedAt = new Date().toISOString()): Chapter => ({
   id,
   number: 1,
   title: "第一章",
@@ -18,7 +18,7 @@ const chapter = (content: string, id = "chapter-1"): Chapter => ({
   batchMode: "逐章",
   isKeyChapter: false,
   revision: 1,
-  updatedAt: new Date().toISOString(),
+  updatedAt,
 });
 
 const deferred = <T>() => {
@@ -78,9 +78,11 @@ describe("chapter draft reliability", () => {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => values.set(key, value),
     };
-    writeRecoveredChapter("project", chapter("崩溃前草稿"), storage);
+    const recovered = chapter("崩溃前草稿", "chapter-1", "2026-01-01T00:00:00.000Z");
+    const server = chapter("服务端旧稿", "chapter-1", "2026-01-01T00:00:00.000Z");
+    writeRecoveredChapter("project", recovered, storage);
     expect(values.has(chapterRecoveryKey("project", chapter("")))).toBe(true);
-    expect(readRecoveredChapter("project", chapter("服务端旧稿"), storage).content).toBe("崩溃前草稿");
+    expect(readRecoveredChapter("project", server, storage).content).toBe("崩溃前草稿");
   });
 
   it("reports when the local recovery copy cannot be written", () => {
