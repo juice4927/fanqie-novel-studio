@@ -1,5 +1,5 @@
 import { parentPort } from "node:worker_threads";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import JSZip from "jszip";
@@ -24,6 +24,21 @@ interface WorkerRequest {
   task: "parse-document" | "quality-check" | "system-health";
   payload: unknown;
   cancel?: boolean;
+}
+
+const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_ARCHIVE_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
+
+async function loadCheckedArchive(filePath: string) {
+  const info = await stat(filePath);
+  if (!info.isFile() || info.size > MAX_IMPORT_BYTES) throw new Error("导入文件超过 100MB 安全限制");
+  const zip = await JSZip.loadAsync(await readFile(filePath));
+  const entries = Object.values(zip.files);
+  if (entries.length > MAX_ARCHIVE_ENTRIES) throw new Error("压缩文档条目数超过安全限制");
+  const expandedBytes = entries.reduce((sum, entry) => sum + Number((entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0), 0);
+  if (expandedBytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES) throw new Error("压缩文档解压后超过 200MB 安全限制");
+  return zip;
 }
 
 interface QualityPayload {
@@ -95,7 +110,7 @@ async function parseTxt(filePath: string) {
 }
 
 async function parseEpub(filePath: string) {
-  const zip = await JSZip.loadAsync(await readFile(filePath));
+  const zip = await loadCheckedArchive(filePath);
   const parser = new XMLParser({ ignoreAttributes: false });
   const containerXml = await zip.file("META-INF/container.xml")?.async("text");
   if (!containerXml) throw new Error("EPUB 缺少 META-INF/container.xml");
@@ -143,6 +158,8 @@ export async function parseDocument(filePath: string): Promise<ImportPreview> {
   const extension = path.extname(filePath).toLowerCase();
   const fileName = path.basename(filePath);
   const warnings: string[] = [];
+  const fileInfo = await stat(filePath);
+  if (!fileInfo.isFile() || fileInfo.size > MAX_IMPORT_BYTES) throw new Error("导入文件超过 100MB 安全限制");
   let chapters: ImportPreview["chapters"];
   let sourceType: ImportPreview["sourceType"];
   let detectedEncoding = "文档内部编码";
@@ -152,6 +169,7 @@ export async function parseDocument(filePath: string): Promise<ImportPreview> {
     sourceType = "TXT";
     detectedEncoding = result.encoding;
   } else if (extension === ".docx") {
+    await loadCheckedArchive(filePath);
     const result = await mammoth.extractRawText({ path: filePath });
     chapters = splitChapters(result.value);
     sourceType = "DOCX";

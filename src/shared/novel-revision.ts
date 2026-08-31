@@ -56,7 +56,7 @@ export function sameRevisionSnapshot(left: unknown, right: unknown) {
 export function applyTextRepair(chapter: Chapter, repair: NovelTextRepair) {
   if (chapter.revision !== repair.baseRevision)
     throw new Error(`第${chapter.number}章版本已变化，请重新分析修改意见`);
-  if (repair.start < 0 || repair.end < repair.start || chapter.content.slice(repair.start, repair.end) !== repair.before)
+  if (repair.start < 0 || repair.end < repair.start || repair.end > chapter.content.length || chapter.content.slice(repair.start, repair.end) !== repair.before)
     throw new Error(`第${chapter.number}章修改位置已变化，请重新选择文字并分析`);
   return `${chapter.content.slice(0, repair.start)}${repair.after}${chapter.content.slice(repair.end)}`;
 }

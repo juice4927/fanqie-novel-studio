@@ -18,6 +18,8 @@ describe("story constraints", () => {
     expect(parseStoryNumber("八十枚灵石")).toBe(80);
     expect(parseStoryNumber("一百二十块")).toBe(120);
     expect(parseStoryNumber("一万零三十")).toBe(10030);
+    expect(parseStoryNumber("三万五")).toBe(35000);
+    expect(parseStoryNumber("3.5万")).toBe(35000);
   });
 
   it("blocks unresolved and overlapping confirmed state", () => {

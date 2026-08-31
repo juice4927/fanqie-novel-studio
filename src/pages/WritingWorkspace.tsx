@@ -93,7 +93,7 @@ const issueTone = (value: string) => value === "硬性" ? "danger" : value === "
 function LightbulbIcon() { return <span className="mini-icon"><Sparkles size={16} /></span>; }
 function UploadIcon() { return <FileOutput size={16} />; }
 
-export function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
+export function WritingPage({ project, api, reload, notify, onDirtyChange }: CommonProjectProps & { onDirtyChange?: (dirty: boolean) => void }) {
   const [selectedId, setSelectedId] = useState(project.chapters[0]?.id ?? "");
   const selected = project.chapters.find(
     (chapter) => chapter.id === selectedId,
@@ -122,6 +122,8 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   const draftRef = useRef(draft);
   const manuscriptRef = useRef<HTMLTextAreaElement>(null);
   const chapterRequestRef = useRef(0);
+  const searchRequestRef = useRef(0);
+  const searchLoadingRef = useRef(false);
   const autosaveRef = useRef<AutosaveCoordinator | null>(null);
   const reloadRef = useRef(reload);
   const notifyRef = useRef(notify);
@@ -167,9 +169,9 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
         } else if (stillEditingChapter) setSaveStatus("dirty");
         void reloadRef.current();
       },
-      (error) => {
+      (error, willRetry) => {
         setSaveStatus("error");
-        notifyRef.current(`${error instanceof Error ? error.message : String(error)}；将自动重试`, "error");
+        notifyRef.current(`${error instanceof Error ? error.message : String(error)}${willRetry ? "；将自动重试" : ""}`, "error");
       },
     );
     autosaveRef.current = coordinator;
@@ -211,21 +213,25 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
     return () => { chapterRequestRef.current += 1; };
   }, [api, project.summary.id, selectedId]);
   const dirty = chapterDraftSignature(draft) !== lastSavedSignature.current;
+  useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   useEffect(() => {
     if (busy || chapterLoading) return;
     if (!dirty) {
       setSaveStatus("saved");
       return;
     }
-    setRecoveryAvailable(writeRecoveredChapter(project.summary.id, draft));
     setSaveStatus("dirty");
-    if (!draft.id || ["已定稿", "待发布", "已发布"].includes(draft.status)) return;
-    const timer = window.setTimeout(async () => {
-      const snapshot = draftRef.current;
-      setSaveStatus("saving");
-      autosaveRef.current?.enqueue(snapshot);
-    }, 2000);
-    return () => window.clearTimeout(timer);
+    const recoveryTimer = window.setTimeout(() => {
+      setRecoveryAvailable(writeRecoveredChapter(project.summary.id, draftRef.current));
+    }, 500);
+    const timer = !draft.id || ["已定稿", "待发布", "已发布"].includes(draft.status)
+      ? null
+      : window.setTimeout(() => {
+          const snapshot = draftRef.current;
+          setSaveStatus("saving");
+          autosaveRef.current?.enqueue(snapshot);
+        }, 2000);
+    return () => { if (timer) window.clearTimeout(timer); window.clearTimeout(recoveryTimer); };
   }, [api, busy, chapterLoading, dirty, draft, notify, project.summary.id]);
   useEffect(() => {
     const preventUnsavedExit = (event: BeforeUnloadEvent) => {
@@ -237,9 +243,11 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
     return () => window.removeEventListener("beforeunload", preventUnsavedExit);
   }, []);
   useEffect(() => {
+    const requestId = ++searchRequestRef.current;
     const timer = window.setTimeout(() => {
       if (query.trim().length >= 2)
         void api.searchProject(project.summary.id, query, 0, 50).then((hits) => {
+          if (searchRequestRef.current !== requestId) return;
           setSearchHits(hits);
           setSearchHasMore(hits.length === 50);
           setScrollTop(0);
@@ -263,21 +271,37 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   const renderCount = Math.ceil(window.innerHeight / ROW_HEIGHT) + OVERSCAN * 2;
   const virtualChapters = compactList ? filteredChapters : filteredChapters.slice(startIndex, startIndex + renderCount);
   const loadMoreSearch = async () => {
-    const hits = await api.searchProject(project.summary.id, query, searchHits.length, 50);
-    setSearchHits((current) => [...current, ...hits]);
-    setSearchHasMore(hits.length === 50);
+    if (searchLoadingRef.current) return;
+    searchLoadingRef.current = true;
+    const requestId = searchRequestRef.current;
+    const requestedQuery = query;
+    const offset = searchHits.length;
+    try {
+      const hits = await api.searchProject(project.summary.id, requestedQuery, offset, 50);
+      if (searchRequestRef.current !== requestId || query !== requestedQuery) return;
+      setSearchHits((current) => current.length === offset ? [...current, ...hits] : current);
+      setSearchHasMore(hits.length === 50);
+    } finally {
+      searchLoadingRef.current = false;
+    }
   };
   const save = async () => {
     const snapshot = draftRef.current;
     const snapshotSignature = chapterDraftSignature(snapshot);
     setSaveStatus("saving");
     try {
-      const saved = await api.saveChapter(project.summary.id, snapshot);
+      const coordinator = autosaveRef.current;
+      const saved = coordinator
+        ? await coordinator.saveLatest(snapshot, (value) => api.saveChapter(project.summary.id, value))
+        : await api.saveChapter(project.summary.id, snapshot);
       clearRecoveredChapter(project.summary.id, snapshot);
       lastSavedSignature.current = snapshotSignature;
       setSelectedId(saved.id);
-      setDraft(saved);
-      setSaveStatus("saved");
+      if (chapterDraftSignature(draftRef.current) === snapshotSignature) {
+        draftRef.current = saved;
+        setDraft(saved);
+        setSaveStatus("saved");
+      } else setSaveStatus("dirty");
       await reload();
       notify("章节已保存并建立新版本");
     } catch (error) {
@@ -773,6 +797,11 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               {draft.content.replace(/\s/g, "").length.toLocaleString()} 字 · v
               {draft.revision || 1}
             </span>
+            {draft.content.length >= 190_000 && (
+              <Badge tone={draft.content.length > 200_000 ? "danger" : "warning"}>
+                {draft.content.length > 200_000 ? "正文超过 200,000 字符保存上限" : `距离保存上限还剩 ${(200_000 - draft.content.length).toLocaleString()} 字符`}
+              </Badge>
+            )}
             <span className="editor-version-actions">
               {draft.id && (
                 <button
@@ -975,11 +1004,17 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                       <Button
                         variant="secondary"
                         onClick={async () => {
-                          await api.restoreRevision(
+                           await api.restoreRevision(
                             project.summary.id,
                             revision.id,
-                          );
-                          await reload();
+                           );
+                           await reload();
+                           const restored = await api.getChapter(project.summary.id, draftRef.current.id);
+                           draftRef.current = restored;
+                           lastSavedSignature.current = chapterDraftSignature(restored);
+                           clearRecoveredChapter(project.summary.id, restored);
+                           setDraft(restored);
+                           setSaveStatus("saved");
                           setHistoryOpen(false);
                           notify(`已从 v${revision.revision} 建立新的当前版本`);
                         }}

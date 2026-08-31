@@ -321,7 +321,7 @@ export class WorkspaceDatabase {
         is_key_chapter, metadata, updated_at
       )
       SELECT id,
-        CAST(json_extract(payload, '$.number') AS INTEGER),
+        COALESCE(CAST(json_extract(payload, '$.number') AS INTEGER), 1),
         COALESCE(json_extract(payload, '$.title'), ''),
         COALESCE(json_extract(payload, '$.outline'), ''),
         COALESCE(json_extract(payload, '$.status'), '章纲'),
@@ -335,6 +335,12 @@ export class WorkspaceDatabase {
       SELECT id, COALESCE(json_extract(payload, '$.content'), '')
       FROM records WHERE collection = 'chapters';
       DELETE FROM records WHERE collection = 'chapters';
+      DELETE FROM chapter_fts;
+      DELETE FROM chapter_fts_tri;
+      INSERT INTO chapter_fts(id, title, content)
+      SELECT c.id, c.title, COALESCE(b.content, '') FROM chapters c LEFT JOIN chapter_contents b ON b.chapter_id = c.id;
+      INSERT INTO chapter_fts_tri(id, title, content)
+      SELECT c.id, c.title, COALESCE(b.content, '') FROM chapters c LEFT JOIN chapter_contents b ON b.chapter_id = c.id;
       `),
       (database) => {
         if (!hasColumn(database, "embeddings", "provider_id"))
@@ -349,7 +355,12 @@ export class WorkspaceDatabase {
   private projectDb(projectId: string) {
     const existing = this.projectDbs.get(projectId);
     if (existing) return existing;
-    const directory = path.join(this.projectsRoot, projectId);
+    if (!this.catalog.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId))
+      throw new Error("项目不存在");
+    const root = path.resolve(this.projectsRoot);
+    const directory = path.resolve(root, projectId);
+    if (!directory.startsWith(`${root}${path.sep}`))
+      throw new Error("项目目录校验失败");
     mkdirSync(path.join(directory, "attachments"), { recursive: true });
     mkdirSync(path.join(directory, "exports"), { recursive: true });
     const db = openDatabase(path.join(directory, "project.sqlite"));
@@ -619,29 +630,42 @@ export class WorkspaceDatabase {
 
   saveContract(id: string, contract: StoryContract) {
     const db = this.projectDb(id);
-    const previous = this.getState<StoryContract>(db, "contract");
-    const update = prepareContractUpdate(previous, contract, now());
-    if (!update.changed) return previous;
-    if (
-      previous.approved &&
-      !this.consumeApprovedChange(db, "创作契约", "contract", previous.version)
-    ) {
-      throw new Error("已审批创作契约只能通过已批准的改纲变更单修改");
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const previous = this.getState<StoryContract>(db, "contract");
+      const update = prepareContractUpdate(previous, contract, now());
+      if (!update.changed) { db.exec("COMMIT"); return previous; }
+      if (previous.approved && !this.consumeApprovedChange(db, "创作契约", "contract", previous.version))
+        throw new Error("已审批创作契约只能通过已批准的改纲变更单修改");
+      const next = update.contract;
+      this.addRevision(db, "state", "contract", previous.version, previous);
+      this.setState(db, "contract", next);
+      db.exec("COMMIT");
+      this.touchProject(id);
+      return next;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
     }
-    const next = update.contract;
-    this.addRevision(db, "state", "contract", previous.version, previous);
-    this.setState(db, "contract", next);
-    this.touchProject(id);
-    return next;
   }
 
   approveContract(id: string) {
     const db = this.projectDb(id);
     const contract = this.getState<StoryContract>(db, "contract");
     const next = approveContractDraft(contract, now());
-    this.setState(db, "contract", next);
-    this.updateProject(id, { status: "大纲审批" });
-    return next;
+    db.exec("BEGIN IMMEDIATE");
+    this.catalog.exec("BEGIN IMMEDIATE");
+    try {
+      this.setState(db, "contract", next);
+      this.catalog.prepare("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?").run("大纲审批", now(), id);
+      db.exec("COMMIT");
+      this.catalog.exec("COMMIT");
+      return next;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      try { this.catalog.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
   }
 
   attachInsights(id: string, insightIds: string[]) {
@@ -651,6 +675,8 @@ export class WorkspaceDatabase {
 
   savePlan(id: string, plan: PlanNode) {
     const db = this.projectDb(id);
+    db.exec("BEGIN IMMEDIATE");
+    try {
     const previous = plan.id
       ? this.getRecord<PlanNode>(db, "plans", plan.id)
       : undefined;
@@ -659,7 +685,7 @@ export class WorkspaceDatabase {
       plan,
       plan.id || randomUUID(),
     );
-    if (prepared.noOp) return previous!;
+    if (prepared.noOp) { db.exec("COMMIT"); return previous!; }
     if (
       prepared.protectedEdit &&
       !this.consumeApprovedChange(
@@ -673,8 +699,13 @@ export class WorkspaceDatabase {
     }
     const next = prepared.plan;
     this.saveRecord(db, "plans", next.id, next);
+    db.exec("COMMIT");
     this.touchProject(id);
     return next;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
   }
 
   approvePlan(id: string, planId: string) {
@@ -787,6 +818,10 @@ export class WorkspaceDatabase {
       }),
       updatedAt: now(),
     });
+    if (protectedEdit && next.status === "待质检") {
+      for (const schedule of this.listRecords<ScheduleItem>(db, "schedule").filter((item) => item.chapterId === next.id && item.status !== "已发布"))
+        this.saveRecord(db, "schedule", schedule.id, { ...schedule, status: "待排期" });
+    }
     this.projects.saveChapter(db, next, previous?.revision, createRevision);
     db.prepare("DELETE FROM chapter_fts WHERE id = ?").run(next.id);
     db.prepare(
@@ -836,6 +871,7 @@ export class WorkspaceDatabase {
     const db = this.projectDb(id);
     const chapter = this.projects.getChapter(db, chapterId);
     if (!chapter) throw new Error("章节不存在");
+    if (status !== "章纲" && !chapter.content.trim()) throw new Error("空正文不能进入质检、定稿或发布流程");
     const issues = this.listRecords<QualityIssue>(db, "issues");
     assertChapterTransition(chapter.status, status, chapterId, issues);
     const saved = this.persistChapter(id, { ...chapter, status }, status);
@@ -947,29 +983,51 @@ export class WorkspaceDatabase {
     const row = this.revisions.get(db, revisionId);
     if (!row) throw new Error("历史版本不存在");
     const payload = parseJson<any>(row.payload);
-    if (row.collection === "chapters") this.saveChapter(id, payload as Chapter);
-    else if (row.collection === "plans") this.savePlan(id, payload as PlanNode);
-    else if (row.collection === "state" && row.entity_id === "contract")
+    const authorizeRestore = (targetKind: ChangeRequest["targetKind"], targetId: string, baseVersion: number, current: unknown) => {
+      const change: ChangeRequest = {
+        id: randomUUID(), targetKind, targetId, baseVersion,
+        title: "恢复历史版本", reason: `恢复修订 ${revisionId}`,
+        beforeValue: JSON.stringify(current), afterValue: JSON.stringify(payload),
+        impact: "受保护内容将恢复为选定历史版本", rollback: "可再次从历史版本恢复",
+        status: "已批准", createdAt: now(),
+      };
+      this.saveRecord(db, "changes", change.id, change);
+    };
+    if (row.collection === "chapters") {
+      const current = this.projects.getChapter(db, row.entity_id);
+      if (current && isProtectedChapterEdit(current, payload as Chapter))
+        authorizeRestore("章节", current.id, current.revision, current);
+      this.saveChapter(id, payload as Chapter);
+    } else if (row.collection === "plans") {
+      const current = this.getRecord<PlanNode>(db, "plans", row.entity_id);
+      if (current?.status === "已批准") authorizeRestore("规划", current.id, this.entityVersion(db, "plans", current.id), current);
+      this.savePlan(id, payload as PlanNode);
+    } else if (row.collection === "state" && row.entity_id === "contract") {
+      const current = this.getState<StoryContract>(db, "contract");
+      if (current.approved) authorizeRestore("创作契约", "contract", current.version, current);
       this.saveContract(id, payload as StoryContract);
+    }
     else this.saveRecord(db, row.collection, row.entity_id, payload);
     this.touchProject(id);
   }
 
   saveIssues(id: string, chapterId: string, issues: QualityIssue[]) {
     const db = this.projectDb(id);
-    const plan = prepareQualityIssueSave(
-      this.listRecords<QualityIssue>(db, "issues"),
-      chapterId,
-      issues,
-    );
-    for (const issue of plan.upserts)
-      this.saveRecord(db, "issues", issue.id, issue);
-    if (plan.forceSequentialReview) {
-      const chapter = this.projects.getChapter(db, chapterId);
-      if (chapter && chapter.batchMode !== "逐章")
-        this.saveChapter(id, { ...chapter, batchMode: "逐章" });
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const plan = prepareQualityIssueSave(this.listRecords<QualityIssue>(db, "issues"), chapterId, issues);
+      for (const issue of plan.upserts) this.saveRecord(db, "issues", issue.id, issue);
+      if (plan.forceSequentialReview) {
+        const chapter = this.projects.getChapter(db, chapterId);
+        if (chapter && chapter.batchMode !== "逐章")
+          this.persistChapterInTransaction(db, id, { ...chapter, batchMode: "逐章" });
+      }
+      db.exec("COMMIT");
+      this.touchProject(id);
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
     }
-    this.touchProject(id);
   }
 
   resolveIssue(id: string, issueId: string, status: QualityIssue["status"]) {
@@ -1047,9 +1105,15 @@ export class WorkspaceDatabase {
 
   saveMetrics(id: string, metrics: MetricSnapshot[]) {
     const db = this.projectDb(id);
-    for (const metric of metrics)
-      this.saveRecord(db, "metrics", metric.id, metric);
-    this.touchProject(id);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const metric of metrics) this.saveRecord(db, "metrics", metric.id, metric);
+      db.exec("COMMIT");
+      this.touchProject(id);
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
   }
 
   saveReviewExperiment(id: string, experiment: ReviewExperiment) {
@@ -1100,7 +1164,9 @@ export class WorkspaceDatabase {
   }
 
   saveRanking(snapshot: RankingSnapshot) {
-    this.research
+    this.research.exec("BEGIN IMMEDIATE");
+    try {
+      this.research
       .prepare("INSERT INTO ranking_snapshots VALUES(?, ?, ?, ?, ?, ?)")
       .run(
         snapshot.id,
@@ -1116,8 +1182,8 @@ export class WorkspaceDatabase {
         synopsis, official_reader_url, platform
       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    for (const entry of snapshot.entries)
-      insert.run(
+      for (const entry of snapshot.entries)
+        insert.run(
         entry.id,
         snapshot.id,
         entry.rank,
@@ -1130,8 +1196,13 @@ export class WorkspaceDatabase {
         entry.sourceUrl,
         entry.synopsis ?? null,
         entry.officialReaderUrl ?? null,
-        entry.platform ?? null,
-      );
+          entry.platform ?? null,
+        );
+      this.research.exec("COMMIT");
+    } catch (error) {
+      try { this.research.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
   }
 
   listRankingSchedules(): RankingCaptureSchedule[] {
@@ -1227,6 +1298,10 @@ export class WorkspaceDatabase {
     this.aiAudit.prune();
   }
 
+  markAiJobApplicationFailed(id: string, error: string) {
+    this.aiAudit.markApplicationFailed(id, error);
+  }
+
   listAiJobs(projectId?: string): AiJobRecord[] {
     return this.aiAudit.list(projectId);
   }
@@ -1245,6 +1320,14 @@ export class WorkspaceDatabase {
 
   getAiSettings(): AiSettings {
     const baseUrl = this.getSetting("ai.baseUrl", "https://api.openai.com/v1");
+    const storedProtocol = this.getSetting("ai.protocol", "");
+    let inferredAnthropic = false;
+    try {
+      inferredAnthropic = new URL(baseUrl).hostname.toLowerCase().endsWith("anthropic.com");
+    } catch { /* invalid legacy values remain editable in settings */ }
+    const protocol = storedProtocol === "anthropic-messages" || (!storedProtocol && inferredAnthropic)
+      ? "anthropic-messages"
+      : "openai-compatible";
     const model = this.getSetting("ai.model", "gpt-4.1");
     const embeddingModel = this.getSetting(
       "ai.embeddingModel",
@@ -1258,6 +1341,7 @@ export class WorkspaceDatabase {
     );
     const longTaskTimeoutMinutes = Math.min(15, Math.max(5, Number(this.getSetting("ai.longTaskTimeoutMinutes", "10")) || 10));
     return {
+      protocol,
       baseUrl,
       model,
       embeddingModel,
@@ -1269,6 +1353,7 @@ export class WorkspaceDatabase {
   }
 
   saveAiSettings(settings: Omit<AiSettings, "hasApiKey">) {
+    this.setSetting("ai.protocol", settings.protocol);
     this.setSetting("ai.baseUrl", settings.baseUrl);
     this.setSetting("ai.model", settings.model);
     this.setSetting("ai.embeddingModel", settings.embeddingModel);
@@ -1386,10 +1471,18 @@ export class WorkspaceDatabase {
   }
 
   checkpointAll() {
-    this.catalog.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    this.research.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    for (const db of this.projectDbs.values())
-      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const checkpoint = (db: DatabaseSync) => {
+      try {
+        const result = db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as { busy?: number } | undefined;
+        if (result?.busy) db.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
+      } catch (error) {
+        if (!/busy|locked/i.test(error instanceof Error ? error.message : String(error))) throw error;
+        db.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
+      }
+    };
+    checkpoint(this.catalog);
+    checkpoint(this.research);
+    for (const db of this.projectDbs.values()) checkpoint(db);
   }
 
   close() {

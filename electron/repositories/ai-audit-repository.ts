@@ -70,6 +70,11 @@ export class AiAuditRepository {
         usage?.chunkCount ?? 0, usage?.attemptCount ?? 0, now(), id);
   }
 
+  markApplicationFailed(id: string, error: string) {
+    this.db.prepare("UPDATE ai_jobs SET status = '失败', error = ?, updated_at = ? WHERE id = ? AND status = '成功'")
+      .run(error, now(), id);
+  }
+
   list(projectId?: string): AiJobRecord[] {
     const rows = (projectId
       ? this.db.prepare("SELECT * FROM ai_jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 200").all(projectId)

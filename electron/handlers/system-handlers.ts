@@ -58,6 +58,7 @@ export interface SystemHandlerDependencies {
   chooseDiagnosticDestination: (
     defaultFileName: string,
   ) => Promise<string | null>;
+  confirmDiagnosticExport?: () => Promise<boolean>;
   chooseProjectExportDestination: (
     defaultFileName: string,
     format: "txt" | "md" | "docx",
@@ -180,6 +181,7 @@ export function registerSystemHandlers({
   chooseBackupDestination,
   chooseBackupSource,
   chooseDiagnosticDestination,
+  confirmDiagnosticExport,
   chooseProjectExportDestination,
 }: SystemHandlerDependencies): SystemHandlerRuntime {
   let autoBackupRunning = false;
@@ -359,6 +361,7 @@ export function registerSystemHandlers({
     return runHealthCheck(randomUUID());
   });
   register("exportDiagnosticBundle", async () => {
+    if (confirmDiagnosticExport && !await confirmDiagnosticExport()) return null;
     const destination = await chooseDiagnosticDestination(
       `长篇创作工作台-诊断-${now().slice(0, 10)}.zip`,
     );

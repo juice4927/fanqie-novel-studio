@@ -66,6 +66,8 @@ export function ProjectPage({
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [insights, setInsights] = useState<InsightPack[]>([]);
   const [loading, setLoading] = useState(true);
+  const [writingDirty, setWritingDirty] = useState(false);
+  const confirmLeaveWriting = () => !writingDirty || window.confirm("当前章节还有未保存内容，确定离开写作台吗？");
 
   const reload = async () => {
     const [detail, allInsights] = await Promise.all([
@@ -92,7 +94,7 @@ export function ProjectPage({
   return (
     <div className={styles.shell}>
       <aside className={styles.subnav}>
-        <button className={styles.backLink} onClick={onBack}>
+        <button className={styles.backLink} onClick={() => { if (confirmLeaveWriting()) onBack(); }}>
           <ArrowLeft size={16} />
           返回多书总览
         </button>
@@ -108,7 +110,7 @@ export function ProjectPage({
             <button
               key={item.id}
               className={`${styles.navButton}${tab === item.id ? ` ${styles.active}` : ""}`}
-              onClick={() => setTab(item.id)}
+              onClick={() => { if (item.id === tab || confirmLeaveWriting()) setTab(item.id); }}
             >
               <item.icon size={17} />
               {item.id}
@@ -166,7 +168,7 @@ export function ProjectPage({
             api={api}
             reload={reload}
             notify={notify}
-            onNavigate={setTab}
+            onNavigate={(next) => { if (confirmLeaveWriting()) setTab(next); }}
           />
         )}
         {tab === "故事圣经" && (
@@ -191,6 +193,7 @@ export function ProjectPage({
             api={api}
             reload={reload}
             notify={notify}
+            onDirtyChange={setWritingDirty}
           />
         )}
         {tab === "状态账本" && (

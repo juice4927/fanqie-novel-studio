@@ -4,6 +4,7 @@ import { Worker } from "node:worker_threads";
 
 export class BackgroundWorker {
   private worker: Worker;
+  private closing = false;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (reason: Error) => void; onProgress?: (value: unknown) => void }>();
 
   constructor() {
@@ -28,7 +29,10 @@ export class BackgroundWorker {
       this.pending.clear();
     });
     worker.on("exit", (code) => {
-      if (code !== 0) this.worker = this.spawn();
+      const error = new Error(`后台任务进程已退出（代码 ${code}）`);
+      for (const pending of this.pending.values()) pending.reject(error);
+      this.pending.clear();
+      if (!this.closing) this.worker = this.spawn();
     });
     return worker;
   }
@@ -48,6 +52,7 @@ export class BackgroundWorker {
   }
 
   close() {
+    this.closing = true;
     return this.worker.terminate();
   }
 }

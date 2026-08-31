@@ -15,4 +15,8 @@ describe("approved volume ranges", () => {
     expect(findCurrentVolume(plans, 75)?.id).toBe("第二卷");
     expect(findCurrentVolume(plans, 101)).toBeUndefined();
   });
+
+  it("rejects corrupt legacy target word values", () => {
+    expect(() => approvedVolumeRanges([volume("坏数据", 1, Number.NaN)])).toThrow("目标字数无效");
+  });
 });

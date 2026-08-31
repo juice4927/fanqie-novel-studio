@@ -162,6 +162,19 @@ function registerHandlers() {
       });
       return result.canceled ? null : result.filePath ?? null;
     },
+    confirmDiagnosticExport: async () => {
+      if (!mainWindow) return false;
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: "warning",
+        buttons: ["取消", "继续导出"],
+        defaultId: 0,
+        cancelId: 0,
+        title: "导出诊断包",
+        message: "诊断包包含系统版本、工作区路径、项目名称、健康检查结果和应用日志。",
+        detail: "请仅将诊断包提供给可信的技术支持人员。",
+      });
+      return result.response === 1;
+    },
     chooseProjectExportDestination: async (defaultFileName, format) => {
       if (!mainWindow) return null;
       const result = await dialog.showSaveDialog(mainWindow, {
@@ -345,6 +358,17 @@ function createWindow() {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     event.preventDefault();
     openExternalHttpUrl(url);
+  });
+  mainWindow.webContents.on("will-prevent-unload", (event) => {
+    const choice = dialog.showMessageBoxSync(mainWindow!, {
+      type: "warning",
+      buttons: ["继续编辑", "放弃未保存内容并关闭"],
+      defaultId: 0,
+      cancelId: 0,
+      title: "存在未保存内容",
+      message: "当前章节还有未保存内容。",
+    });
+    if (choice === 1) event.preventDefault();
   });
   mainWindow.webContents.session.setPermissionCheckHandler(() => false);
   mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));

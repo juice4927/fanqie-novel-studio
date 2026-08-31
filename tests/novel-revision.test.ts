@@ -33,6 +33,7 @@ describe("novel revision safeguards", () => {
     const repair = { id: "text:chapter-1", targetId: chapter.id, baseRevision: 3, start, end: chapter.content.length, before: "灯忽然亮了。", after: "应急灯一盏盏亮起。", reason: "增强画面", risk: "低" } as const;
     expect(applyTextRepair(chapter, repair)).toBe("他推开门。应急灯一盏盏亮起。");
     expect(() => applyTextRepair({ ...chapter, content: "他推开门。四周仍然漆黑。" }, repair)).toThrow("修改位置已变化");
+    expect(() => applyTextRepair(chapter, { ...repair, start: chapter.content.length + 1, end: chapter.content.length + 1, before: "" })).toThrow("修改位置已变化");
   });
 
   it("creates stable editable chapter snapshots", () => {

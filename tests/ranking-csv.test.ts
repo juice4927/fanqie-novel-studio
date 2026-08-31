@@ -47,4 +47,10 @@ describe("ranking CSV parser", () => {
     expect(snapshot.error).toBeTruthy();
     expect(snapshot.entries).toHaveLength(1);
   });
+
+  it("parses decorated Chinese units and rejects unsafe links", () => {
+    const snapshot = parseRankingCsv("书名,字数,链接\n甲,约1.2万,javascript:alert(1)\n乙,1.5亿,https://example.com/book", "单位", options());
+    expect(snapshot.entries.map((entry) => entry.words)).toEqual([12_000, 150_000_000]);
+    expect(snapshot.entries.map((entry) => entry.sourceUrl)).toEqual(["", "https://example.com/book"]);
+  });
 });

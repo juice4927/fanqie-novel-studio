@@ -27,6 +27,7 @@ describe("shared chapter lifecycle", () => {
     expect(deriveChapterStatus(chapter("章纲", ""), chapter("已发布"))).toBe("草稿");
     expect(deriveChapterStatus(chapter("待质检"), chapter("待质检", "修改正文"))).toBe("草稿");
     expect(deriveChapterStatus(chapter("已定稿"), chapter("已定稿", "修改正文"), { protectedEdit: true })).toBe("待质检");
+    expect(deriveChapterStatus(chapter("待定稿"), chapter("待定稿", ""))).toBe("章纲");
   });
 
   it("enforces ordered transitions and unresolved hard issue gates", () => {

@@ -62,6 +62,14 @@ describe("chapter draft reliability", () => {
     expect(writeRecoveredChapter("project", chapter("无法落盘"), storage)).toBe(false);
   });
 
+  it("does not let an older recovery copy replace a newer server revision", () => {
+    const values = new Map<string, string>();
+    const server = { ...chapter("服务器新稿"), revision: 3, updatedAt: "2026-08-01T03:00:00.000Z" };
+    const stale = { ...chapter("本地旧稿"), revision: 2, updatedAt: "2026-08-01T02:00:00.000Z" };
+    values.set(chapterRecoveryKey("project", server), JSON.stringify(stale));
+    expect(readRecoveredChapter("project", server, { getItem: (key) => values.get(key) ?? null })).toBe(server);
+  });
+
   it("lets an explicit action wait until the newest draft wins an in-flight autosave race", async () => {
     const first = deferred<Chapter>();
     const save = vi.fn().mockReturnValueOnce(first.promise).mockImplementation(async (value: Chapter) => value);
@@ -85,5 +93,18 @@ describe("chapter draft reliability", () => {
       expect.objectContaining({ content: "最终操作" }),
       expect.objectContaining({ content: "最终操作" }),
     ]);
+  });
+
+  it("rejects persistent failures instead of retrying forever", async () => {
+    vi.useFakeTimers();
+    const save = vi.fn().mockRejectedValue(new Error("参数无效：content 超过上限"));
+    const onError = vi.fn();
+    const coordinator = new AutosaveCoordinator(save, vi.fn(), onError, 50);
+    const explicit = coordinator.saveLatest(chapter("过长正文"));
+    await expect(explicit).rejects.toThrow("超过上限");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(expect.any(Error), false);
+    vi.useRealTimers();
   });
 });

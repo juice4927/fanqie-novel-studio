@@ -19,13 +19,22 @@ export class ResearchRepository {
   }
 
   saveBook(book: ResearchBook, chapters: Array<{ title: string; content: string; wordCount: number }>) {
-    this.db.prepare("INSERT OR REPLACE INTO research_books VALUES(?, ?, ?)").run(book.id, JSON.stringify(book), now());
-    const insert = this.db.prepare("INSERT INTO research_chapters VALUES(?, ?, ?, ?, ?, ?)");
-    const fingerprint = this.db.prepare("INSERT OR IGNORE INTO research_fingerprints VALUES(?, ?, ?)");
-    chapters.forEach((chapter, index) => {
-      insert.run(randomUUID(), book.id, index + 1, chapter.title, chapter.content, chapter.wordCount);
-      for (const window of textWindows(chapter.content, 8)) fingerprint.run(hashText(window), book.id, window);
-    });
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("INSERT OR REPLACE INTO research_books VALUES(?, ?, ?)").run(book.id, JSON.stringify(book), now());
+      this.db.prepare("DELETE FROM research_chapters WHERE book_id = ?").run(book.id);
+      this.db.prepare("DELETE FROM research_fingerprints WHERE book_id = ?").run(book.id);
+      const insert = this.db.prepare("INSERT INTO research_chapters VALUES(?, ?, ?, ?, ?, ?)");
+      const fingerprint = this.db.prepare("INSERT OR IGNORE INTO research_fingerprints VALUES(?, ?, ?)");
+      chapters.forEach((chapter, index) => {
+        insert.run(randomUUID(), book.id, index + 1, chapter.title, chapter.content, chapter.wordCount);
+        for (const window of textWindows(chapter.content, 8)) fingerprint.run(hashText(window), book.id, window);
+      });
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
   }
 
   getBook(bookId: string) {
@@ -36,9 +45,16 @@ export class ResearchRepository {
   }
 
   saveAnalyses(records: ResearchAnalysisRecord[]) {
-    if (records[0]) this.db.prepare("DELETE FROM research_analyses WHERE book_id = ?").run(records[0].bookId);
-    const insert = this.db.prepare("INSERT OR REPLACE INTO research_analyses VALUES(?, ?, ?, ?, ?, ?, ?)");
-    for (const record of records) insert.run(record.id, record.bookId, record.layer, record.fromChapter, record.toChapter, JSON.stringify(record), record.createdAt);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (records[0]) this.db.prepare("DELETE FROM research_analyses WHERE book_id = ?").run(records[0].bookId);
+      const insert = this.db.prepare("INSERT OR REPLACE INTO research_analyses VALUES(?, ?, ?, ?, ?, ?, ?)");
+      for (const record of records) insert.run(record.id, record.bookId, record.layer, record.fromChapter, record.toChapter, JSON.stringify(record), record.createdAt);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* transaction already closed */ }
+      throw error;
+    }
   }
 
   listAnalyses(bookId: string): ResearchAnalysisRecord[] {

@@ -5,8 +5,12 @@ import JSZip from "jszip";
 import type { AutoBackupFrequency } from "../src/shared/types";
 import { injectFault } from "./fault-injection";
 
-const MAGIC = Buffer.from("NOVELSTUDIO1");
+const MAGIC_V1 = Buffer.from("NOVELSTUDIO1");
+const MAGIC = Buffer.from("NOVELSTUDIO2");
 const AUTO_BACKUP_PATTERN = /^auto-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.novelbak$/;
+const SCRYPT_OPTIONS = { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 } as const;
+const MAX_RESTORE_FILES = 50_000;
+const MAX_RESTORE_BYTES = 2 * 1024 * 1024 * 1024;
 
 export function nextAutoBackupAt(frequency: AutoBackupFrequency, from = new Date()) {
   const interval = frequency === "daily" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
@@ -24,7 +28,7 @@ export async function pruneAutoBackups(backupRoot: string, retentionCount: numbe
     .sort()
     .reverse();
   for (const name of entries.slice(Math.max(1, retentionCount)))
-    await unlink(path.join(backupRoot, name));
+    await unlink(path.join(backupRoot, name)).catch(() => {});
   return entries.slice(0, Math.max(1, retentionCount));
 }
 
@@ -53,7 +57,7 @@ export async function createEncryptedBackup(workspaceRoot: string, destination: 
   const archive = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
   const salt = randomBytes(16);
   const iv = randomBytes(12);
-  const key = scryptSync(password, salt, 32);
+  const key = scryptSync(password, salt, 32, SCRYPT_OPTIONS);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(archive), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -77,7 +81,7 @@ export async function createEncryptedBackup(workspaceRoot: string, destination: 
       previousMoved = false;
       throw error;
     }
-    if (previousMoved) await unlink(previous);
+    if (previousMoved) await unlink(previous).catch(() => {});
   } catch (error) {
     await unlink(temporary).catch(() => {});
     if (previousMoved) await rename(previous, destination).catch(() => {});
@@ -87,13 +91,15 @@ export async function createEncryptedBackup(workspaceRoot: string, destination: 
 
 async function readVerifiedArchive(source: string, password: string) {
   const payload = await readFile(source);
-  if (!payload.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error("不是有效的工作台加密备份");
+  const header = payload.subarray(0, MAGIC.length);
+  const legacy = header.equals(MAGIC_V1);
+  if (!legacy && !header.equals(MAGIC)) throw new Error("不是有效的工作台加密备份");
   let offset = MAGIC.length;
   const salt = payload.subarray(offset, offset += 16);
   const iv = payload.subarray(offset, offset += 12);
   const tag = payload.subarray(offset, offset += 16);
   const encrypted = payload.subarray(offset);
-  const decipher = createDecipheriv("aes-256-gcm", scryptSync(password, salt, 32), iv);
+  const decipher = createDecipheriv("aes-256-gcm", legacy ? scryptSync(password, salt, 32) : scryptSync(password, salt, 32, SCRYPT_OPTIONS), iv);
   decipher.setAuthTag(tag);
   let archive: Buffer;
   try {
@@ -106,6 +112,9 @@ async function readVerifiedArchive(source: string, password: string) {
   if (!manifestEntry) throw new Error("备份缺少完整性清单");
   const manifest = JSON.parse(await manifestEntry.async("text")) as { files: Array<{ path: string; bytes: number }> };
   if (!Array.isArray(manifest.files)) throw new Error("备份完整性清单格式无效");
+  if (manifest.files.length > MAX_RESTORE_FILES) throw new Error("备份文件数量超过安全限制");
+  const declaredBytes = manifest.files.reduce((sum, item) => sum + (Number.isSafeInteger(item.bytes) && item.bytes >= 0 ? item.bytes : Number.POSITIVE_INFINITY), 0);
+  if (!Number.isSafeInteger(declaredBytes) || declaredBytes > MAX_RESTORE_BYTES) throw new Error("备份解压总量超过 2GB 安全限制");
   for (const item of manifest.files) {
     const normalized = path.normalize(item.path);
     if (path.isAbsolute(normalized) || normalized.startsWith("..")) throw new Error("备份包含不安全路径");

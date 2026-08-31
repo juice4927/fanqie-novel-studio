@@ -46,6 +46,7 @@ export function prepareFactSave(
     (fact) =>
       fact.id !== next.id &&
       fact.id !== proposedReplacement?.id &&
+      fact.confidence !== "已忽略" &&
       fact.subject === next.subject &&
       fact.predicate === next.predicate &&
       fact.validToChapter === null &&

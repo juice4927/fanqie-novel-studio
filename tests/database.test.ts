@@ -82,8 +82,20 @@ describe("per-book isolation and gates", () => {
   it("persists the configurable long AI task timeout", () => {
     const database = createDatabase();
     expect(database.getAiSettings().longTaskTimeoutMinutes).toBe(10);
+    expect(database.getAiSettings().protocol).toBe("openai-compatible");
     const { hasApiKey: _hasApiKey, ...current } = database.getAiSettings();
-    expect(database.saveAiSettings({ ...current, longTaskTimeoutMinutes: 15 }).longTaskTimeoutMinutes).toBe(15);
+    expect(database.saveAiSettings({
+      ...current,
+      protocol: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      model: "claude-model",
+      longTaskTimeoutMinutes: 15,
+    })).toMatchObject({
+      protocol: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      model: "claude-model",
+      longTaskTimeoutMinutes: 15,
+    });
   });
 
   it("records AI usage and marks abandoned running jobs as interrupted", () => {
@@ -335,12 +347,17 @@ describe("per-book isolation and gates", () => {
     const chapter = { ...createChapter(3, "迁移后仍需保留的正文"), id: crypto.randomUUID(), wordCount: 10 };
     legacy.prepare("INSERT INTO records(collection, id, payload, updated_at) VALUES('chapters', ?, ?, ?)")
       .run(chapter.id, JSON.stringify(chapter), chapter.updatedAt);
+    const malformed = { ...chapter, id: crypto.randomUUID(), title: "缺失章号", content: "旧数据没有章号", number: undefined };
+    legacy.prepare("INSERT INTO records(collection, id, payload, updated_at) VALUES('chapters', ?, ?, ?)")
+      .run(malformed.id, JSON.stringify(malformed), chapter.updatedAt);
     legacy.close();
 
     const reopened = new WorkspaceDatabase(root);
     databases.push(reopened);
-    expect(reopened.getProjectOverview(project.id).chapters[0]).toMatchObject({ id: chapter.id, number: 3, content: "" });
+    expect(reopened.getProjectOverview(project.id).chapters.find((item) => item.id === chapter.id)).toMatchObject({ id: chapter.id, number: 3, content: "" });
     expect(reopened.getChapter(project.id, chapter.id).content).toBe(chapter.content);
+    expect(reopened.getChapter(project.id, malformed.id).number).toBe(1);
+    expect(reopened.searchProject(project.id, "迁移后")).toHaveLength(1);
     const migrated = new DatabaseSync(path.join(projectPath, "project.sqlite"));
     expect((migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
     expect((migrated.prepare("SELECT COUNT(*) AS count FROM records WHERE collection = 'chapters'").get() as { count: number }).count).toBe(0);
@@ -447,6 +464,7 @@ describe("per-book isolation and gates", () => {
     expect(database.getProject(project.id).summaries.map((item) => item.layer)).toEqual(expect.arrayContaining(["场景", "章节", "十章阶段", "全书"]));
     expect(database.getProject(project.id).summaries.find((item) => item.layer === "章节")?.content).toContain("未解决事项：");
     expect(database.searchProject(project.id, "章节版本")[0].chapterNumber).toBe(1);
+    expect(database.searchProject(project.id, "版本")[0].chapterNumber).toBe(1);
   });
 
   it("marks overlapping facts as conflicts and ranks relevant facts", () => {
@@ -659,6 +677,29 @@ describe("approval gates", () => {
     expect(unrelated.status).toBe("待审批");
     expect(unrelated.baseVersion).toBe(second.revision);
     expect(() => database.saveContract(project.id, { ...contract, premise: "不能挪用审批" })).toThrow("变更单");
+  });
+
+  it("invalidates a pending schedule when an approved protected edit returns a chapter to quality review", () => {
+    const database = createDatabase();
+    const project = database.createProject({ title: "排期回退", genre: "都市脑洞", targetWords: 1000000, updateCadence: "每日1章" });
+    let chapter = database.saveChapter(project.id, createChapter(1, "原定稿正文"));
+    chapter = database.transitionChapter(project.id, chapter.id, "待质检");
+    chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
+    chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    database.saveSchedule(project.id, {
+      id: "", projectId: project.id, projectTitle: project.title, chapterId: chapter.id,
+      chapterNumber: chapter.number, chapterTitle: chapter.title, publishAt: "2026-08-03T08:00:00.000Z", status: "待发布",
+    });
+    const request = database.saveChangeRequest(project.id, {
+      id: "", targetKind: "章节", targetId: chapter.id, baseVersion: 0, title: "修改定稿", reason: "复核",
+      beforeValue: chapter.content, afterValue: "修订正文", impact: "本章排期", rollback: "恢复正文", status: "待审批", createdAt: now(),
+    });
+    database.decideChangeRequest(project.id, request.id, "批准");
+    const saved = database.saveChapter(project.id, { ...database.getChapter(project.id, chapter.id), content: "修订正文" });
+    const detail = database.getProject(project.id);
+    expect(saved.status).toBe("待质检");
+    expect(detail.schedule[0].status).toBe("待排期");
+    expect(detail.changes.find((item) => item.id === request.id)?.status).toBe("已应用");
   });
 
   it("rejects approval when the long-form narrative engine is incomplete", () => {

@@ -15,8 +15,11 @@ const activeAt = (fact: LedgerFact, chapterNumber: number) => fact.validFromChap
 const CHINESE_DIGITS: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 
 export function parseStoryNumber(value: string): number | null {
-  const arabic = value.match(/\d+(?:\.\d+)?/);
-  if (arabic) return Number(arabic[0]);
+  const arabic = value.match(/\d+(?:\.\d+)?\s*([十百千万亿])?/);
+  if (arabic) {
+    const multiplier = { 十: 10, 百: 100, 千: 1_000, 万: 10_000, 亿: 100_000_000 }[arabic[1] ?? ""] ?? 1;
+    return Number(arabic[0].match(/\d+(?:\.\d+)?/)![0]) * multiplier;
+  }
   const text = value.match(/[零〇一二两三四五六七八九十百千万]+/)?.[0];
   if (!text) return null;
   let total = 0;
@@ -34,6 +37,9 @@ export function parseStoryNumber(value: string): number | null {
       digit = 0;
     }
   }
+  const omittedTail = text.match(/万([一二两三四五六七八九])$/);
+  if (omittedTail && !text.includes("零"))
+    return total + section + CHINESE_DIGITS[omittedTail[1]] * 1_000;
   return total + section + digit;
 }
 

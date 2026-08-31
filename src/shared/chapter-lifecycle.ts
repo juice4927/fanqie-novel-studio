@@ -48,10 +48,11 @@ export function deriveChapterStatus(
   next: Chapter,
   options: { forcedStatus?: ChapterStatus; protectedEdit?: boolean } = {},
 ): ChapterStatus {
+  if (!next.content.trim()) return "章纲";
   if (options.forcedStatus) return options.forcedStatus;
-  if (!previous) return next.content.trim() ? "草稿" : "章纲";
-  if (options.protectedEdit) return next.content.trim() ? "待质检" : "章纲";
-  if (previous.status === "章纲" && next.content.trim()) return "草稿";
+  if (!previous) return "草稿";
+  if (options.protectedEdit) return "待质检";
+  if (previous.status === "章纲") return "草稿";
   if (previous.content !== next.content && (previous.status === "待质检" || previous.status === "待定稿")) return "草稿";
   return previous.status;
 }

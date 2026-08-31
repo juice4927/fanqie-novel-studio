@@ -23,7 +23,7 @@ export type ChapterGenerationDatabase = Pick<
   | "getProject"
   | "saveGeneratedChapter"
   | "searchRelevantFacts"
->;
+> & Partial<Pick<WorkspaceDatabase, "markAiJobApplicationFailed">>;
 
 export type ChapterGenerationAi = Pick<
   AiService,
@@ -136,13 +136,17 @@ export function createChapterGenerationCoordinator({
       return {
         ...task,
         completion: task.completion
-          .then((generated) =>
-            database.saveGeneratedChapter(
-              projectId,
-              generated,
-              generationGuard,
-            ),
-          )
+          .then((generated) => {
+            try {
+              return database.saveGeneratedChapter(projectId, generated, generationGuard);
+            } catch (error) {
+              if (task.jobId) {
+                const message = error instanceof Error ? error.message : String(error);
+                database.markAiJobApplicationFailed?.(task.jobId, `模型输出未应用：${message}`);
+              }
+              throw error;
+            }
+          })
           .finally(() => markIdle(projectId)),
       };
     } catch (error) {

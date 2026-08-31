@@ -18,9 +18,20 @@ function value(
 }
 
 function parseNumber(raw: string): number {
-  const numeric = Number(String(raw).replace(/[,，万]/g, ""));
-  if (String(raw).includes("万")) return Math.round(numeric * 10_000);
-  return Number.isFinite(numeric) ? numeric : 0;
+  const text = String(raw).replace(/[,，]/g, "");
+  const match = text.match(/[-+]?\d+(?:\.\d+)?/);
+  if (!match) return 0;
+  const numeric = Number(match[0]);
+  const multiplier = text.includes("亿") ? 100_000_000 : text.includes("万") ? 10_000 : 1;
+  const result = Math.round(numeric * multiplier);
+  return Number.isFinite(result) ? result : 0;
+}
+
+function safeHttpUrl(raw: string) {
+  try {
+    const url = new URL(raw);
+    return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.toString() : "";
+  } catch { return ""; }
 }
 
 export function parseRankingCsv(
@@ -58,7 +69,7 @@ export function parseRankingCsv(
       tags: value(row, ["标签", "tags"])
         .split(/[、,，]/)
         .filter(Boolean),
-      sourceUrl: value(row, ["链接", "url", "sourceUrl"]),
+      sourceUrl: safeHttpUrl(value(row, ["链接", "url", "sourceUrl"])),
     })),
   };
 }

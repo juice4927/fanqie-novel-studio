@@ -102,6 +102,7 @@ function createProject(): ProjectDetail {
 }
 
 const settings: AiSettings = {
+  protocol: "openai-compatible",
   baseUrl: "https://model.invalid/v1",
   model: "test-model",
   embeddingModel: "test-embedding",
@@ -155,6 +156,7 @@ function createHarness(options: {
   const saveGeneratedChapter = vi.fn(
     (_projectId: string, chapter: Chapter) => chapter,
   );
+  const markAiJobApplicationFailed = vi.fn();
   const startDraftChapter = vi.fn(
     (_projectId: string, _chapter: Chapter) => ({
       jobId: "job-1",
@@ -176,6 +178,7 @@ function createHarness(options: {
     getAiSettings,
     searchRelevantFacts,
     saveGeneratedChapter,
+    markAiJobApplicationFailed,
   };
   const ai: ChapterGenerationAi = {
     startDraftChapter,
@@ -195,6 +198,7 @@ function createHarness(options: {
     getProject,
     searchRelevantFacts,
     saveGeneratedChapter,
+    markAiJobApplicationFailed,
     startDraftChapter,
     draftChapter,
     compileContext,
@@ -343,6 +347,20 @@ describe("chapter generation coordinator", () => {
     pending.reject(new Error("generation failed"));
     await expect(task.completion).rejects.toThrow("generation failed");
     expect(harness.coordinator.isActive("project-1")).toBe(false);
+  });
+
+  it("marks a successful AI job failed when its chapter result cannot be applied", async () => {
+    const harness = createHarness();
+    harness.saveGeneratedChapter.mockImplementationOnce(() => {
+      throw new Error("章节在 AI 生成期间已被修改，旧生成结果未保存");
+    });
+
+    const task = harness.coordinator.startOne("project-1", "chapter-1");
+    await expect(task.completion).rejects.toThrow("旧生成结果未保存");
+    expect(harness.markAiJobApplicationFailed).toHaveBeenCalledWith(
+      "job-1",
+      expect.stringContaining("模型输出未应用"),
+    );
   });
 
   it("generates a five-chapter batch in order and skips existing content", async () => {

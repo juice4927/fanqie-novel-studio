@@ -58,5 +58,6 @@ describe("change request rules", () => {
     expect(decideChangeRequest(prepared, "批准").status).toBe("已批准");
     expect(decideChangeRequest(prepared, "拒绝").status).toBe("已拒绝");
     expect(() => decideChangeRequest(undefined, "批准")).toThrow("变更单不存在");
+    expect(() => decideChangeRequest({ ...prepared, status: "已应用" }, "批准")).toThrow("只有待审批");
   });
 });

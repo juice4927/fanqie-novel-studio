@@ -105,5 +105,11 @@ describe("fact save rules", () => {
 
     expect(ignored.fact.confidence).toBe("已忽略");
     expect(ignored.replacement).toBeUndefined();
+    const replacement = prepareFactSave(
+      [fact({ confidence: "已忽略" })],
+      fact({ id: "new", value: "上海" }),
+      { factId: "new", updatedAt: timestamp },
+    );
+    expect(replacement.fact.confidence).toBe("已确认");
   });
 });
