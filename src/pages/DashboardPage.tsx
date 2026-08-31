@@ -91,17 +91,13 @@ export function DashboardPage({
               <span />
             </div>
             {data.projects.map((project) => (
-              // biome-ignore lint/a11y/useSemanticElements: 行内含删除按钮，改成 button 会产生嵌套交互元素
-              <div
-                className="project-row"
-                key={project.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => onOpenProject(project.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") onOpenProject(project.id);
-                }}
-              >
+              <div className="project-row" key={project.id}>
+                <button
+                  type="button"
+                  className="project-row-open"
+                  aria-label={`打开作品 ${project.title}`}
+                  onClick={() => onOpenProject(project.id)}
+                />
                 <span className="book-cell">
                   <span className="book-mark">{project.title.slice(0, 1)}</span>
                   <span>
@@ -124,13 +120,7 @@ export function DashboardPage({
                   <Badge tone={riskTone(project.riskLevel)}>{project.riskLevel}</Badge>
                 </span>
                 <span className="project-row-actions">
-                  <IconButton
-                    label={`删除作品 ${project.title}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDeleteProject(project);
-                    }}
-                  >
+                  <IconButton label={`删除作品 ${project.title}`} onClick={() => onDeleteProject(project)}>
                     <Trash2 size={16} />
                   </IconButton>
                   <ArrowRight size={17} />

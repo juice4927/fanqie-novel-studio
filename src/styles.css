@@ -6,8 +6,8 @@
   text-rendering: optimizeLegibility;
   letter-spacing: 0;
   --ink: #202421;
-  --muted: #6e756e;
-  --subtle: #8b918b;
+  --muted: #5f665f;
+  --subtle: #5f665f;
   --line: #dcded8;
   --line-strong: #c8cbc4;
   --surface: #ffffff;
@@ -189,7 +189,7 @@ p {
   height: 32px;
   margin: 0 3px 7px;
   padding: 0 9px;
-  color: #7f8b84;
+  color: #97a299;
   background: #171d1a;
   border: 1px solid #333c37;
   border-radius: 5px;
@@ -255,7 +255,7 @@ p {
 }
 .sidebar-book-list small {
   margin-top: 3px;
-  color: #7f8b84;
+  color: #97a299;
   font-size: 10px;
 }
 .sidebar-book-list i {
@@ -275,7 +275,7 @@ p {
   align-items: center;
   gap: 7px;
   padding: 12px 10px 2px;
-  color: #738077;
+  color: #97a299;
   font-size: 10px;
 }
 .app-main {
@@ -311,7 +311,7 @@ p {
 }
 .eyebrow {
   margin-bottom: 6px;
-  color: var(--accent);
+  color: var(--accent-hover);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -504,6 +504,7 @@ p {
   gap: 13px;
   min-width: 900px;
   padding: 0 17px;
+  position: relative;
 }
 .table-header {
   height: 38px;
@@ -527,7 +528,22 @@ p {
 .project-row:hover {
   background: #fbfbf8;
 }
+.project-row-open {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.project-row-open:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  z-index: 2;
+}
 .project-row-actions {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;

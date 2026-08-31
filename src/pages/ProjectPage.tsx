@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { Select } from "../components/UI";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
+import { PROJECT_STATUSES } from "../shared/status-constants";
 import type { AppApi, InsightPack, ProjectDetail, ProjectStatus } from "../shared/types";
 import { LedgerPage } from "./LedgerWorkspace";
 import { PlanningPage } from "./PlanningWorkspace";
@@ -116,6 +117,7 @@ export function ProjectPage({
         <div className={styles.stage}>
           <span>当前阶段</span>
           <Select
+            aria-label="当前阶段"
             value={project.summary.status}
             onChange={async (event) => {
               try {
@@ -128,11 +130,9 @@ export function ProjectPage({
               }
             }}
           >
-            {["研究中", "候选立项", "设定中", "大纲审批", "连载准备", "连载中", "暂停", "完结", "归档"].map(
-              (status) => (
-                <option key={status}>{status}</option>
-              ),
-            )}
+            {PROJECT_STATUSES.map((status) => (
+              <option key={status}>{status}</option>
+            ))}
           </Select>
         </div>
       </aside>
