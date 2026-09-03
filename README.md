@@ -129,6 +129,7 @@ Anthropic 支持使用官方 API 密钥，不读取或复用 Claude Code / Claud
 
 ## 本地开发
 工程优化路线图见 [docs/OPTIMIZATION_EXECUTION.md](docs/OPTIMIZATION_EXECUTION.md)。
+架构与依赖方向见 [docs/architecture.md](docs/architecture.md)，领域门禁见 [docs/domain-rules.md](docs/domain-rules.md)，商业知识库与质量基准见 [docs/knowledge-base.md](docs/knowledge-base.md)，安全模型见 [docs/security.md](docs/security.md)。
 
 建议使用 Node.js 22 LTS、Windows 10/11 和 SSD：
 
