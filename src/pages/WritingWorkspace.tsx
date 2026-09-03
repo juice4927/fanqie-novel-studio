@@ -42,6 +42,7 @@ import type {
 } from "../shared/types";
 import { CHAPTER_FUNCTIONS } from "../shared/types";
 import { ContextPanel } from "./ContextPanel";
+import { DirectorNotesEditor } from "./DirectorNotesEditor";
 
 export interface CommonProjectProps {
   project: ProjectDetail;
@@ -1094,36 +1095,12 @@ export function WritingPage({
             })}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 10 }}>
               <section>
-                <details>
-                  <summary>导演备注（约束后续 AI 生成）</summary>
-                  {(project.directorNotes ?? []).length === 0 ? (
-                    <p className="muted-line">还没有备注；打回时填原因会自动沉淀到这里。</p>
-                  ) : (
-                    <ul style={{ paddingLeft: 18, marginTop: 6 }}>
-                      {(project.directorNotes ?? []).map((note) => (
-                        <li key={note} style={{ marginBottom: 4 }}>
-                          <span style={{ marginRight: 8 }}>{note}</span>
-                          <button
-                            type="button"
-                            aria-label="删除导演备注"
-                            onClick={() => void removeDirectorNote(note)}
-                            style={{ color: "var(--muted)", cursor: "pointer" }}
-                          >
-                            ×
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </details>
-                <Field label="打回原因（可选，将沉淀为导演备注）">
-                  <Textarea
-                    rows={2}
-                    value={revertNote}
-                    onChange={(event) => setRevertNote(event.target.value)}
-                    placeholder="例如：开头节奏太慢、别用“旋即”"
-                  />
-                </Field>
+                <DirectorNotesEditor
+                  notes={project.directorNotes ?? []}
+                  note={revertNote}
+                  onNoteChange={setRevertNote}
+                  onRemove={(entry) => void removeDirectorNote(entry)}
+                />
               </section>
 
               <Button variant="secondary" onClick={() => setBatchReview(null)}>
@@ -1240,36 +1217,12 @@ export function WritingPage({
               )}
 
               <section>
-                <details>
-                  <summary>导演备注（约束后续 AI 生成）</summary>
-                  {(project.directorNotes ?? []).length === 0 ? (
-                    <p className="muted-line">还没有备注；打回 AI 产出时可填原因，会自动沉淀到这里。</p>
-                  ) : (
-                    <ul style={{ paddingLeft: 18, marginTop: 6 }}>
-                      {(project.directorNotes ?? []).map((note) => (
-                        <li key={note} style={{ marginBottom: 4 }}>
-                          <span style={{ marginRight: 8 }}>{note}</span>
-                          <button
-                            type="button"
-                            aria-label="删除导演备注"
-                            onClick={() => void removeDirectorNote(note)}
-                            style={{ color: "var(--muted)", cursor: "pointer" }}
-                          >
-                            ×
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </details>
-                <Field label="打回原因（可选，将沉淀为导演备注）">
-                  <Textarea
-                    rows={2}
-                    value={revertNote}
-                    onChange={(event) => setRevertNote(event.target.value)}
-                    placeholder="例如：开头节奏太慢、别用“旋即”、结局的拥抱保留"
-                  />
-                </Field>
+                <DirectorNotesEditor
+                  notes={project.directorNotes ?? []}
+                  note={revertNote}
+                  onNoteChange={setRevertNote}
+                  onRemove={(entry) => void removeDirectorNote(entry)}
+                />
               </section>
             </section>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
