@@ -1,12 +1,16 @@
 import { BookCopy, BookOpen, Database, LayoutDashboard, Plus, Search, Settings, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { NewProjectModal } from "./components/NewProjectModal";
 import { Button, Field, Input, Modal } from "./components/UI";
 import { createBrowserApi } from "./lib/browser-api";
 import { DashboardPage } from "./pages/DashboardPage";
-import { ProjectPage } from "./pages/ProjectPage";
-import { ResearchPage } from "./pages/ResearchPage";
-import { SettingsPage } from "./pages/SettingsPage";
+
+const ResearchPage = lazy(() => import("./pages/ResearchPage").then((m) => ({ default: m.ResearchPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const ProjectPage = lazy(() => import("./pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
+
+
+
 import type { DashboardData, ProjectSummary } from "./shared/types";
 
 type AppPage = "dashboard" | "research" | "project" | "settings";
@@ -114,6 +118,7 @@ export default function App() {
         </nav>
       </aside>
       <div className="app-main">
+        <Suspense fallback={<div className="page loading-page">加载中…</div>}>
         {page === "dashboard" && dashboard && (
           <DashboardPage
             data={dashboard}
@@ -138,6 +143,7 @@ export default function App() {
             }}
           />
         )}
+        </Suspense>
       </div>
       {createModal && (
         <NewProjectModal
