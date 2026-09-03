@@ -67,7 +67,6 @@
   "build": {
     "appId": "cn.local.fanqie.novelstudio",
     "productName": "长篇创作工作台",
-    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release"
     },
