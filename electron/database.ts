@@ -1033,7 +1033,7 @@ export class WorkspaceDatabase {
           this.persistChapterInTransaction(db, id, { ...chapter, batchMode: "逐章" });
       }
       injectFault("power-loss-before-commit");
-db.exec("COMMIT");
+      db.exec("COMMIT");
       this.touchProject(id);
     } catch (error) {
       try {
@@ -1116,7 +1116,7 @@ db.exec("COMMIT");
     try {
       for (const metric of metrics) this.saveRecord(db, "metrics", metric.id, metric);
       injectFault("power-loss-before-commit");
-db.exec("COMMIT");
+      db.exec("COMMIT");
       this.touchProject(id);
     } catch (error) {
       try {
@@ -1202,7 +1202,7 @@ db.exec("COMMIT");
           entry.platform ?? null,
         );
       injectFault("power-loss-before-commit");
-this.research.exec("COMMIT");
+      this.research.exec("COMMIT");
     } catch (error) {
       try {
         this.research.exec("ROLLBACK");
