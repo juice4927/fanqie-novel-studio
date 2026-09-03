@@ -487,24 +487,17 @@ export class WorkspaceDatabase {
             .all(throughExclusive) as Array<{ payload: string }>
         ).map((row) => parseJson<ScheduleItem>(row.payload)),
       );
-      const issueCount = db
+      const alertRows = db
         .prepare(`
-        SELECT COUNT(*) AS count FROM records
+        SELECT payload, COUNT(*) OVER () AS total
+        FROM records
         WHERE collection = 'issues' AND json_extract(payload, '$.status') = '待处理'
+        ORDER BY julianday(json_extract(payload, '$.createdAt')) DESC, id
+        LIMIT 12
       `)
-        .get() as { count: number };
-      pendingIssues += Number(issueCount.count);
-      activeAlerts.push(
-        ...(
-          db
-            .prepare(`
-        SELECT payload FROM records
-        WHERE collection = 'issues' AND json_extract(payload, '$.status') = '待处理'
-        ORDER BY julianday(json_extract(payload, '$.createdAt')) DESC, id LIMIT 12
-      `)
-            .all() as Array<{ payload: string }>
-        ).map((row) => parseJson<QualityIssue>(row.payload)),
-      );
+        .all() as Array<{ payload: string; total: number }>;
+      pendingIssues += alertRows.length ? Number(alertRows[0].total) : 0;
+      activeAlerts.push(...alertRows.map((row) => parseJson<QualityIssue>(row.payload)));
     }
     return {
       dueToday: dueToday.sort(compareDueSchedules),
