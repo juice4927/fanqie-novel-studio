@@ -58,7 +58,6 @@ jobs:
           --config.publish.owner="$env:GH_OWNER"
           --config.publish.repo="$env:GH_REPO"
           --config.publish.releaseType=release
-          --config.win.publisherName="$env:WINDOWS_PUBLISHER_NAME"
       - uses: actions/upload-artifact@v4
         with:
           name: signed-windows-installer
