@@ -24,7 +24,9 @@ import {
 } from "../lib/chapter-draft";
 import { formatCount, formatDate } from "../lib/format";
 import { CONTEXT_SECTION_LABELS } from "../shared/context-diagnostics";
+import { canAcceptGeneratedDraft, summarizeQualityOverview } from "../shared/generated-review";
 import { diffParagraphs } from "../shared/paragraph-diff";
+import { buildChapterSummary } from "../shared/summaries";
 import { TOKEN_ESTIMATE_WARNING } from "../shared/token-estimator";
 import type {
   AppApi,
@@ -35,6 +37,7 @@ import type {
   NovelRevisionProposal,
   NovelRevisionScope,
   ProjectDetail,
+  QualityIssue,
   RevisionRecord,
   SearchHit,
 } from "../shared/types";
@@ -94,6 +97,12 @@ export function WritingPage({
   const [compareRevisionId, setCompareRevisionId] = useState("");
   const [saveStatus, setSaveStatus] = useState<"saved" | "dirty" | "saving" | "error">("saved");
   const [recoveryAvailable, setRecoveryAvailable] = useState(true);
+  const [review, setReview] = useState<{
+    chapter: Chapter;
+    previousChapter: Chapter;
+    issues: QualityIssue[];
+    checking: boolean;
+  } | null>(null);
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
   const draftRef = useRef(draft);
   const manuscriptRef = useRef<HTMLTextAreaElement>(null);
@@ -330,6 +339,49 @@ export function WritingPage({
     setSaveStatus("saved");
     return saved;
   };
+  const acceptGeneratedDraft = async () => {
+    if (!review) return;
+    try {
+      setBusy(true);
+      await api.transitionChapter(project.summary.id, review.chapter.id, "待定稿");
+      const accepted = review.chapter;
+      setReview(null);
+      await reload();
+      notify("已采纳 AI 产出并进入待定稿");
+      if (accepted.id === draftRef.current.id) {
+        draftRef.current = { ...draftRef.current, status: "待定稿" };
+        setDraft({ ...draftRef.current, status: "待定稿" });
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const rejectGeneratedDraft = async () => {
+    if (!review) return;
+    try {
+      setBusy(true);
+      const restored = await api.saveChapter(
+        project.summary.id,
+        { ...review.previousChapter, content: review.previousChapter.content },
+        "version",
+      );
+      draftRef.current = restored;
+      lastSavedSignature.current = chapterDraftSignature(restored);
+      clearRecoveredChapter(project.summary.id, restored);
+      setDraft(restored);
+      setSaveStatus("saved");
+      setReview(null);
+      await reload();
+      notify("已打回，正文恢复为生成前内容");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const canDiscardDraft = () => {
     if (!dirty) return true;
     if (!window.confirm("当前章节还有未保存内容，确定放弃这些修改吗？")) return false;
@@ -594,7 +646,21 @@ export function WritingPage({
                 setDraft(result);
                 setSaveStatus("saved");
                 await reload();
-                notify("AI 草稿已生成，尚未定稿");
+                setReview({ chapter: result, previousChapter: beforeGeneration, issues: [], checking: true });
+                void api
+                  .runQualityCheck(project.summary.id, result.id)
+                  .then((issues) =>
+                    setReview((current) =>
+                      current && current.chapter.id === result.id ? { ...current, issues, checking: false } : current,
+                    ),
+                  )
+                  .catch(() =>
+                    setReview((current) =>
+                      current && current.chapter.id === result.id
+                        ? { ...current, issues: [], checking: false }
+                        : current,
+                    ),
+                  );
               } catch (error) {
                 draftRef.current = beforeGeneration;
                 setDraft(beforeGeneration);
@@ -890,6 +956,95 @@ export function WritingPage({
               </details>
             ))}
         </aside>
+      )}
+      {review && (
+        <Modal
+          title={`审阅 AI 产出 · 第${review.chapter.number}章`}
+          onClose={() => !busy && setReview(null)}
+          width={940}
+        >
+          <div className="form-stack generated-review">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <strong>{review.chapter.title || "未命名章"}</strong>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                <small>{formatCount(review.chapter.content.replace(/\s/g, "").length)} 字</small>
+                {!review.checking && (
+                  <Badge tone={canAcceptGeneratedDraft(review.issues) ? "success" : "danger"}>
+                    {canAcceptGeneratedDraft(review.issues) ? "可采纳" : "存在硬性问题"}
+                  </Badge>
+                )}
+              </span>
+            </div>
+            <details open>
+              <summary>本章摘要</summary>
+              <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.7 }}>
+                {buildChapterSummary(review.chapter)}
+              </pre>
+            </details>
+            <div
+              style={{
+                whiteSpace: "pre-wrap",
+                lineHeight: 1.9,
+                maxHeight: 340,
+                overflowY: "auto",
+                padding: 12,
+                background: "var(--surface-soft)",
+                border: "1px solid var(--line)",
+                borderRadius: 6,
+                fontSize: 15,
+              }}
+            >
+              {review.chapter.content || "（空正文）"}
+            </div>
+            <section>
+              {review.checking ? (
+                <p className="muted-line">正在运行质检…</p>
+              ) : review.issues.length === 0 ? (
+                <p className="muted-line">未发现硬性问题（本地规则未命中，可采纳进入待定稿）</p>
+              ) : (
+                <div>
+                  <p>
+                    {summarizeQualityOverview(review.issues).hard} 硬性 ·{" "}
+                    {summarizeQualityOverview(review.issues).warning} 警告 ·{" "}
+                    {summarizeQualityOverview(review.issues).suggestion} 建议
+                  </p>
+                  <ul style={{ paddingLeft: 18, marginTop: 6 }}>
+                    {review.issues.map((issue) => (
+                      <li key={issue.id} style={{ marginBottom: 4 }}>
+                        <Badge
+                          tone={
+                            issue.severity === "硬性" ? "danger" : issue.severity === "警告" ? "warning" : "neutral"
+                          }
+                        >
+                          {issue.severity}
+                        </Badge>{" "}
+                        {issue.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </section>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              {canAcceptGeneratedDraft(review.issues) ? (
+                <Button
+                  icon={<Check size={16} />}
+                  disabled={review.checking || busy}
+                  onClick={() => void acceptGeneratedDraft()}
+                >
+                  采纳并进入待定稿
+                </Button>
+              ) : (
+                <Button variant="secondary" disabled={busy} onClick={() => setReview(null)}>
+                  先保留草稿，去处理问题
+                </Button>
+              )}
+              <Button variant="secondary" disabled={busy} onClick={() => void rejectGeneratedDraft()}>
+                打回重写
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
       {revisionOpen && (
         <Modal title="AI 修改意见" onClose={() => !revisionBusy && setRevisionOpen(false)} width={920}>
