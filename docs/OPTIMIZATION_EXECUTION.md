@@ -46,7 +46,7 @@
   - 已配置：在验证通过的提交上打 `v0.2.0` tag 并推送，触发 `release-windows`；确认 Release 产出签名安装包与 `latest.yml`。
   - 未配置：**不打 tag**；改为本地 `npm run dist:win` 验证打包链路，并把「需配置签名 Secrets 才能完成发布」写入文档待办。
 
-> 状态（2026-09-03）：签名 Secrets 尚未配置，v0.2.0 只做本地打包验证，未打 tag。发布待办：在仓库 Secrets 配置 `WINDOWS_CERTIFICATE_BASE64`/`WINDOWS_CERTIFICATE_PASSWORD`/`WINDOWS_PUBLISHER_NAME` 后，对已验证提交打 `v0.2.0` 触发 `release-windows`。
+> 状态（2026-09-03）：`v0.2.0` 已打 tag 并通过 GitHub Actions 发布（verify + release-windows 均绿），Release 含 `fanqie-novel-studio-setup-0.2.0.exe` 与 `latest.yml`，自动更新通道生效。安装包为未签名（与历史版本一致，SmartScreen 会提示未知发布者）；如需签名版，再在仓库 Secrets 配置 `WINDOWS_CERTIFICATE_BASE64`/`WINDOWS_CERTIFICATE_PASSWORD`/`WINDOWS_PUBLISHER_NAME` 后重新发布。
 - 验收：版本号一致、更新通道配置生效；发布成功或（无证书时）本地打包成功 + 证书待办已记录。
 
 ## 阶段 5 — 性能与领域文档（P3）
