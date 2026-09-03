@@ -11,7 +11,6 @@ import {
   Search,
   SearchCheck,
   Sparkles,
-  Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Badge, Button, Field, IconButton, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
@@ -23,7 +22,6 @@ import {
   writeRecoveredChapter,
 } from "../lib/chapter-draft";
 import { formatCount, formatDate } from "../lib/format";
-import { CONTEXT_SECTION_LABELS } from "../shared/context-diagnostics";
 import { canAcceptGeneratedDraft, summarizeQualityOverview } from "../shared/generated-review";
 import type { GenerationQuality } from "../shared/generation-quality";
 import { diffParagraphs } from "../shared/paragraph-diff";
@@ -43,6 +41,7 @@ import type {
   SearchHit,
 } from "../shared/types";
 import { CHAPTER_FUNCTIONS } from "../shared/types";
+import { ContextPanel } from "./ContextPanel";
 
 export interface CommonProjectProps {
   project: ProjectDetail;
@@ -1006,63 +1005,8 @@ export function WritingPage({
           </footer>
         </div>
       </div>
-      {context && (
-        <aside className="context-panel">
-          <div className="context-head">
-            <span>
-              <strong>上下文包</strong>
-              <small>约 {context.estimatedTokens} tokens</small>
-              <small>{TOKEN_ESTIMATE_WARNING}</small>
-            </span>
-            <IconButton label="关闭上下文" onClick={() => setContext(null)}>
-              <Trash2 size={16} />
-            </IconButton>
-          </div>
-          {context.diagnostics && (
-            <div className="context-diagnostics">
-              {context.diagnostics.warnings.length > 0 && (
-                <div className="context-warnings" role="alert">
-                  <AlertTriangle size={16} />
-                  <span>{context.diagnostics.warnings.join("；")}</span>
-                </div>
-              )}
-              <div className="context-diagnostic-list">
-                {context.diagnostics.sections.map((section) => (
-                  <div key={section.key} className={`context-diagnostic context-${section.status}`}>
-                    <span>
-                      <strong>{section.label}</strong>
-                      <small>{section.source}</small>
-                    </span>
-                    <span>
-                      <Badge tone={section.status === "缺失" ? "warning" : "neutral"}>{section.status}</Badge>
-                      <small>
-                        {section.includedItems}/{section.totalItems} 项 · {section.characters} 字
-                      </small>
-                    </span>
-                    <p>{section.reason}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {Object.entries(context)
-            .filter(([key]) => key !== "estimatedTokens" && key !== "diagnostics")
-            .map(([key, value]) => (
-              <details
-                key={key}
-                open={
-                  key === "contract" ||
-                  key === "chapterIntent" ||
-                  key === "expectationLedger" ||
-                  key === "forbiddenKnowledge"
-                }
-              >
-                <summary>{CONTEXT_SECTION_LABELS[key as keyof typeof CONTEXT_SECTION_LABELS]}</summary>
-                <pre>{value || "无"}</pre>
-              </details>
-            ))}
-        </aside>
-      )}
+      {context && <ContextPanel context={context} onClose={() => setContext(null)} />}
+
       {batchReview && batchReview.length > 0 && (
         <Modal title="审阅五章批次产出" onClose={() => setBatchReview(null)} width={940}>
           <div className="form-stack generated-review">
