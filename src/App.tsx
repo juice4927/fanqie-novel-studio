@@ -9,8 +9,6 @@ const ResearchPage = lazy(() => import("./pages/ResearchPage").then((m) => ({ de
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const ProjectPage = lazy(() => import("./pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
 
-
-
 import type { DashboardData, ProjectSummary } from "./shared/types";
 
 type AppPage = "dashboard" | "research" | "project" | "settings";
@@ -119,30 +117,30 @@ export default function App() {
       </aside>
       <div className="app-main">
         <Suspense fallback={<div className="page loading-page">加载中…</div>}>
-        {page === "dashboard" && dashboard && (
-          <DashboardPage
-            data={dashboard}
-            onCreate={() => setCreateModal(true)}
-            onOpenProject={openProject}
-            onDeleteProject={(project) => {
-              setDeleteProject(project);
-              setDeleteConfirmation("");
-            }}
-          />
-        )}
-        {page === "research" && <ResearchPage api={api} notify={notify} />}
-        {page === "settings" && <SettingsPage api={api} notify={notify} />}
-        {page === "project" && selectedProjectId && (
-          <ProjectPage
-            api={api}
-            projectId={selectedProjectId}
-            onBack={() => navigate("dashboard")}
-            notify={(message, tone) => {
-              notify(message, tone);
-              void reload();
-            }}
-          />
-        )}
+          {page === "dashboard" && dashboard && (
+            <DashboardPage
+              data={dashboard}
+              onCreate={() => setCreateModal(true)}
+              onOpenProject={openProject}
+              onDeleteProject={(project) => {
+                setDeleteProject(project);
+                setDeleteConfirmation("");
+              }}
+            />
+          )}
+          {page === "research" && <ResearchPage api={api} notify={notify} />}
+          {page === "settings" && <SettingsPage api={api} notify={notify} />}
+          {page === "project" && selectedProjectId && (
+            <ProjectPage
+              api={api}
+              projectId={selectedProjectId}
+              onBack={() => navigate("dashboard")}
+              notify={(message, tone) => {
+                notify(message, tone);
+                void reload();
+              }}
+            />
+          )}
         </Suspense>
       </div>
       {createModal && (
