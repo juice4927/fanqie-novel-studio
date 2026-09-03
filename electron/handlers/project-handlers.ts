@@ -30,6 +30,8 @@ type ProjectDatabase = Pick<
   | "saveFact"
   | "getDirectorNotes"
   | "saveDirectorNotes"
+  | "getGenerationQuality"
+  | "recordGenerationDecision"
   | "savePlan"
   | "saveSchedule"
   | "searchProject"
@@ -111,6 +113,10 @@ export function registerProjectHandlers({
   register("saveFact", (id, fact) => database.saveFact(id, fact));
   register("getDirectorNotes", (id) => database.getDirectorNotes(id));
   register("saveDirectorNotes", (id, notes) => database.saveDirectorNotes(id, notes));
+  register("recordGenerationDecision", (id, chapterId, action) =>
+    database.recordGenerationDecision(id, chapterId, action),
+  );
+  register("getGenerationQuality", (id) => database.getGenerationQuality(id));
   register("resolveIssue", (id, issueId, status) => database.resolveIssue(id, issueId, status));
   register("saveChangeRequest", (id, change) => database.saveChangeRequest(id, change));
   register("decideChangeRequest", (id, changeId, decision) => database.decideChangeRequest(id, changeId, decision));

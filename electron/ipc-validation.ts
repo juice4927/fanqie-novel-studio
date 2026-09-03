@@ -530,6 +530,8 @@ const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
   saveFact: z.tuple([id, fact]),
   getDirectorNotes: idOnly,
   saveDirectorNotes: z.tuple([id, z.array(z.string().trim().max(300)).max(50)]),
+  recordGenerationDecision: z.tuple([id, id, z.enum(["adopted", "reverted"])]),
+  getGenerationQuality: idOnly,
   resolveIssue: z.tuple([id, id, z.enum(["待处理", "已忽略", "已解决"])]),
   saveChangeRequest: z.tuple([id, changeRequest]),
   decideChangeRequest: z.tuple([id, id, z.enum(["批准", "拒绝"])]),

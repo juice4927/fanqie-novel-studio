@@ -23,6 +23,7 @@ import {
 } from "../shared/dashboard-policy";
 import { prepareExpectationSave } from "../shared/expectation-service";
 import { prepareFactSave } from "../shared/fact-service";
+import { computeGenerationQuality, type GenerationDecision } from "../shared/generation-quality";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import {
   applyContractRepairs,
@@ -80,6 +81,7 @@ interface DemoState {
   insights: InsightPack[];
   settings: AiSettings;
   directorNotes: Record<string, string[]>;
+  genDecisions: Record<string, GenerationDecision[]>;
 }
 
 const key = "fanqie-novel-studio.demo.v1";
@@ -419,6 +421,7 @@ function seed(): DemoState {
       longTaskTimeoutMinutes: 10,
     },
     directorNotes: {},
+    genDecisions: {},
   };
 }
 
@@ -428,6 +431,7 @@ function load(): DemoState {
     const state = raw ? (JSON.parse(raw) as DemoState) : seed();
     state.settings.protocol ??= "openai-compatible";
     state.directorNotes ??= {};
+    state.genDecisions ??= {};
     state.planVersions ??= {};
     for (const project of state.projects) {
       for (const plan of project.plans) {
@@ -1428,6 +1432,15 @@ export function createBrowserApi(): AppApi {
     },
     async exportDiagnosticBundle() {
       throw new Error("诊断包仅在桌面版提供");
+    },
+    async recordGenerationDecision(projectId: string, chapterId: string, action: "adopted" | "reverted") {
+      const decisions = state.genDecisions[projectId] ?? [];
+      decisions.push({ chapterId, action, at: now() });
+      state.genDecisions[projectId] = decisions.slice(-50);
+      persist();
+    },
+    async getGenerationQuality(projectId: string) {
+      return computeGenerationQuality(state.genDecisions[projectId] ?? []);
     },
     async getDirectorNotes(projectId: string) {
       return state.directorNotes[projectId] ?? [];

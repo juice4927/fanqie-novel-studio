@@ -22,6 +22,7 @@ import {
 } from "../src/shared/dashboard-policy";
 import { prepareExpectationSave } from "../src/shared/expectation-service";
 import { prepareFactSave } from "../src/shared/fact-service";
+import { computeGenerationQuality, type GenerationDecision } from "../src/shared/generation-quality";
 import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
 import { prepareProjectCreation, prepareProjectUpdate } from "../src/shared/project-service";
 import { prepareQualityIssueSave, resolveQualityIssue } from "../src/shared/quality-issue-service";
@@ -1578,6 +1579,16 @@ export class WorkspaceDatabase {
     const cleaned = [...new Set(notes.map((note) => note.trim()).filter(Boolean))].slice(-50);
     this.setSetting(`directorNotes.${projectId}`, JSON.stringify(cleaned));
     return cleaned;
+  }
+  recordGenerationDecision(projectId: string, chapterId: string, action: GenerationDecision["action"]): void {
+    const current = parseJson<GenerationDecision[]>(this.getSetting(`genDecisions.${projectId}`, "[]"));
+    current.push({ chapterId, action, at: now() });
+    this.setSetting(`genDecisions.${projectId}`, JSON.stringify(current.slice(-50)));
+  }
+
+  getGenerationQuality(projectId: string) {
+    const decisions = parseJson<GenerationDecision[]>(this.getSetting(`genDecisions.${projectId}`, "[]"));
+    return computeGenerationQuality(decisions);
   }
 
   private consumeApprovedChange(

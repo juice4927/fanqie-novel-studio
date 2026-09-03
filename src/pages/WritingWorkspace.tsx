@@ -352,6 +352,7 @@ export function WritingPage({
     try {
       setBusy(true);
       await api.transitionChapter(project.summary.id, review.chapter.id, "待定稿");
+      void api.recordGenerationDecision(project.summary.id, review.chapter.id, "adopted");
       const accepted = review.chapter;
       setReview(null);
       await reload();
@@ -388,6 +389,7 @@ export function WritingPage({
     try {
       setBusy(true);
       await persistDirectorNote(revertNote);
+      void api.recordGenerationDecision(project.summary.id, review.chapter.id, "reverted");
       const restored = await api.saveChapter(
         project.summary.id,
         { ...review.previousChapter, content: review.previousChapter.content },
@@ -411,6 +413,7 @@ export function WritingPage({
   const adoptBatchChapter = async (chapterId: string) => {
     try {
       await api.transitionChapter(project.summary.id, chapterId, "待定稿");
+      void api.recordGenerationDecision(project.summary.id, chapterId, "adopted");
       setBatchReview((current) =>
         current ? current.map((item) => (item.chapter.id === chapterId ? { ...item, adopted: true } : item)) : current,
       );
@@ -424,6 +427,7 @@ export function WritingPage({
       const target = batchReview?.find((item) => item.chapter.id === chapterId)?.chapter;
       if (!target) return;
       await persistDirectorNote(revertNote);
+      void api.recordGenerationDecision(project.summary.id, chapterId, "reverted");
       await api.saveChapter(project.summary.id, { ...target, content: previousContent }, "version");
       setBatchReview((current) => (current ? current.filter((item) => item.chapter.id !== chapterId) : current));
       setRevertNote("");

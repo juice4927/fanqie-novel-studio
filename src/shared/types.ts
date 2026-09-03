@@ -1,3 +1,4 @@
+import type { GenerationQuality } from "./generation-quality";
 import type { GenreComposition, NarrativeGenre } from "./genre-composition";
 import type { CHAPTER_STATUSES, PROJECT_STATUSES } from "./status-constants";
 
@@ -887,6 +888,8 @@ export interface AppApi {
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
   getDirectorNotes(projectId: string): Promise<string[]>;
   saveDirectorNotes(projectId: string, notes: string[]): Promise<string[]>;
+  recordGenerationDecision(projectId: string, chapterId: string, action: "adopted" | "reverted"): Promise<void>;
+  getGenerationQuality(projectId: string): Promise<GenerationQuality>;
   resolveIssue(id: string, issueId: string, status: QualityIssue["status"]): Promise<void>;
   saveChangeRequest(id: string, change: ChangeRequest): Promise<ChangeRequest>;
   decideChangeRequest(id: string, changeId: string, decision: "批准" | "拒绝"): Promise<void>;

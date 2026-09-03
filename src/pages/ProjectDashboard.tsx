@@ -9,9 +9,10 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge, Button, Modal } from "../components/UI";
 import { formatCount } from "../lib/format";
+import { type GenerationQuality, reviewTierLabel } from "../shared/generation-quality";
 import type { GenrePluginDefinition } from "../shared/genre-plugins";
 import { GENRE_STAGES } from "../shared/genre-plugins";
 import type { AppApi, ConceptCandidate, InsightPack, ProjectDetail } from "../shared/types";
@@ -39,6 +40,19 @@ export function ProjectDashboard({
   const [selectedInsights, setSelectedInsights] = useState(project.insightIds);
   const [concepts, setConcepts] = useState<ConceptCandidate[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [quality, setQuality] = useState<GenerationQuality | null>(null);
+  useEffect(() => {
+    let active = true;
+    void api
+      .getGenerationQuality(project.summary.id)
+      .then((next) => {
+        if (active) setQuality(next);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [api, project.summary.id]);
   const unresolved = project.issues.filter((issue) => issue.status === "待处理");
   const approvedPlans = project.plans.filter((plan) => plan.status === "已批准");
   const milestones = [
@@ -118,6 +132,39 @@ export function ProjectDashboard({
           </div>
         </div>
       </section>
+      {quality && quality.total > 0 && (
+        <section className="section-band compact-band">
+          <div className="section-heading">
+            <div>
+              <h2>AI 生成质量（最近 {quality.total} 次）</h2>
+              <p>{reviewTierLabel(quality.tier)}</p>
+            </div>
+            <Badge tone={quality.tier === "scrutiny" ? "warning" : quality.tier === "balanced" ? "accent" : "success"}>
+              {quality.tier === "scrutiny" ? "建议细审" : quality.tier === "balanced" ? "建议扫读" : "可抽查"}
+            </Badge>
+          </div>
+          <div className="stat-grid">
+            <div className="stat">
+              <div>
+                <span>采纳</span>
+                <strong>{quality.adopted}</strong>
+              </div>
+            </div>
+            <div className="stat">
+              <div>
+                <span>打回</span>
+                <strong>{quality.reverted}</strong>
+              </div>
+            </div>
+            <div className="stat">
+              <div>
+                <span>打回率</span>
+                <strong>{Math.round(quality.revertRate * 100)}%</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
       <section className="two-column">
         <div className="section-band compact-band">
           <div className="section-heading">
