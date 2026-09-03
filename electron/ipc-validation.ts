@@ -406,9 +406,9 @@ const noArgs = z.tuple([]);
 const idOnly = z.tuple([id]);
 const projectEntity = z.tuple([id, id]);
 
-type InvokeApiKey = Exclude<keyof AppApi, "onChapterFactsExtracted">;
+export type InvokeApiKey = Exclude<keyof AppApi, "onChapterFactsExtracted">;
 
-const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
+const schemas = {
   getDashboard: noArgs,
   listProjects: noArgs,
   createProject: z.tuple([createProject]),
@@ -626,7 +626,23 @@ const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
   cancelSystemHealthCheck: z.tuple([id]),
 };
 
+void (schemas satisfies Record<InvokeApiKey, z.ZodType<unknown[]>>);
+
 export const IPC_CHANNELS: readonly InvokeApiKey[] = Object.keys(schemas).sort() as InvokeApiKey[];
+export type IpcHandlerArgs<C extends InvokeApiKey> = z.infer<(typeof schemas)[C]>;
+
+export type IpcHandlerResult<C extends InvokeApiKey> = C extends keyof AppApi ? Awaited<ReturnType<AppApi[C]>> : never;
+
+/**
+ * 类型化 handler 注册助手：参数与返回类型由 Zod schema（进而由 AppApi 键）推导。
+ * 运行时仍需 validateIpcArgs 兜底；本函数主要用于编译期契约。
+ */
+export function defineIpcHandler<C extends InvokeApiKey>(
+  channel: C,
+  handler: (...args: IpcHandlerArgs<C>) => IpcHandlerResult<C> | Promise<IpcHandlerResult<C>>,
+) {
+  return { channel, handler };
+}
 
 export function validateIpcArgs(channel: InvokeApiKey, args: unknown[]) {
   const schema = schemas[channel];
