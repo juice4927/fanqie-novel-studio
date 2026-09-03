@@ -1098,6 +1098,20 @@ export function WritingPage({
                       {buildChapterSummary(item.chapter)}
                     </pre>
                   </details>
+                  <details>
+                    <summary>阅读全文</summary>
+                    <div
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        lineHeight: 1.9,
+                        maxHeight: 260,
+                        overflowY: "auto",
+                        fontSize: 14,
+                      }}
+                    >
+                      {item.chapter.content || "（空正文）"}
+                    </div>
+                  </details>
                   {!item.checking && item.issues.length > 0 && (
                     <ul style={{ paddingLeft: 18, marginTop: 6 }}>
                       {item.issues.slice(0, 4).map((issue) => (

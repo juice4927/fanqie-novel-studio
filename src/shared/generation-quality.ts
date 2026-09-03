@@ -16,7 +16,7 @@ export interface GenerationQuality {
   tier: ReviewTier;
 }
 
-const DEFAULT_WINDOW = 10;
+const DEFAULT_WINDOW = 20;
 const MIN_SAMPLE = 5;
 
 export function computeGenerationQuality(

@@ -31,6 +31,6 @@ describe("generation quality window", () => {
     const decisions = Array.from({ length: 25 }, (_, index) =>
       decision(index % 3 === 0 ? "reverted" : "adopted", index),
     );
-    expect(computeGenerationQuality(decisions).total).toBe(10);
+    expect(computeGenerationQuality(decisions).total).toBe(20);
   });
 });
