@@ -31,11 +31,12 @@ export interface ContextCompilerInput {
   expectations: readonly ExpectationEntry[];
   recentChapters: readonly ContextChapterExcerpt[];
   styleSamples: readonly string[];
+  directorNotes?: readonly string[];
 }
 
 export type ProjectContextSource = Pick<
   ProjectDetail,
-  "summary" | "contract" | "plans" | "chapters" | "facts" | "summaries" | "expectations"
+  "summary" | "contract" | "plans" | "chapters" | "facts" | "summaries" | "expectations" | "directorNotes"
 >;
 
 const styleSampleStatuses = new Set<Chapter["status"]>(["已定稿", "待发布", "已发布"]);
@@ -60,6 +61,7 @@ export function buildProjectContextInput(
       .sort((left, right) => left.number - right.number)
       .slice(-20)
       .map((item) => item.content),
+    directorNotes: project.directorNotes,
   };
 }
 
@@ -73,6 +75,7 @@ export function compileProjectChapterContext(
 
 export function compileChapterContext(input: ContextCompilerInput): ContextPackage {
   const { chapter, contract, summary } = input;
+  const directorNotes = (input.directorNotes ?? []).filter(Boolean).slice(-20);
   const approvedPlans = input.plans
     .filter((plan) => plan.status === "已批准")
     .sort((left, right) => left.ordinal - right.ordinal);
@@ -185,9 +188,14 @@ export function compileChapterContext(input: ContextCompilerInput): ContextPacka
     forbiddenKnowledge:
       secrets.map((fact) => `${fact.subject}：${fact.value}；当前知情范围：${fact.knowledgeScope}`).join("\n") ||
       "无额外限制",
-    authorStyle: styleSamples.length
-      ? `仅根据本项目已定稿正文统计：平均句长 ${averageSentence} 字，平均段长 ${averageParagraph} 字，对话标记密度 ${dialogueDensity}‰，每千字具身情绪 ${proseTemperature.embodiedEmotionPerThousand.toFixed(1)} 次，感官反馈 ${proseTemperature.sensoryPerThousand.toFixed(1)} 次。保持当前项目的叙事密度，不模仿研究样本；这些统计只是观察值，具体取舍以本项目审美设定为准。`
-      : "尚无本项目已定稿正文，不加载任何样本文风。",
+    authorStyle: [
+      styleSamples.length
+        ? `仅根据本项目已定稿正文统计：平均句长 ${averageSentence} 字，平均段长 ${averageParagraph} 字，对话标记密度 ${dialogueDensity}‰，每千字具身情绪 ${proseTemperature.embodiedEmotionPerThousand.toFixed(1)} 次，感官反馈 ${proseTemperature.sensoryPerThousand.toFixed(1)} 次。保持当前项目的叙事密度，不模仿研究样本；这些统计只是观察值，具体取舍以本项目审美设定为准。`
+        : "尚无本项目已定稿正文，不加载任何样本文风。",
+      ...(directorNotes.length
+        ? [`作者近期纠错偏好（后续写作必须遵守）：\n${directorNotes.map((note) => `- ${note}`).join("\n")}`]
+        : []),
+    ].join("\n"),
     estimatedTokens: 0,
   };
   context.estimatedTokens = estimateStructuredRequestTokens([

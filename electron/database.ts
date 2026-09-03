@@ -591,6 +591,7 @@ export class WorkspaceDatabase {
       expectations: this.listRecords<ExpectationEntry>(db, "expectations").sort(
         (a, b) => a.sourceChapter - b.sourceChapter,
       ),
+      directorNotes: this.getDirectorNotes(id),
     };
   }
 
@@ -614,6 +615,7 @@ export class WorkspaceDatabase {
       expectations: this.listRecords<ExpectationEntry>(db, "expectations").sort(
         (a, b) => a.sourceChapter - b.sourceChapter,
       ),
+      directorNotes: this.getDirectorNotes(id),
     };
   }
 
@@ -1567,6 +1569,15 @@ export class WorkspaceDatabase {
 
   private setSetting(key: string, value: string) {
     this.catalog.prepare("INSERT OR REPLACE INTO settings VALUES(?, ?)").run(key, value);
+  }
+  getDirectorNotes(projectId: string): string[] {
+    return parseJson<string[]>(this.getSetting(`directorNotes.${projectId}`, "[]"));
+  }
+
+  saveDirectorNotes(projectId: string, notes: string[]): string[] {
+    const cleaned = [...new Set(notes.map((note) => note.trim()).filter(Boolean))].slice(-50);
+    this.setSetting(`directorNotes.${projectId}`, JSON.stringify(cleaned));
+    return cleaned;
   }
 
   private consumeApprovedChange(

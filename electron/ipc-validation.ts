@@ -528,6 +528,8 @@ const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
   runQualityCheck: projectEntity,
   extractChapterFacts: projectEntity,
   saveFact: z.tuple([id, fact]),
+  getDirectorNotes: idOnly,
+  saveDirectorNotes: z.tuple([id, z.array(z.string().trim().max(300)).max(50)]),
   resolveIssue: z.tuple([id, id, z.enum(["待处理", "已忽略", "已解决"])]),
   saveChangeRequest: z.tuple([id, changeRequest]),
   decideChangeRequest: z.tuple([id, id, z.enum(["批准", "拒绝"])]),

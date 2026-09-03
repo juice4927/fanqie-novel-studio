@@ -229,3 +229,17 @@ describe("context compiler", () => {
     expect(compileProjectChapterContext(project, current, relevantFacts).estimatedTokens).toBeGreaterThan(0);
   });
 });
+
+describe("director notes injection", () => {
+  it("appends author revision notes to authorStyle when present", () => {
+    const context = compileChapterContext(input({ directorNotes: ["别用“旋即”", "开头三章别拖节奏"] }));
+    expect(context.authorStyle).toContain("作者近期纠错偏好");
+    expect(context.authorStyle).toContain("- 别用“旋即”");
+    expect(context.authorStyle).toContain("- 开头三章别拖节奏");
+  });
+
+  it("keeps authorStyle unchanged when no director notes exist", () => {
+    const context = compileChapterContext(input());
+    expect(context.authorStyle).not.toContain("作者近期纠错偏好");
+  });
+});

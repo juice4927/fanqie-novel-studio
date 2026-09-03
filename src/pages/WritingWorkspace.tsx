@@ -103,6 +103,7 @@ export function WritingPage({
     issues: QualityIssue[];
     checking: boolean;
   } | null>(null);
+  const [revertNote, setRevertNote] = useState("");
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
   const draftRef = useRef(draft);
   const manuscriptRef = useRef<HTMLTextAreaElement>(null);
@@ -365,10 +366,28 @@ export function WritingPage({
       setBusy(false);
     }
   };
+  const persistDirectorNote = async (note: string) => {
+    const trimmed = note.trim();
+    if (!trimmed) return;
+    const current = project.directorNotes ?? [];
+    if (!current.includes(trimmed)) {
+      await api.saveDirectorNotes(project.summary.id, [...current, trimmed]);
+      await reload();
+    }
+  };
+  const removeDirectorNote = async (note: string) => {
+    const current = project.directorNotes ?? [];
+    await api.saveDirectorNotes(
+      project.summary.id,
+      current.filter((item) => item !== note),
+    );
+    await reload();
+  };
   const rejectGeneratedDraft = async () => {
     if (!review) return;
     try {
       setBusy(true);
+      await persistDirectorNote(revertNote);
       const restored = await api.saveChapter(
         project.summary.id,
         { ...review.previousChapter, content: review.previousChapter.content },
@@ -379,6 +398,7 @@ export function WritingPage({
       clearRecoveredChapter(project.summary.id, restored);
       setDraft(restored);
       setSaveStatus("saved");
+      setRevertNote("");
       setReview(null);
       await reload();
       notify("已打回，正文恢复为生成前内容");
@@ -403,8 +423,10 @@ export function WritingPage({
     try {
       const target = batchReview?.find((item) => item.chapter.id === chapterId)?.chapter;
       if (!target) return;
+      await persistDirectorNote(revertNote);
       await api.saveChapter(project.summary.id, { ...target, content: previousContent }, "version");
       setBatchReview((current) => (current ? current.filter((item) => item.chapter.id !== chapterId) : current));
+      setRevertNote("");
       await reload();
       notify("已打回该章，正文恢复为生成前内容");
     } catch (error) {
@@ -1059,6 +1081,39 @@ export function WritingPage({
               );
             })}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 10 }}>
+              <section>
+                <details>
+                  <summary>导演备注（约束后续 AI 生成）</summary>
+                  {(project.directorNotes ?? []).length === 0 ? (
+                    <p className="muted-line">还没有备注；打回时填原因会自动沉淀到这里。</p>
+                  ) : (
+                    <ul style={{ paddingLeft: 18, marginTop: 6 }}>
+                      {(project.directorNotes ?? []).map((note) => (
+                        <li key={note} style={{ marginBottom: 4 }}>
+                          <span style={{ marginRight: 8 }}>{note}</span>
+                          <button
+                            type="button"
+                            aria-label="删除导演备注"
+                            onClick={() => void removeDirectorNote(note)}
+                            style={{ color: "var(--muted)", cursor: "pointer" }}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </details>
+                <Field label="打回原因（可选，将沉淀为导演备注）">
+                  <Textarea
+                    rows={2}
+                    value={revertNote}
+                    onChange={(event) => setRevertNote(event.target.value)}
+                    placeholder="例如：开头节奏太慢、别用“旋即”"
+                  />
+                </Field>
+              </section>
+
               <Button variant="secondary" onClick={() => setBatchReview(null)}>
                 关闭
               </Button>
@@ -1150,6 +1205,39 @@ export function WritingPage({
                   </ul>
                 </div>
               )}
+
+              <section>
+                <details>
+                  <summary>导演备注（约束后续 AI 生成）</summary>
+                  {(project.directorNotes ?? []).length === 0 ? (
+                    <p className="muted-line">还没有备注；打回 AI 产出时可填原因，会自动沉淀到这里。</p>
+                  ) : (
+                    <ul style={{ paddingLeft: 18, marginTop: 6 }}>
+                      {(project.directorNotes ?? []).map((note) => (
+                        <li key={note} style={{ marginBottom: 4 }}>
+                          <span style={{ marginRight: 8 }}>{note}</span>
+                          <button
+                            type="button"
+                            aria-label="删除导演备注"
+                            onClick={() => void removeDirectorNote(note)}
+                            style={{ color: "var(--muted)", cursor: "pointer" }}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </details>
+                <Field label="打回原因（可选，将沉淀为导演备注）">
+                  <Textarea
+                    rows={2}
+                    value={revertNote}
+                    onChange={(event) => setRevertNote(event.target.value)}
+                    placeholder="例如：开头节奏太慢、别用“旋即”、结局的拥抱保留"
+                  />
+                </Field>
+              </section>
             </section>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               {canAcceptGeneratedDraft(review.issues) ? (

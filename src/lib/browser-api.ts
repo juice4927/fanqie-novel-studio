@@ -79,6 +79,7 @@ interface DemoState {
   books: ResearchBook[];
   insights: InsightPack[];
   settings: AiSettings;
+  directorNotes: Record<string, string[]>;
 }
 
 const key = "fanqie-novel-studio.demo.v1";
@@ -417,6 +418,7 @@ function seed(): DemoState {
       outputPricePerMillion: 0,
       longTaskTimeoutMinutes: 10,
     },
+    directorNotes: {},
   };
 }
 
@@ -425,6 +427,7 @@ function load(): DemoState {
     const raw = localStorage.getItem(key);
     const state = raw ? (JSON.parse(raw) as DemoState) : seed();
     state.settings.protocol ??= "openai-compatible";
+    state.directorNotes ??= {};
     state.planVersions ??= {};
     for (const project of state.projects) {
       for (const plan of project.plans) {
@@ -1425,6 +1428,15 @@ export function createBrowserApi(): AppApi {
     },
     async exportDiagnosticBundle() {
       throw new Error("诊断包仅在桌面版提供");
+    },
+    async getDirectorNotes(projectId: string) {
+      return state.directorNotes[projectId] ?? [];
+    },
+    async saveDirectorNotes(projectId: string, notes: string[]) {
+      const cleaned = [...new Set(notes.map((note) => note.trim()).filter(Boolean))].slice(-50);
+      state.directorNotes[projectId] = cleaned;
+      persist();
+      return cleaned;
     },
     async getWorkspacePath() {
       return "浏览器预览使用 localStorage";

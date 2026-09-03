@@ -474,6 +474,8 @@ export interface ProjectDetail {
   insightIds: string[];
   summaries: StorySummary[];
   expectations: ExpectationEntry[];
+  /** 作者打回 AI 产出时沉淀的导演备注，注入后续生成上下文 */
+  directorNotes?: string[];
 }
 
 export interface ConceptCandidate {
@@ -883,6 +885,8 @@ export interface AppApi {
   reviseChapterFromQuality(id: string, chapterId: string): Promise<Chapter>;
   extractChapterFacts(id: string, chapterId: string): Promise<LedgerFact[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
+  getDirectorNotes(projectId: string): Promise<string[]>;
+  saveDirectorNotes(projectId: string, notes: string[]): Promise<string[]>;
   resolveIssue(id: string, issueId: string, status: QualityIssue["status"]): Promise<void>;
   saveChangeRequest(id: string, change: ChangeRequest): Promise<ChangeRequest>;
   decideChangeRequest(id: string, changeId: string, decision: "批准" | "拒绝"): Promise<void>;
