@@ -25,6 +25,7 @@ import {
 import { formatCount, formatDate } from "../lib/format";
 import { CONTEXT_SECTION_LABELS } from "../shared/context-diagnostics";
 import { canAcceptGeneratedDraft, summarizeQualityOverview } from "../shared/generated-review";
+import type { GenerationQuality } from "../shared/generation-quality";
 import { diffParagraphs } from "../shared/paragraph-diff";
 import { buildChapterSummary } from "../shared/summaries";
 import { TOKEN_ESTIMATE_WARNING } from "../shared/token-estimator";
@@ -104,6 +105,8 @@ export function WritingPage({
     checking: boolean;
   } | null>(null);
   const [revertNote, setRevertNote] = useState("");
+  const [reviewSelectionText, setReviewSelectionText] = useState("");
+  const [generationQuality, setGenerationQuality] = useState<GenerationQuality | null>(null);
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
   const draftRef = useRef(draft);
   const manuscriptRef = useRef<HTMLTextAreaElement>(null);
@@ -140,6 +143,18 @@ export function WritingPage({
     reloadRef.current = reload;
     notifyRef.current = notify;
   }, [draft, reload, notify]);
+  useEffect(() => {
+    let active = true;
+    void api
+      .getGenerationQuality(project.summary.id)
+      .then((next) => {
+        if (active && next.total > 0) setGenerationQuality(next);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [api, project.summary.id]);
   useEffect(
     () =>
       api.onChapterFactsExtracted((event) => {
@@ -347,6 +362,22 @@ export function WritingPage({
     setSaveStatus("saved");
     return saved;
   };
+  const openRevisionFromReviewSelection = () => {
+    if (!review || !reviewSelectionText) return;
+    const content = review.chapter.content;
+    const index = content.indexOf(reviewSelectionText);
+    if (index < 0) {
+      notify("未能在正文中定位所选文字，请改选或使用整章修改意见", "error");
+      return;
+    }
+    setRevisionSelection({ start: index, end: index + reviewSelectionText.length, text: reviewSelectionText });
+    setRevisionInput((current) => ({ ...current, scope: "仅选区" }));
+    setRevisionProposal(null);
+    setSelectedRepairIds([]);
+    setReviewSelectionText("");
+    setReview(null);
+    setRevisionOpen(true);
+  };
   const acceptGeneratedDraft = async () => {
     if (!review) return;
     try {
@@ -355,6 +386,7 @@ export function WritingPage({
       void api.recordGenerationDecision(project.summary.id, review.chapter.id, "adopted");
       const accepted = review.chapter;
       setReview(null);
+      setReviewSelectionText("");
       await reload();
       notify("已采纳 AI 产出并进入待定稿");
       if (accepted.id === draftRef.current.id) {
@@ -401,6 +433,7 @@ export function WritingPage({
       setDraft(restored);
       setSaveStatus("saved");
       setRevertNote("");
+      setReviewSelectionText("");
       setReview(null);
       await reload();
       notify("已打回，正文恢复为生成前内容");
@@ -606,6 +639,23 @@ export function WritingPage({
                         ? "保存失败"
                         : "已保存"}
             </span>
+            {generationQuality && (
+              <Badge
+                tone={
+                  generationQuality.tier === "scrutiny"
+                    ? "warning"
+                    : generationQuality.tier === "balanced"
+                      ? "accent"
+                      : "success"
+                }
+              >
+                {generationQuality.tier === "scrutiny"
+                  ? "建议细审"
+                  : generationQuality.tier === "balanced"
+                    ? "建议扫读"
+                    : "可抽查"}
+              </Badge>
+            )}
             <Segmented
               options={["逐章", "五章批次"] as const}
               value={draft.batchMode}
@@ -1145,7 +1195,11 @@ export function WritingPage({
       {review && (
         <Modal
           title={`审阅 AI 产出 · 第${review.chapter.number}章`}
-          onClose={() => !busy && setReview(null)}
+          onClose={() => {
+            if (busy) return;
+            setReview(null);
+            setReviewSelectionText("");
+          }}
           width={940}
         >
           <div className="form-stack generated-review">
@@ -1166,6 +1220,7 @@ export function WritingPage({
                 {buildChapterSummary(review.chapter)}
               </pre>
             </details>
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: 阅读区划词交给 AI 修改，需要原生文本选区 */}
             <div
               style={{
                 whiteSpace: "pre-wrap",
@@ -1178,9 +1233,25 @@ export function WritingPage({
                 borderRadius: 6,
                 fontSize: 15,
               }}
+              onMouseUp={() => {
+                const selection = window.getSelection();
+                const text = selection ? selection.toString() : "";
+                setReviewSelectionText(text && text.length <= 2000 ? text : "");
+              }}
             >
               {review.chapter.content || "（空正文）"}
             </div>
+            {reviewSelectionText && (
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+                <Button
+                  variant="secondary"
+                  icon={<MessageSquareText size={15} />}
+                  onClick={() => void openRevisionFromReviewSelection()}
+                >
+                  把选中文字交给 AI 修改（已选 {reviewSelectionText.length} 字）
+                </Button>
+              </div>
+            )}
             <section>
               {review.checking ? (
                 <p className="muted-line">正在运行质检…</p>
