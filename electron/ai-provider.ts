@@ -1,3 +1,4 @@
+import { AppError } from "../src/shared/error-codes";
 import type { AiProtocol } from "../src/shared/types";
 
 export interface ProviderUsage {
@@ -314,7 +315,10 @@ export class JsonStringFieldExtractor {
 
 export function providerError(status: number, detail: string) {
   const compact = detail.replace(/\s+/g, " ").slice(0, 300);
-  return [429, 500, 502, 503, 504, 529].includes(status)
-    ? `模型服务暂时不可用 ${status}: ${compact}`
-    : `模型接口返回 ${status}: ${compact}`;
+  const retryable = [429, 500, 502, 503, 504, 529].includes(status);
+  return new AppError(
+    retryable ? "PROVIDER_UNAVAILABLE" : "PROVIDER_HTTP_ERROR",
+    retryable ? `模型服务暂时不可用 ${status}: ${compact}` : `模型接口返回 ${status}: ${compact}`,
+    { retryable },
+  );
 }

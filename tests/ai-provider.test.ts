@@ -119,7 +119,7 @@ describe("Anthropic Messages API", () => {
   it("surfaces Anthropic error events and treats overload status as retryable", async () => {
     const response = new Response('event: error\ndata: {"type":"error","error":{"message":"overloaded"}}\n\n');
     await expect(readAnthropicStream(response, vi.fn())).rejects.toThrow("overloaded");
-    expect(providerError(529, "overloaded_error")).toContain("暂时不可用");
+    expect(providerError(529, "overloaded_error").message).toContain("暂时不可用");
   });
 });
 

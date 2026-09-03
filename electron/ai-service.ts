@@ -7,6 +7,7 @@ import {
   resolveStoryStage,
 } from "../src/shared/commercial-knowledge";
 import { contextForModel } from "../src/shared/context-diagnostics";
+import { AppError, isAppError } from "../src/shared/error-codes";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
 import { chapterRevisionSnapshot, contractFieldText, planRevisionSnapshot } from "../src/shared/novel-revision";
@@ -787,7 +788,8 @@ export class AiService {
       try {
         const endpoint = aiEndpoint(settings.baseUrl, settings.model, useResponses, protocol);
         const remainingMs = deadline - Date.now();
-        if (remainingMs <= 0) throw new Error(`模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`);
+        if (remainingMs <= 0)
+          throw new AppError("PROVIDER_TIMEOUT", `模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`);
         let timeoutError = "";
         const totalTimeout = setTimeout(() => {
           timeoutError = `模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`;
@@ -926,7 +928,7 @@ export class AiService {
               attempt -= 1;
               continue;
             }
-            throw new Error(providerError(response.status, detail));
+            throw providerError(response.status, detail);
           }
           let raw: string;
           let anthropicStopReason: string | null = null;
@@ -1016,7 +1018,7 @@ export class AiService {
           return parsed;
         } catch (error) {
           if (controller.signal.aborted) {
-            if (this.cancelledJobs.has(jobId)) throw new Error("任务已取消");
+            if (this.cancelledJobs.has(jobId)) throw new AppError("TASK_CANCELLED", "任务已取消");
             if (timeoutError) throw new Error(timeoutError);
           }
           throw error;
@@ -1026,7 +1028,8 @@ export class AiService {
         }
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
-        if (lastError.startsWith("AI 任务审计落库失败")) throw error;
+        const lastCode = isAppError(error) ? error.code : null;
+        if (lastCode === "AUDIT_WRITE_FAILED" || lastError.startsWith("AI 任务审计落库失败")) throw error;
         this.log("error", "ai.request.attempt_failed", {
           jobId,
           taskType: options.taskType,
@@ -1039,7 +1042,7 @@ export class AiService {
           cumulativeInputTokens: cumulativeUsage.inputTokens,
           cumulativeOutputTokens: cumulativeUsage.outputTokens,
         });
-        if (lastError === "任务已取消") {
+        if (lastCode === "TASK_CANCELLED" || lastError === "任务已取消") {
           try {
             this.database.finishAiJob(jobId, "", lastError, telemetry("已取消"));
           } finally {
@@ -1048,7 +1051,7 @@ export class AiService {
           }
           throw new Error(lastError);
         }
-        if (lastError.startsWith("模型请求超时")) {
+        if (lastCode === "PROVIDER_TIMEOUT" || lastError.startsWith("模型请求超时")) {
           try {
             this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
           } finally {
@@ -1057,7 +1060,7 @@ export class AiService {
           }
           throw new Error(lastError);
         }
-        if (lastError.startsWith("模型接口返回")) {
+        if (lastCode === "PROVIDER_HTTP_ERROR" || lastError.startsWith("模型接口返回")) {
           try {
             this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
           } finally {
@@ -1066,7 +1069,7 @@ export class AiService {
           }
           throw new Error(lastError);
         }
-        if (lastError.startsWith("模型输出达到 Anthropic max_tokens")) {
+        if (lastCode === "PROVIDER_TRUNCATED" || lastError.startsWith("模型输出达到 Anthropic max_tokens")) {
           try {
             this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
           } finally {
@@ -1075,7 +1078,7 @@ export class AiService {
           }
           throw new Error(lastError);
         }
-        if (lastError.startsWith("模型服务暂时不可用") && attempt < 2) {
+        if ((lastCode === "PROVIDER_UNAVAILABLE" || lastError.startsWith("模型服务暂时不可用")) && attempt < 2) {
           try {
             const remainingMs = Math.max(0, deadline - Date.now());
             const delayMs = Math.min(1000 * 2 ** attempt, remainingMs);
@@ -1099,7 +1102,7 @@ export class AiService {
             throw new Error(lastError);
           }
         }
-        if (!lastError.startsWith("模型服务暂时不可用") && attempt < 2)
+        if (!(lastCode === "PROVIDER_UNAVAILABLE" || lastError.startsWith("模型服务暂时不可用")) && attempt < 2)
           this.log("warn", "ai.request.retry_scheduled", {
             jobId,
             taskType: options.taskType,

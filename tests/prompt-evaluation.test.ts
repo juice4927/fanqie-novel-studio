@@ -15,7 +15,7 @@ describe("provider compatibility", () => {
       outputTokens: 8,
     });
     expect(rejectsJsonMode(400, "response_format is unsupported")).toBe(true);
-    expect(providerError(429, "busy")).toContain("暂时不可用");
+    expect(providerError(429, "busy").message).toContain("暂时不可用");
   });
 });
 
