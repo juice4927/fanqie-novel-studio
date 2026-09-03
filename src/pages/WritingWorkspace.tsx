@@ -113,6 +113,13 @@ export function WritingPage({
   const reloadRef = useRef(reload);
   const notifyRef = useRef(notify);
   const [batchPreview, setBatchPreview] = useState<BatchGenerationPreview | null>(null);
+  const [batchReview, setBatchReview] = useState<Array<{
+    chapter: Chapter;
+    previousContent: string;
+    issues: QualityIssue[];
+    checking: boolean;
+    adopted: boolean;
+  }> | null>(null);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [revisionProposal, setRevisionProposal] = useState<NovelRevisionProposal | null>(null);
@@ -379,6 +386,29 @@ export function WritingPage({
       notify(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setBusy(false);
+    }
+  };
+  const adoptBatchChapter = async (chapterId: string) => {
+    try {
+      await api.transitionChapter(project.summary.id, chapterId, "待定稿");
+      setBatchReview((current) =>
+        current ? current.map((item) => (item.chapter.id === chapterId ? { ...item, adopted: true } : item)) : current,
+      );
+      notify("已采纳该章并进入待定稿");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  };
+  const revertBatchChapter = async (chapterId: string, previousContent: string) => {
+    try {
+      const target = batchReview?.find((item) => item.chapter.id === chapterId)?.chapter;
+      if (!target) return;
+      await api.saveChapter(project.summary.id, { ...target, content: previousContent }, "version");
+      setBatchReview((current) => (current ? current.filter((item) => item.chapter.id !== chapterId) : current));
+      await reload();
+      notify("已打回该章，正文恢复为生成前内容");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
     }
   };
 
@@ -957,6 +987,102 @@ export function WritingPage({
             ))}
         </aside>
       )}
+      {batchReview && batchReview.length > 0 && (
+        <Modal title="审阅五章批次产出" onClose={() => setBatchReview(null)} width={940}>
+          <div className="form-stack generated-review">
+            <p className="muted-line">逐章确认：无硬性问题的章节可采纳进入待定稿；有硬性问题的建议先打回或稍后处理。</p>
+            {batchReview.map((item) => {
+              const overview = summarizeQualityOverview(item.issues);
+              const adoptable = !item.checking && canAcceptGeneratedDraft(item.issues) && !item.adopted;
+              return (
+                <article
+                  key={item.chapter.id}
+                  style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12 }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <strong>
+                      第{item.chapter.number}章 {item.chapter.title || "未命名章"}
+                    </strong>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <small>{formatCount(item.chapter.content.replace(/\s/g, "").length)} 字</small>
+                      {item.checking ? (
+                        <Badge tone="neutral">质检中</Badge>
+                      ) : item.adopted ? (
+                        <Badge tone="success">已采纳</Badge>
+                      ) : overview.needsHumanJudgment ? (
+                        <Badge tone="danger">有硬性问题</Badge>
+                      ) : (
+                        <Badge tone="success">可采纳</Badge>
+                      )}
+                    </span>
+                  </div>
+                  <details>
+                    <summary>本章摘要</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.7 }}>
+                      {buildChapterSummary(item.chapter)}
+                    </pre>
+                  </details>
+                  {!item.checking && item.issues.length > 0 && (
+                    <ul style={{ paddingLeft: 18, marginTop: 6 }}>
+                      {item.issues.slice(0, 4).map((issue) => (
+                        <li key={issue.id} style={{ marginBottom: 2, fontSize: 12 }}>
+                          <Badge
+                            tone={
+                              issue.severity === "硬性" ? "danger" : issue.severity === "警告" ? "warning" : "neutral"
+                            }
+                          >
+                            {issue.severity}
+                          </Badge>{" "}
+                          {issue.message}
+                        </li>
+                      ))}
+                      {item.issues.length > 4 && <li style={{ fontSize: 12 }}>… 共 {item.issues.length} 项</li>}
+                    </ul>
+                  )}
+                  {!item.checking && (
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+                      <Button
+                        variant="secondary"
+                        disabled={item.adopted}
+                        onClick={() => void revertBatchChapter(item.chapter.id, item.previousContent)}
+                      >
+                        打回
+                      </Button>
+                      {adoptable && (
+                        <Button disabled={busy} onClick={() => void adoptBatchChapter(item.chapter.id)}>
+                          采纳
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 10 }}>
+              <Button variant="secondary" onClick={() => setBatchReview(null)}>
+                关闭
+              </Button>
+              <Button
+                icon={<Check size={16} />}
+                disabled={
+                  busy ||
+                  batchReview.every(
+                    (item) => !(!item.checking && canAcceptGeneratedDraft(item.issues) && !item.adopted),
+                  )
+                }
+                onClick={async () => {
+                  for (const item of batchReview) {
+                    if (!item.checking && canAcceptGeneratedDraft(item.issues) && !item.adopted)
+                      await adoptBatchChapter(item.chapter.id);
+                  }
+                }}
+              >
+                全部采纳（无硬性问题章节）
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {review && (
         <Modal
           title={`审阅 AI 产出 · 第${review.chapter.number}章`}
@@ -1363,9 +1489,39 @@ export function WritingPage({
                   setBusy(true);
                   try {
                     const result = await api.generateChapterBatch(project.summary.id, draft.id);
+                    const prior = new Map<string, string>();
+                    for (const chapter of project.chapters)
+                      if (chapter.number >= draft.number && chapter.number < draft.number + result.length)
+                        prior.set(chapter.id, chapter.content);
                     setBatchPreview(null);
                     await reload();
-                    notify(`已生成 ${result.length} 章待质检草稿`);
+                    setBatchReview(
+                      result.map((chapter) => ({
+                        chapter,
+                        previousContent: prior.get(chapter.id) ?? "",
+                        issues: [],
+                        checking: true,
+                        adopted: false,
+                      })),
+                    );
+                    void Promise.all(
+                      result.map(async (chapter) => {
+                        try {
+                          return { id: chapter.id, issues: await api.runQualityCheck(project.summary.id, chapter.id) };
+                        } catch {
+                          return { id: chapter.id, issues: [] as QualityIssue[] };
+                        }
+                      }),
+                    ).then((checks) =>
+                      setBatchReview((current) =>
+                        current
+                          ? current.map((item) => {
+                              const check = checks.find((entry) => entry.id === item.chapter.id);
+                              return check ? { ...item, issues: check.issues, checking: false } : item;
+                            })
+                          : current,
+                      ),
+                    );
                   } catch (error) {
                     notify(error instanceof Error ? error.message : String(error), "error");
                   } finally {
