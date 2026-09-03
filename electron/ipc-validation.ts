@@ -622,6 +622,8 @@ const schemas: Record<InvokeApiKey, z.ZodType<unknown[]>> = {
   cancelSystemHealthCheck: z.tuple([id]),
 };
 
+export const IPC_CHANNELS: readonly InvokeApiKey[] = Object.keys(schemas).sort() as InvokeApiKey[];
+
 export function validateIpcArgs(channel: InvokeApiKey, args: unknown[]) {
   const schema = schemas[channel];
   if (!schema) throw new Error(`拒绝未注册的 IPC 通道：${String(channel)}`);
