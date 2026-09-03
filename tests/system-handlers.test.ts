@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import JSZip from "jszip";
@@ -281,5 +281,23 @@ describe("system handlers", () => {
       status: "已取消",
       label: "正在取消",
     });
+  });
+  it("exports a diagnostic bundle that never contains novel content or databases", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "novel-diag-"));
+    temporaryDirectories.push(directory);
+    const logFile = path.join(directory, "application.jsonl");
+    writeFileSync(logFile, '{"event":"ipc.completed","channel":"getProject"}\n');
+    const destination = path.join(directory, "diagnostic.zip");
+    const { dependencies, handlers } = createDependencies();
+    dependencies.logFilePath = logFile;
+    dependencies.chooseDiagnosticDestination = vi.fn(async () => destination);
+    registerSystemHandlers(dependencies);
+
+    await expect(handlers.get("exportDiagnosticBundle")!()).resolves.toBe(destination);
+    const archive = await JSZip.loadAsync(readFileSync(destination));
+    const names = Object.keys(archive.files).filter((name) => !archive.files[name].dir);
+    expect(names.sort()).toEqual(["application.jsonl", "health.json", "system.json"]);
+    expect(names.some((name) => name.endsWith(".sqlite") || name.includes("正文"))).toBe(false);
+    expect(await archive.file("application.jsonl")!.async("string")).toContain("getProject");
   });
 });

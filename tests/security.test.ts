@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { createCipheriv, randomBytes, scryptSync } from "node:crypto";
+import { rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import JSZip from "jszip";
+import { afterEach, describe, expect, it } from "vitest";
 import { sanitizeResearchBatch, sanitizeResearchText } from "../electron/ai-service";
+import { restoreEncryptedBackup, verifyEncryptedBackup } from "../electron/backup";
 import { validateIpcArgs } from "../electron/ipc-validation";
 
 describe("research text sanitization", () => {
@@ -195,5 +201,44 @@ describe("IPC runtime validation", () => {
         },
       ]),
     ).toThrow("参数无效");
+  });
+});
+
+describe("encrypted backup path containment", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+  });
+
+  async function forgeEncryptedBackup(manifestFiles: Array<{ path: string; bytes: number }>) {
+    const zip = new JSZip();
+    zip.file("backup-manifest.json", JSON.stringify({ files: manifestFiles }));
+    const archive = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    const magic = Buffer.from("NOVELSTUDIO2");
+    const salt = randomBytes(16);
+    const iv = randomBytes(12);
+    const key = scryptSync("strong-password", salt, 32, { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    const encrypted = Buffer.concat([cipher.update(archive), cipher.final()]);
+    const forged = Buffer.concat([magic, salt, iv, cipher.getAuthTag(), encrypted]);
+    const file = path.join(os.tmpdir(), `novel-forged-${randomBytes(6).toString("hex")}.novelbak`);
+    writeFileSync(file, forged);
+    roots.push(file);
+    return file;
+  }
+
+  it("rejects a forged backup whose manifest escapes the workspace with ..", async () => {
+    const file = await forgeEncryptedBackup([{ path: "../evil.txt", bytes: 8 }]);
+    await expect(verifyEncryptedBackup(file, "strong-password")).rejects.toThrow("不安全路径");
+  });
+
+  it("rejects a forged backup whose manifest points at an absolute path", async () => {
+    const file = await forgeEncryptedBackup([{ path: "C:/Windows/evil.txt", bytes: 8 }]);
+    await expect(restoreEncryptedBackup(file, os.tmpdir(), "strong-password")).rejects.toThrow("不安全路径");
+  });
+
+  it("rejects a forged backup with an oversized declared payload", async () => {
+    const file = await forgeEncryptedBackup([{ path: "notes/ok.txt", bytes: 3 * 1024 * 1024 * 1024 }]);
+    await expect(verifyEncryptedBackup(file, "strong-password")).rejects.toThrow(/2GB|安全限制/);
   });
 });
