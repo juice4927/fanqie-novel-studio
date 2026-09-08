@@ -23,7 +23,7 @@ Guidance for AI coding agents working in this repository.
 
 1. **Human-in-the-loop gates are sacred.** AI only produces candidates/drafts; finalizing, outline changes, and publishing are always human-confirmed. Do not weaken these gates (`src/shared/chapter-lifecycle.ts`, `contract-service.ts`, `change-request-service.ts`).
 2. **Local-first privacy.** API keys go to Windows Credential Manager only. Semantic deconstruction uploads only desensitized fragments. Research data and creation data are physically isolated. Do not upload full text or ledgers.
-3. **Security boundary.** All outbound HTTP goes through `electron/netguard.ts` (`fetchPublicHttpResponse`) — URL/IP validation and manual redirect handling. Model endpoints follow the same policy. Never add a raw `fetch` for remote URLs.
+3. **Security boundary.** All outbound HTTP goes through `electron/netguard.ts` (`fetchPublicHttpResponse`; local model endpoints use the explicit `fetchLocalEndpointResponse` exemption). URL/IP validation and manual redirect handling stay there; the optional outbound proxy only swaps the dispatcher inside netguard and never relaxes destination validation. Never add a raw `fetch` for remote URLs.
 4. **Shared code must stay pure.** `src/shared/` must never import from `electron/` or React. Deterministic rules are reused by both renderer and main process.
 5. **State transitions are transactional.** Multi-statement writes wrap in `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`. Approved content edits require an approved change request first.
 6. **Prompt/quality changes need evidence.** Before touching quality prompts, add a reproducible benchmark case (`src/shared/quality-benchmark-corpus.ts`) and compare against baseline (`npm run test:quality`).
