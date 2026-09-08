@@ -21,3 +21,6 @@ dist-ssr/
 # IDE / editor
 .idea/
 .vscode/
+
+# ZCode session artifacts
+.zcode/
