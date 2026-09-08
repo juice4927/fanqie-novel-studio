@@ -214,6 +214,7 @@ export function SettingsPage({
         outputPricePerMillion: settings.outputPricePerMillion,
         longTaskTimeoutMinutes: settings.longTaskTimeoutMinutes,
         reasoningEffort: settings.reasoningEffort,
+        temperatureOverride: settings.temperatureOverride,
       },
       apiKey || undefined,
     );

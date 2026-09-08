@@ -113,6 +113,31 @@ describe("settings AI task center", () => {
     expect(notify).toHaveBeenCalledWith("模型设置已保存");
   });
 
+  it("persists the writing temperature override instead of clearing it", async () => {
+    const saveAiSettings = vi.fn(async (input, apiKey) => ({
+      ...input,
+      hasApiKey: Boolean(apiKey),
+    }));
+    const api = {
+      getAiSettings: vi.fn().mockResolvedValue(settings),
+      getWorkspacePath: vi.fn().mockResolvedValue("C:\\workspace"),
+      getAutoBackupSettings: vi.fn().mockResolvedValue(autoBackup),
+      ...updateApi(),
+      listAiJobs: vi.fn().mockResolvedValue([]),
+      saveAiSettings,
+    } as unknown as AppApi;
+
+    render(<SettingsPage api={api} notify={vi.fn()} />);
+    const temperature = (await screen.findByLabelText(/写作温度覆盖/)) as HTMLInputElement;
+    await userEvent.type(temperature, "0.7");
+    await userEvent.click(screen.getByRole("button", { name: "保存模型设置" }));
+
+    await waitFor(() =>
+      expect(saveAiSettings).toHaveBeenCalledWith(expect.objectContaining({ temperatureOverride: 0.7 }), undefined),
+    );
+    expect(temperature.value).toBe("0.7");
+  });
+
   it("uses the returned retry record without reloading the job list", async () => {
     const source = createJob("job-source", "原失败任务");
     const staleRetry = createJob("job-retry", "旧重试记录");
