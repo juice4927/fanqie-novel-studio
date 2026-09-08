@@ -4,6 +4,7 @@ import { canonicalizeProviderUrl } from "../../src/shared/ai/provider-url";
 import type {
   AiProfile,
   AiProfileHealth,
+  AiProfileModelOption,
   AiProfileView,
   AiRoleRoute,
   ApiSurface,
@@ -48,9 +49,46 @@ export interface AiProfileHandlerDependencies {
 }
 
 const MODELS_RESPONSE_LIMIT_BYTES = 2 * 1024 * 1024;
+/** 自动刷新节流：同一来源在该窗口内只尝试一次 /models，手动 force 除外。 */
+const MODELS_REFRESH_TTL_MS = 10 * 60 * 1000;
+const lastModelsRefreshAt = new Map<string, number>();
 
 function profileError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 该来源的模型候选：能力行（远端/探测）∪ 默认模型 ∪ 指向它的角色路由模型。
+ * 只读本地数据，绝不跨来源合并——列别家来源的模型只会得到难懂的 404。
+ */
+function buildModelOptions(database: ProfileDatabase, profile: AiProfile, now: () => string): AiProfileModelOption[] {
+  const options = new Map<string, AiProfileModelOption>();
+  for (const record of database.listModelCapabilities(profile.id)) {
+    const modelId = record.modelId.trim();
+    if (!modelId) continue;
+    const existing = options.get(modelId);
+    if (!existing || Date.parse(record.probedAt) > Date.parse(existing.fetchedAt)) {
+      options.set(modelId, { modelId, source: record.source, fetchedAt: record.probedAt });
+    }
+  }
+  const manual = [
+    profile.defaultModel,
+    ...database
+      .listAiRoleRoutes()
+      .filter((route) => route.profileId === profile.id)
+      .map((route) => route.modelId ?? ""),
+  ];
+  for (const value of manual) {
+    const modelId = value.trim();
+    if (!modelId || options.has(modelId)) continue;
+    options.set(modelId, { modelId, source: "user", fetchedAt: now() });
+  }
+  const defaultModel = profile.defaultModel.trim();
+  return [...options.values()].sort((a, b) => {
+    if (a.modelId === defaultModel) return -1;
+    if (b.modelId === defaultModel) return 1;
+    return a.modelId.localeCompare(b.modelId);
+  });
 }
 
 function sanitizeProfile(input: AiProfile): AiProfile {
@@ -184,6 +222,8 @@ export function registerAiProfileHandlers({
       credentialIds.add(saved.id);
     }
     if (database.getDefaultAiProfileId() === null) database.setDefaultAiProfileId(saved.id);
+    // 保存可能补上了密钥或换了端点，允许立刻重新拉一次清单。
+    lastModelsRefreshAt.delete(saved.id);
     return view(saved);
   });
 
@@ -195,6 +235,7 @@ export function registerAiProfileHandlers({
       log("warn", "ai.profile.credential_delete_failed", { id, error: profileError(error) });
     });
     credentialIds.delete(id);
+    lastModelsRefreshAt.delete(id);
   });
 
   register("setDefaultAiProfile", (id) => {
@@ -234,13 +275,29 @@ export function registerAiProfileHandlers({
       lastTestOk: result.ok,
       lastError: result.ok ? null : result.message.slice(0, 300),
     });
+    // 连接刚验证成功，清单可以立刻重拉。
+    if (result.ok) lastModelsRefreshAt.delete(id);
     return { ok: result.ok, message: result.message };
   });
 
-  register("refreshAiProfileModels", async (id) => {
+  register("listAiProfileModels", (id) => {
+    const profile = database.getAiProfile(id);
+    if (!profile) throw new Error("来源不存在");
+    return buildModelOptions(database, profile, now);
+  });
+
+  register("refreshAiProfileModels", async (id, force) => {
     const profile = database.getAiProfile(id);
     if (!profile) throw new Error("来源不存在");
     if (profile.apiSurface === "anthropic-messages") return [];
+    const lastAttemptAt = lastModelsRefreshAt.get(id) ?? 0;
+    if (!force && Date.now() - lastAttemptAt < MODELS_REFRESH_TTL_MS) {
+      return database
+        .listModelCapabilities(id)
+        .filter((record) => record.source === "remote")
+        .map((record) => record.modelId);
+    }
+    lastModelsRefreshAt.set(id, Date.now());
     const secret = profile.authScheme === "none" ? "" : await credentials.read(id);
     const url = withQuery(`${profile.baseUrl}/models`, profile.extraQuery);
     const requestInit: RequestInit = {

@@ -1046,6 +1046,9 @@ export function createBrowserApi(): AppApi {
     async testAiProfile() {
       return { ok: false, message: "浏览器预览不调用真实模型接口，请在桌面版测试连接。" };
     },
+    async listAiProfileModels() {
+      return [];
+    },
     async refreshAiProfileModels() {
       return [];
     },

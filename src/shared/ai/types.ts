@@ -85,6 +85,15 @@ export interface AiProfileView extends AiProfile {
   hasApiKey: boolean;
 }
 
+/** 某个来源的模型候选；只含标识与来源，不含密钥与请求细节。 */
+export interface AiProfileModelOption {
+  modelId: string;
+  /** remote=远端清单，probe=实际用过并探测过，user=用户手填。 */
+  source: CapabilitySource;
+  /** 能力行写入时间；手工填写的模型取合成时间。 */
+  fetchedAt: string;
+}
+
 /** 来源熔断状态；degradedUntil 非空表示正在冷却。 */
 export interface AiProfileHealth {
   profileId: string;

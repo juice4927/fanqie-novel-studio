@@ -1,5 +1,6 @@
 import type {
   AiProfileHealth,
+  AiProfileModelOption,
   AiProfileView,
   AiRoleRoute,
   ApiSurfacePreference,
@@ -1023,7 +1024,8 @@ export interface AppApi {
   listAiProfileHealth(): Promise<AiProfileHealth[]>;
   setAiRoleRoute(role: ModelRole, profileId: string | null, modelId: string | null): Promise<AiRoleRoute>;
   testAiProfile(id: string): Promise<{ ok: boolean; message: string }>;
-  refreshAiProfileModels(id: string): Promise<string[]>;
+  listAiProfileModels(id: string): Promise<AiProfileModelOption[]>;
+  refreshAiProfileModels(id: string, force?: boolean): Promise<string[]>;
   exportAiProfiles(): Promise<string>;
   importAiProfiles(json: string): Promise<AiProfileView[]>;
   getProxySettings(): Promise<ProxySettings>;
