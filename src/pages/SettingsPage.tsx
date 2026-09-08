@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   CalendarClock,
   Database,
+  Download,
   FileArchive,
   FolderLock,
   HardDrive,
@@ -19,6 +20,7 @@ import {
 import { useEffect, useState } from "react";
 import { Badge, Button, Field, Input, Select } from "../components/UI";
 import { describeError } from "../lib/error-message";
+import { formatDate } from "../lib/format";
 import type {
   AiJobRecord,
   AiSettings,
@@ -26,6 +28,9 @@ import type {
   AutoBackupSettings,
   HealthCheckTask,
   SystemHealthReport,
+  UpdatePhase,
+  UpdateSettingsInput,
+  UpdateStatus,
 } from "../shared/types";
 
 const DEFAULT_AUTO_BACKUP: AutoBackupSettings = {
@@ -71,6 +76,16 @@ const upsertAiJob = (jobs: readonly AiJobRecord[], incoming: AiJobRecord) =>
   [incoming, ...jobs.filter((job) => job.id !== incoming.id)].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
   );
+const UPDATE_PHASE_LABELS: Record<UpdatePhase, string> = {
+  idle: "未检查",
+  checking: "检查中",
+  "up-to-date": "已是最新",
+  available: "发现新版本",
+  downloading: "下载中",
+  downloaded: "已就绪",
+  installing: "正在安装",
+  error: "检查失败",
+};
 
 export function SettingsPage({
   api,
@@ -100,6 +115,9 @@ export function SettingsPage({
   const [aiJobs, setAiJobs] = useState<AiJobRecord[]>([]);
   const [busy, setBusy] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [updatePassword, setUpdatePassword] = useState("");
+  const [updateBusy, setUpdateBusy] = useState(false);
   useEffect(() => {
     void Promise.all([api.getAiSettings(), api.getWorkspacePath(), api.getAutoBackupSettings(), api.listAiJobs()]).then(
       ([nextSettings, path, nextAutoBackup, jobs]) => {
@@ -134,6 +152,56 @@ export function SettingsPage({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [api, healthTask, notify]);
+  useEffect(() => {
+    let active = true;
+    void api
+      .getUpdateStatus()
+      .then((status) => {
+        if (active) setUpdate(status);
+      })
+      .catch((error) => notify(describeError(error), "error"));
+    const unsubscribe = api.onUpdateStatus((status) => setUpdate(status));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [api, notify]);
+
+  const checkUpdates = async () => {
+    setUpdateBusy(true);
+    try {
+      setUpdate(await api.checkForUpdates());
+    } catch (error) {
+      notify(describeError(error), "error");
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+  const installUpdate = async (password?: string) => {
+    setUpdateBusy(true);
+    try {
+      setUpdate(await api.installUpdate(password));
+      setUpdatePassword("");
+    } catch (error) {
+      notify(describeError(error), "error");
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+  const persistUpdateSettings = async (patch: Partial<UpdateSettingsInput>) => {
+    if (!update) return;
+    try {
+      setUpdate(
+        await api.saveUpdateSettings({
+          autoCheck: update.autoCheck,
+          autoInstallOnQuit: update.autoInstallOnQuit,
+          ...patch,
+        }),
+      );
+    } catch (error) {
+      notify(describeError(error), "error");
+    }
+  };
 
   const persistAiSettings = async () => {
     const saved = await api.saveAiSettings(
@@ -609,6 +677,113 @@ export function SettingsPage({
             >
               保存自动备份设置
             </Button>
+          </div>
+        </div>
+      </section>
+      <section className="settings-section">
+        <div className="settings-title">
+          <span className="settings-icon">
+            <Download size={19} />
+          </span>
+          <div>
+            <h2>软件更新</h2>
+            <p>自动检查并在后台下载；安装前创建加密快照，且始终由你确认。</p>
+          </div>
+          {update && (
+            <Badge
+              tone={
+                update.phase === "error"
+                  ? "danger"
+                  : update.phase === "downloaded"
+                    ? "success"
+                    : update.phase === "downloading" || update.phase === "available"
+                      ? "warning"
+                      : "neutral"
+              }
+            >
+              {UPDATE_PHASE_LABELS[update.phase]}
+            </Badge>
+          )}
+        </div>
+        <div className="settings-form">
+          <div className="update-meta">
+            <span>
+              当前版本<strong>{update?.currentVersion ?? "--"}</strong>
+            </span>
+            <span>
+              上次检查<strong>{update?.lastCheckedAt ? formatDate(update.lastCheckedAt, true) : "尚未检查"}</strong>
+            </span>
+            {update?.availableVersion && (
+              <span>
+                可用版本<strong>{update.availableVersion}</strong>
+              </span>
+            )}
+          </div>
+          {update?.phase === "downloading" && (
+            <div
+              className="update-progress"
+              role="progressbar"
+              aria-label="更新下载进度"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={update.progressPercent ?? 0}
+            >
+              <i style={{ width: `${update.progressPercent ?? 0}%` }} />
+            </div>
+          )}
+          {update?.error && <p className="muted-line">{update.error}</p>}
+          {update?.releaseNotes && (
+            <details>
+              <summary>更新说明</summary>
+              <pre>{update.releaseNotes}</pre>
+            </details>
+          )}
+          {update?.phase === "downloaded" && update.backupPasswordRequired && (
+            <Field label="备份密码" hint="未保存自动备份密码，请输入一次用于安装前快照">
+              <Input
+                aria-label="安装前备份密码"
+                type="password"
+                value={updatePassword}
+                onChange={(event) => setUpdatePassword(event.target.value)}
+              />
+            </Field>
+          )}
+          <div className="inline-actions">
+            <Button
+              variant="secondary"
+              icon={<RefreshCw size={15} />}
+              disabled={updateBusy || update?.phase === "checking"}
+              onClick={() => void checkUpdates()}
+            >
+              检查更新
+            </Button>
+            {update?.phase === "downloaded" && (
+              <Button
+                icon={<Download size={15} />}
+                disabled={updateBusy || (update.backupPasswordRequired && updatePassword.trim().length < 8)}
+                onClick={() => void installUpdate(update.backupPasswordRequired ? updatePassword : undefined)}
+              >
+                立即重启并安装
+              </Button>
+            )}
+          </div>
+          <div className="update-toggles">
+            <label>
+              <input
+                type="checkbox"
+                checked={update?.autoCheck ?? false}
+                onChange={(event) => void persistUpdateSettings({ autoCheck: event.target.checked })}
+              />
+              自动检查更新
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={update?.autoInstallOnQuit ?? false}
+                onChange={(event) => void persistUpdateSettings({ autoInstallOnQuit: event.target.checked })}
+              />
+              退出时自动安装
+            </label>
           </div>
         </div>
       </section>
