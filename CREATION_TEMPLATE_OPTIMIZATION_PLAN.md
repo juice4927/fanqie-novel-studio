@@ -44,13 +44,14 @@
 
 验证（A+B+C+D 合并后全量）：`tsc --noEmit` ✅、`npm test` 611 通过 ✅、`npm run test:quality` 16 通过 ✅、`npm run build` ✅、`npm run test:e2e` 22 通过 ✅。
 
-五点实施偏差/发现：
+六点实施偏差/发现：
 
 1. 预设值放在 `fanqie-taxonomy/creation-presets.ts` 并在模块加载时合并进画像（与 `FANQIE_SUBGENRE_SEEDS → FANQIE_SUBGENRE_PROFILES` 同一模式），而不是写进 37 个画像字面量；运行时仍是单源（`profile.creationPreset`），完整性由测试守住。
 2. 60 条二级流派的 `typicalChapterWords` / `firstPayoffWindow` 目前与父分类完全相同，窄化逻辑暂时是空操作；逻辑已按前向兼容写好，等流派级数据补齐后自动生效。
 3. "直达"实现为"只生成一套候选"，而不是另开一个跳过候选的任务：复用同一份候选 schema 与 `expandBookConcept`，作者拿到的仍是完整契约草稿，落地成本最低。
 4. 顺带修复一个既有 bug：`createProject` 的 IPC schema 缺 `wordsPerChapter`（面板手动创建一直在传它，strict 校验会直接拒绝），手动创建在桌面端实际会失败；已补上 `wordsPerChapter` 与 `lengthShape`。
 5. 没有往 `quality-benchmark-corpus.ts` 加"单元剧/多卷史诗"语料：现有两份 corpus 都是质量检查器的 fixture（知识边界、资源守恒），不是生成结构的 fixture。结构改动改由 `tests/structure-preset.test.ts` 的确定性断言锁定，`npm run test:quality` 无回归。`PROMPT_VERSION` 升到 v14、`FANQIE_PROFILE_VERSION` 升到 v2。
+6. C 章节里那个"结构卡对照实验"**没有执行**（需要真实模型配置）。所以 C 的保证只到"区间正确、校验生效"这一层；结构卡对模型输出的实际约束力仍待作者抽检：同一分类只换篇幅形态各开一本，对比阶段与分卷的差异。
 
 ## 一、结论
 
