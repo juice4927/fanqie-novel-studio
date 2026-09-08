@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   BrainCircuit,
   Check,
+  CornerDownRight,
   History,
   Layers3,
   LoaderCircle,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Field, IconButton, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
+import { inheritChapterDefaults, previousEndingExpectation } from "../lib/chapter-defaults";
 import {
   AutosaveCoordinator,
   chapterDraftSignature,
@@ -85,8 +87,9 @@ export function WritingPage({
   const { registerLeaveGuard } = useNavigationGuard();
   const [selectedId, setSelectedId] = useState(project.chapters[0]?.id ?? "");
   const selected = project.chapters.find((chapter) => chapter.id === selectedId);
+  const newChapter = (number: number) => inheritChapterDefaults(EMPTY_CHAPTER(number), project.chapters);
   const [draft, setDraft] = useState<Chapter>(
-    readRecoveredChapter(project.summary.id, selected ?? EMPTY_CHAPTER(project.chapters.length + 1)),
+    readRecoveredChapter(project.summary.id, selected ?? newChapter(project.chapters.length + 1)),
   );
   const [context, setContext] = useState<ContextPackage | null>(null);
   const [busy, setBusy] = useState(false);
@@ -370,7 +373,8 @@ export function WritingPage({
   };
   const saveLatestForAction = async () => {
     const snapshot = draftRef.current;
-    if (chapterDraftSignature(snapshot) === lastSavedSignature.current) return snapshot;
+    // 新章还没有服务端记录：即使内容没变也要先落库，后续动作才拿得到章节 id。
+    if (snapshot.id && chapterDraftSignature(snapshot) === lastSavedSignature.current) return snapshot;
     setSaveStatus("saving");
     const coordinator = autosaveRef.current;
     const saved = coordinator
@@ -382,6 +386,8 @@ export function WritingPage({
     setDraft(saved);
     setSelectedId(saved.id);
     setSaveStatus("saved");
+    // 新章落库后刷新章节列表，否则左侧目录里看不到它。
+    if (!snapshot.id) await reload();
     return saved;
   };
   const captureReviewSelection = () => {
@@ -528,7 +534,7 @@ export function WritingPage({
     if (!canDiscardDraft()) return;
     chapterRequestRef.current += 1;
     setChapterLoading(false);
-    const empty = EMPTY_CHAPTER(project.chapters.length + 1);
+    const empty = newChapter(project.chapters.length + 1);
     // 新章没有服务端记录，只能靠本地恢复稿兜底：重新新建时先取回它。
     const recovered = readRecoveredChapter(project.summary.id, empty);
     const recoveredDraft = chapterDraftSignature(recovered) !== chapterDraftSignature(empty);
@@ -541,8 +547,32 @@ export function WritingPage({
     setContext(null);
     if (recoveredDraft) notify("已恢复上次未保存的新章草稿");
   };
+  const endingToInherit = previousEndingExpectation(draft, project.chapters);
+  const canInheritEnding = Boolean(endingToInherit) && draft.chapterPromise?.trim() !== endingToInherit;
+  const linkedExpectationCount = draft.linkedExpectationIds?.length ?? 0;
+  const advancedExpectationSummary = [
+    draft.expectationTargetChapter ? `第 ${draft.expectationTargetChapter} 章兑现` : "",
+    linkedExpectationCount ? `承接 ${linkedExpectationCount} 项历史期待` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const inheritEndingExpectation = () => {
+    if (!endingToInherit) return;
+    const openExpectationIds = project.expectations
+      .filter(
+        (item) => item.sourceChapter === draft.number - 1 && (item.status === "待兑现" || item.status === "部分兑现"),
+      )
+      .map((item) => item.id);
+    setDraft((current) => ({
+      ...current,
+      chapterPromise: endingToInherit,
+      linkedExpectationIds: Array.from(new Set([...(current.linkedExpectationIds ?? []), ...openExpectationIds])),
+    }));
+    notify("已带入上一章的结尾期待");
+  };
   const runQualityCheck = async () => {
-    if (!draftRef.current.id || busy || chapterLoading) return;
+    // 新章由 saveLatestForAction 先落库，所以这里不再要求已有 id。
+    if (busy || chapterLoading) return;
     setBusy(true);
     try {
       const saved = await saveLatestForAction();
@@ -789,17 +819,17 @@ export function WritingPage({
               icon={<Save size={16} />}
               disabled={editorBusy || saveStatus === "saving"}
               aria-keyshortcuts="Control+S"
-              title="保存并建立新版本（Ctrl+S）"
+              title={draft.id ? "保存并建立新版本（Ctrl+S）" : "创建本章并保存（Ctrl+S）"}
               onClick={save}
             >
-              建立版本
+              {draft.id ? "建立版本" : "创建本章"}
             </Button>
           </div>
         </header>
         <div className="writing-actions">
           <Button
             variant="secondary"
-            disabled={!draft.id || editorBusy}
+            disabled={editorBusy || !draft.content.trim()}
             icon={<MessageSquareText size={16} />}
             onClick={() => {
               const editor = manuscriptRef.current;
@@ -817,7 +847,7 @@ export function WritingPage({
           </Button>
           <Button
             variant="secondary"
-            disabled={!draft.id || editorBusy}
+            disabled={editorBusy}
             icon={<BrainCircuit size={16} />}
             onClick={async () => {
               setBusy(true);
@@ -835,7 +865,7 @@ export function WritingPage({
           </Button>
           <Button
             variant="secondary"
-            disabled={!draft.id || editorBusy}
+            disabled={editorBusy}
             icon={<Sparkles size={16} />}
             onClick={async () => {
               let beforeGeneration = draftRef.current;
@@ -917,7 +947,7 @@ export function WritingPage({
             </Button>
           )}
           <Button
-            disabled={!draft.id || editorBusy}
+            disabled={editorBusy}
             icon={<SearchCheck size={16} />}
             aria-keyshortcuts="Control+Enter"
             title={
@@ -961,6 +991,19 @@ export function WritingPage({
         </div>
         <div className="editor-body">
           <div className="chapter-intent-panel">
+            <div className="intent-panel-head">
+              <span>本章意图</span>
+              {canInheritEnding && (
+                <Button
+                  variant="ghost"
+                  disabled={editorBusy}
+                  icon={<CornerDownRight size={14} />}
+                  onClick={inheritEndingExpectation}
+                >
+                  带入上章结尾期待
+                </Button>
+              )}
+            </div>
             <div className="intent-grid">
               <Field label="本章承诺" hint="读者进入本章后应获得什么推进">
                 <Textarea
@@ -1029,43 +1072,53 @@ export function WritingPage({
                   onChange={(event) => setDraft({ ...draft, targetWords: Number(event.target.value) })}
                 />
               </Field>
-              <Field label="预计兑现章">
-                <Input
-                  type="number"
-                  disabled={editorBusy}
-                  min={draft.number}
-                  value={draft.expectationTargetChapter ?? ""}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      expectationTargetChapter: event.target.value ? Number(event.target.value) : null,
-                    })
-                  }
-                />
-              </Field>
-              <Field label="本章承接的历史期待">
-                <select
-                  className="expectation-link-select"
-                  disabled={editorBusy}
-                  multiple
-                  value={draft.linkedExpectationIds ?? []}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      linkedExpectationIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value),
-                    })
-                  }
-                >
-                  {project.expectations
-                    .filter((item) => item.status === "待兑现" || item.status === "部分兑现")
-                    .map((item) => (
-                      <option value={item.id} key={item.id}>
-                        第{item.sourceChapter}章 · {item.title}
-                      </option>
-                    ))}
-                </select>
-              </Field>
             </div>
+            <details className="intent-advanced">
+              <summary>
+                高级：期待兑现设置
+                {advancedExpectationSummary && (
+                  <span className="intent-advanced-hint">{advancedExpectationSummary}</span>
+                )}
+              </summary>
+              <div className="intent-meta">
+                <Field label="预计兑现章">
+                  <Input
+                    type="number"
+                    disabled={editorBusy}
+                    min={draft.number}
+                    value={draft.expectationTargetChapter ?? ""}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        expectationTargetChapter: event.target.value ? Number(event.target.value) : null,
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="本章承接的历史期待">
+                  <select
+                    className="expectation-link-select"
+                    disabled={editorBusy}
+                    multiple
+                    value={draft.linkedExpectationIds ?? []}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        linkedExpectationIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value),
+                      })
+                    }
+                  >
+                    {project.expectations
+                      .filter((item) => item.status === "待兑现" || item.status === "部分兑现")
+                      .map((item) => (
+                        <option value={item.id} key={item.id}>
+                          第{item.sourceChapter}章 · {item.title}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              </div>
+            </details>
           </div>
           <div className="outline-panel">
             <Field label="本章章纲">

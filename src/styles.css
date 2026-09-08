@@ -1762,6 +1762,41 @@ p {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+.intent-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.intent-panel-head > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.intent-advanced {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.intent-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.intent-advanced-hint {
+  color: var(--teal);
+  font-size: 11px;
+}
+.intent-advanced .intent-meta {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: none;
+}
 .expectation-link-select {
   width: 100%;
   min-height: 58px;

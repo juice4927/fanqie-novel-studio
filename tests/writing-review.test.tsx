@@ -120,3 +120,26 @@ describe("AI generated draft review (director mode)", () => {
     }
   });
 });
+
+describe("new chapter without a saved record", () => {
+  it("生成前自动落库，不再要求先点建立版本", async () => {
+    const saveChapter = vi.fn(async (_id: string, chapter: Chapter) => ({
+      ...chapter,
+      id: chapter.id || "chapter-new",
+    }));
+    const { api, unmount } = await mountWritingPage({ saveChapter });
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "新建章节（Alt+N）" }));
+      const generate = await screen.findByRole("button", { name: "AI 生成草稿" });
+      expect((generate as HTMLButtonElement).disabled).toBe(false);
+      await userEvent.click(generate);
+      await waitFor(() => expect(saveChapter).toHaveBeenCalled());
+      expect(saveChapter.mock.calls[0][1].id).toBe("");
+      await waitFor(() =>
+        expect((api.generateChapterDraft as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe("chapter-new"),
+      );
+    } finally {
+      unmount();
+    }
+  });
+});
