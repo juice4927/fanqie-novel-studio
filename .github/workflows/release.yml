@@ -50,6 +50,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      # electron-builder 会为 exe 和 blockmap 各起一个 publisher；Release 还不存在时
+      # 两边会各建一个，同一 tag 下出现两个 Release，资产被分散。先建好，publisher 就会复用它。
+      - name: Create the release before building
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --verify-tag --title ($tag -replace '^v', '') --generate-notes
+          }
       - shell: pwsh
         run: >-
           npm run release:win --
