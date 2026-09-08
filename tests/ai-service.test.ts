@@ -354,6 +354,8 @@ describe("AI provider routing", () => {
     expect(body).toMatchObject({
       model: "gpt-5.1",
       reasoning: { effort: "low" },
+      max_output_tokens: 10_000,
+      store: false,
       instructions: expect.any(String),
       input: expect.any(String),
       stream: true,
@@ -366,6 +368,30 @@ describe("AI provider routing", () => {
     });
     expect(body).not.toHaveProperty("messages");
     expect(body).not.toHaveProperty("response_format");
+  });
+
+  it("lets an explicit global reasoning effort override the task default", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output: [{ content: [{ type: "output_text", text: JSON.stringify({ issues: [] }) }] }],
+            usage: { input_tokens: 11, output_tokens: 3 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const database = databaseFor("gpt-5.1");
+    vi.spyOn(database, "getAiSettings").mockReturnValue({
+      ...database.getAiSettings(),
+      reasoningEffort: "high",
+    });
+
+    await new AiService(database, () => "secret").reviewChapter(project, chapter, context);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.reasoning).toEqual({ effort: "high" });
   });
 
   it("falls back to chat completions when a GPT-compatible endpoint lacks Responses", async () => {

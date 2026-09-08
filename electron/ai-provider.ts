@@ -39,13 +39,20 @@ export function rejectsStreaming(status: number, detail: string) {
 }
 
 export function rejectsResponsesApi(status: number, detail: string) {
-  return (
-    [400, 404, 405].includes(status) && /responses|unknown (?:url|endpoint)|not found|unsupported|不支持/i.test(detail)
-  );
+  if (status === 405) return /(?:method not allowed|unsupported|not supported|unknown)/i.test(detail);
+  if (![400, 404].includes(status)) return false;
+  const endpointMentioned = /(?:responses(?:\s+api)?|\/responses|endpoint|route|url)/i.test(detail);
+  const unsupported =
+    /(?:unsupported|not supported|unknown|not found|does not exist|invalid|cannot|can't|no such)/i.test(detail);
+  return endpointMentioned && unsupported;
 }
 
 export function usesResponsesApi(model: string) {
   return /^gpt(?:-|$)/i.test(model.trim());
+}
+
+export function supportsReasoning(model: string) {
+  return /^(?:gpt-(?:5|6)|o\d)/i.test(model.trim());
 }
 
 export function aiEndpoint(
@@ -84,6 +91,24 @@ export function parseResponsesOutput(body: unknown) {
     .filter((item) => item.type === "output_text")
     .map((item) => item.text ?? "")
     .join("");
+}
+
+export function parseResponsesRefusal(body: unknown): string | null {
+  const response = body as {
+    refusal?: unknown;
+    output?: Array<{
+      content?: Array<{ type?: string; refusal?: unknown; text?: unknown }>;
+    }>;
+  };
+  if (typeof response.refusal === "string" && response.refusal.trim()) return response.refusal;
+  for (const item of response.output ?? []) {
+    for (const content of item.content ?? []) {
+      if (content.type !== "refusal") continue;
+      const refusal = content.refusal ?? content.text;
+      if (typeof refusal === "string" && refusal.trim()) return refusal;
+    }
+  }
+  return null;
 }
 
 export function parseAnthropicOutput(body: unknown) {
@@ -159,32 +184,53 @@ export async function readResponsesStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let content = "";
+  let refusal = "";
+  let terminal: "completed" | "failed" | "incomplete" | null = null;
   let usage: ProviderUsage = { inputTokens: 0, outputTokens: 0 };
   const consume = (event: string) => {
     for (const value of parseSseData(event)) {
       const chunk = value as {
         type?: string;
-        delta?: string;
+        delta?: string | null;
         message?: string;
-        response?: { usage?: Record<string, unknown> };
+        response?: {
+          usage?: Record<string, unknown>;
+          refusal?: unknown;
+          output?: Array<{ content?: Array<{ type?: string; refusal?: unknown; text?: unknown }> }>;
+          error?: { message?: string };
+          incomplete_details?: { reason?: string };
+        };
         usage?: Record<string, unknown>;
-        error?: { message?: string };
+        error?: { message?: string } | string;
       };
       if (chunk.type === "response.output_text.delta") {
-        const delta = chunk.delta ?? "";
+        const delta = typeof chunk.delta === "string" ? chunk.delta : "";
         content += delta;
         if (delta) onContent(delta);
       }
-      if (chunk.type === "response.completed" && chunk.response) usage = parseProviderUsage(chunk.response);
+      if (chunk.type === "response.refusal.delta") {
+        const delta = typeof chunk.delta === "string" ? chunk.delta : "";
+        refusal += delta;
+      }
+      if (chunk.type === "response.completed") {
+        terminal = "completed";
+        if (chunk.response) {
+          usage = parseProviderUsage(chunk.response);
+          refusal ||= parseResponsesRefusal(chunk.response) ?? "";
+        }
+      }
       if (chunk.usage) usage = parseProviderUsage(chunk);
       if (chunk.type === "error" || chunk.error) {
-        throw new Error(chunk.error?.message ?? chunk.message ?? "Responses API 流式请求失败");
+        const errorMessage = typeof chunk.error === "string" ? chunk.error : chunk.error?.message;
+        throw new Error(errorMessage ?? chunk.message ?? "Responses API 流式请求失败");
       }
-      if (chunk.type === "response.failed" || chunk.type === "response.incomplete") {
-        const failed = chunk.response as
-          | { error?: { message?: string }; incomplete_details?: { reason?: string } }
-          | undefined;
-        throw new Error(failed?.error?.message ?? failed?.incomplete_details?.reason ?? "Responses API 未完成输出");
+      if (chunk.type === "response.failed") {
+        terminal = "failed";
+        throw new Error(chunk.response?.error?.message ?? "Responses API 请求失败");
+      }
+      if (chunk.type === "response.incomplete") {
+        terminal = "incomplete";
+        throw new Error(chunk.response?.incomplete_details?.reason ?? "Responses API 未完成输出");
       }
     }
   };
@@ -199,6 +245,8 @@ export async function readResponsesStream(
   }
   buffer += decoder.decode();
   if (buffer.trim()) consume(buffer);
+  if (!terminal) throw new Error("Responses API 流式响应未收到完成事件");
+  if (refusal.trim()) throw new Error(`模型拒绝生成内容：${refusal.trim()}`);
   return { content, usage };
 }
 

@@ -4,12 +4,14 @@ import {
   JsonStringFieldExtractor,
   parseAnthropicOutput,
   parseResponsesOutput,
+  parseResponsesRefusal,
   providerError,
   readAnthropicStream,
   readChatCompletionStream,
   readResponsesStream,
   rejectsResponsesApi,
   rejectsStreaming,
+  supportsReasoning,
   usesResponsesApi,
 } from "../electron/ai-provider";
 
@@ -130,10 +132,16 @@ describe("Responses API", () => {
     expect(usesResponsesApi("deepseek-chat")).toBe(false);
     expect(aiEndpoint("https://api.openai.com/v1/", "gpt-5.1")).toBe("https://api.openai.com/v1/responses");
     expect(aiEndpoint("https://model.invalid/v1", "deepseek-chat")).toBe("https://model.invalid/v1/chat/completions");
+    expect(supportsReasoning("gpt-6")).toBe(true);
+    expect(supportsReasoning("gpt-5.1")).toBe(true);
+    expect(supportsReasoning("gpt-4o")).toBe(false);
   });
 
   it("recognizes endpoints that do not implement the Responses API", () => {
     expect(rejectsResponsesApi(404, "unknown endpoint /responses")).toBe(true);
+    expect(rejectsResponsesApi(404, "model not found")).toBe(false);
+    expect(rejectsResponsesApi(400, "invalid response_format schema")).toBe(false);
+    expect(rejectsResponsesApi(405, "method not allowed")).toBe(true);
     expect(rejectsResponsesApi(500, "temporary failure")).toBe(false);
     expect(aiEndpoint("https://model.invalid/v1", "gpt-5.1", false)).toBe("https://model.invalid/v1/chat/completions");
   });
@@ -142,6 +150,12 @@ describe("Responses API", () => {
     expect(parseResponsesOutput({ output: [{ content: [{ type: "output_text", text: '{"ok":true}' }] }] })).toBe(
       '{"ok":true}',
     );
+  });
+
+  it("extracts refusal text from Responses output", () => {
+    expect(parseResponsesRefusal({ refusal: "policy refusal" })).toBe("policy refusal");
+    expect(parseResponsesRefusal({ output: [{ content: [{ type: "refusal", refusal: "blocked" }] }] })).toBe("blocked");
+    expect(parseResponsesRefusal({ output: [{ content: [{ type: "output_text", text: "ok" }] }] })).toBeNull();
   });
 
   it("reassembles typed Responses SSE events and usage", async () => {
@@ -172,5 +186,20 @@ describe("Responses API", () => {
       'data: {"type":"response.failed","response":{"error":{"message":"context limit"}}}\n\n',
     );
     await expect(readResponsesStream(response, vi.fn())).rejects.toThrow("context limit");
+  });
+
+  it("rejects a Responses stream that ends without a terminal event", async () => {
+    const response = new Response('data: {"type":"response.output_text.delta","delta":"partial"}\n\n');
+    await expect(readResponsesStream(response, vi.fn())).rejects.toThrow("未收到完成事件");
+  });
+
+  it("surfaces refusal deltas from a completed Responses stream", async () => {
+    const response = new Response(
+      [
+        'data: {"type":"response.refusal.delta","delta":"not allowed"}\n\n',
+        'data: {"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1}}}\n\n',
+      ].join(""),
+    );
+    await expect(readResponsesStream(response, vi.fn())).rejects.toThrow("not allowed");
   });
 });

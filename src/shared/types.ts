@@ -418,6 +418,8 @@ export interface StorySummary {
 
 export type AiProtocol = "openai-compatible" | "anthropic-messages";
 
+export type AiReasoningEffort = "low" | "medium" | "high";
+
 export interface AiSettings {
   protocol: AiProtocol;
   baseUrl: string;
@@ -427,6 +429,7 @@ export interface AiSettings {
   inputPricePerMillion: number;
   outputPricePerMillion: number;
   longTaskTimeoutMinutes: number;
+  reasoningEffort?: AiReasoningEffort;
 }
 
 export type AiJobStatus = "运行中" | "成功" | "失败" | "已取消" | "已中断";

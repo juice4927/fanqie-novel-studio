@@ -81,6 +81,7 @@ import {
   parseAnthropicOutput,
   parseProviderUsage,
   parseResponsesOutput,
+  parseResponsesRefusal,
   providerError,
   readAnthropicStream,
   readChatCompletionStream,
@@ -88,6 +89,7 @@ import {
   rejectsJsonMode,
   rejectsResponsesApi,
   rejectsStreaming,
+  supportsReasoning,
   usesResponsesApi,
 } from "./ai-provider";
 import { now, type WorkspaceDatabase } from "./database";
@@ -202,6 +204,10 @@ export class AiService {
           };
         })()
       : null;
+    // A saved setting is the author's global preference; task defaults only
+    // apply to older workspaces that have no persisted preference.
+    const reasoningEffort = settings.reasoningEffort ?? options.reasoningEffort ?? "medium";
+    const maxOutputTokens = options.taskType === "draft-chapter" ? 12_000 : options.longTask ? 10_000 : 6_000;
     this.activeRequests.set(jobId, controller);
     const telemetry = (status?: "失败" | "已取消") => ({
       ...cumulativeUsage,
@@ -280,7 +286,9 @@ export class AiService {
                   : useResponses
                     ? {
                         model: settings.model,
-                        reasoning: { effort: options.reasoningEffort ?? "medium" },
+                        ...(supportsReasoning(settings.model) ? { reasoning: { effort: reasoningEffort } } : {}),
+                        max_output_tokens: maxOutputTokens,
+                        store: false,
                         ...(useStreaming ? { stream: true } : {}),
                         instructions: `${options.system}\n只返回合法 JSON，不使用 Markdown。`,
                         input: `${options.user}${repairInstruction}`,
@@ -288,6 +296,7 @@ export class AiService {
                       }
                     : {
                         model: settings.model,
+                        max_tokens: maxOutputTokens,
                         temperature: options.taskType === "draft-chapter" ? 0.85 : 0.35,
                         ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
                         ...(useStreaming ? { stream: true } : {}),
@@ -420,6 +429,10 @@ export class AiService {
               : useResponses
                 ? parseResponsesOutput(body)
                 : (body.choices?.[0]?.message?.content ?? "");
+            if (useResponses) {
+              const refusal = parseResponsesRefusal(body);
+              if (refusal) throw new Error(`模型拒绝生成内容：${refusal}`);
+            }
           }
           cumulativeUsage = {
             inputTokens: cumulativeUsage.inputTokens + attemptUsage.inputTokens,
@@ -1342,7 +1355,7 @@ export class AiService {
         inputSummary: `第${chapter.number}章 ${chapter.title || "未命名"}`,
         system:
           "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、项目审美、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑、契约或本书审美。项目审美是本书唯一的文风基准：冷峻、克制、均衡、热烈都可能是正确答案，不得默认采用清冷克制风，也不得把任一温度写成所有作品共用的模板。",
-        user: `本章主要功能：${chapterFunction}\n本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标约 ${targetCharacters} 个非空白字符，完整结果必须落在 ${minimumCharacters}-${maximumCharacters} 个非空白字符内。按本章功能完成有效推进：行动、生存、经营或高潮章应产生可观察的局势变化；调查、关系、群像、氛围或过渡章可以通过证据重排、认知变化、关系位移、情绪积累或环境信息完成推进，不得为了显得刺激而强塞冲突、打脸或反转。若本章承担回报，展示其实际影响；若只承担蓄势，不要提前透支回报。把上下文中的叙事距离、情绪温度、文字质地、对话风格、情绪表达和标志手法落实到具体句段。遵守审美避用项，并以符合本章功能的自然余波结束。`,
+        user: `本章主要功能：${chapterFunction}\n本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标约 ${targetCharacters} 个非空白字符，完整结果必须落在 ${minimumCharacters}-${maximumCharacters} 个非空白字符内。按本章功能完成有效推进：行动、生存、经营或高潮章应产生可观察的局势变化；调查、关系、群像、氛围或过渡章可以通过证据重排、认知变化、关系位移、情绪积累或环境信息完成推进。每个主要场景先明确角色当下目标，再让选择带来可见的收益、代价或新风险；不要用连续概述替代关键选择、冲突和关系变化。不得为了显得刺激而强塞冲突、打脸或反转。若本章承担回报，展示其实际影响；若只承担蓄势，不要提前透支回报。把上下文中的叙事距离、情绪温度、文字质地、对话风格、情绪表达和标志手法落实到具体句段。遵守审美避用项，并以符合本章功能的自然余波结束。`,
         schema: chapterDraftSchema(minimumCharacters, maximumCharacters),
         retryContext: options.retryContext,
         timeoutMs: 300_000,
@@ -1442,14 +1455,14 @@ export class AiService {
       inputSummary: `第${chapter.number}章语义质检`,
       system: [
         "你是中文长篇网络小说的严格审校员。只报告能够引用本章证据的问题，不做文风偏好式改写。",
-        "检查：章纲兑现、人物动机、事件因果、设定与状态一致性、角色知识边界、重复信息、节奏停滞、读者承诺、具体压力、主动行动、情绪回报、回报实际影响与章末推动力。",
+        "检查：章纲兑现、人物动机、事件因果、设定与状态一致性、角色知识边界、重复信息、节奏停滞、读者承诺、具体压力、主动行动、情绪回报、回报实际影响与章末推动力。每个主要场景都应至少改变一项可追踪状态（目标、关系、资源、认知或风险）；如果叙述用概述跳过了本应呈现的关键选择、代价或关系位移，也要报告。",
         `项目审美设定：${compileAestheticGuidance(project.contract?.aestheticProfile)}`,
         "审美质检必须以本项目设定为标准，不得把某一种叙事温度或人物表达方式当成通用优点。只有正文与明确设定冲突，或在未设专项审美时出现严重影响可读性的失衡，才标记审美类问题并引用证据。",
         `题材专项检查：${GENRE_PLUGINS[project.summary.genre].qualityChecks.join("；")}。`,
         "只有正文明确违反已审批契约、事实账本或知识边界时才标记为硬性；可以优化但不构成矛盾的问题标记为警告或建议。",
         "evidence 必须是本章中的简短原文或明确的契约/事实条目。没有可验证问题时返回空数组。",
       ].join("\n"),
-      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(contextForModel(context))}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 issues 数组，每项包含 severity、category、message、evidence。`,
+      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(contextForModel(context))}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 issues 数组，每项包含 severity、category、message、evidence。优先报告可通过正文原句或上下文条目复核的问题，避免把个人偏好当成缺陷。`,
       schema: QualityReviewSchema,
       longTask: true,
       stream: true,

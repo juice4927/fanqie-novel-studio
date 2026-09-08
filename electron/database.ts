@@ -1338,7 +1338,7 @@ export class WorkspaceDatabase {
       storedProtocol === "anthropic-messages" || (!storedProtocol && inferredAnthropic)
         ? "anthropic-messages"
         : "openai-compatible";
-    const model = this.getSetting("ai.model", "gpt-4.1");
+    const model = this.getSetting("ai.model", "gpt-6");
     const embeddingModel = this.getSetting("ai.embeddingModel", "text-embedding-3-small");
     const inputPricePerMillion = Number(this.getSetting("ai.inputPricePerMillion", "0"));
     const outputPricePerMillion = Number(this.getSetting("ai.outputPricePerMillion", "0"));
@@ -1346,6 +1346,11 @@ export class WorkspaceDatabase {
       15,
       Math.max(5, Number(this.getSetting("ai.longTaskTimeoutMinutes", "10")) || 10),
     );
+    // 未显式保存过时不返回默认值，让各任务使用自己的推理档位；作者一旦在设置页选定，就对所有任务生效。
+    const storedReasoningEffort = this.getSetting("ai.reasoningEffort", "");
+    const reasoningEffort = ["low", "medium", "high"].includes(storedReasoningEffort)
+      ? (storedReasoningEffort as AiSettings["reasoningEffort"])
+      : undefined;
     return {
       protocol,
       baseUrl,
@@ -1355,6 +1360,7 @@ export class WorkspaceDatabase {
       inputPricePerMillion,
       outputPricePerMillion,
       longTaskTimeoutMinutes,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
     };
   }
 
@@ -1366,6 +1372,7 @@ export class WorkspaceDatabase {
     this.setSetting("ai.inputPricePerMillion", String(settings.inputPricePerMillion));
     this.setSetting("ai.outputPricePerMillion", String(settings.outputPricePerMillion));
     this.setSetting("ai.longTaskTimeoutMinutes", String(settings.longTaskTimeoutMinutes));
+    this.setSetting("ai.reasoningEffort", settings.reasoningEffort ?? "");
     return this.getAiSettings();
   }
 

@@ -592,6 +592,7 @@ const schemas = {
         inputPricePerMillion: z.number().min(0).max(1_000_000),
         outputPricePerMillion: z.number().min(0).max(1_000_000),
         longTaskTimeoutMinutes: z.number().int().min(5).max(15),
+        reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
       })
       .strict(),
     z.string().max(10_000).optional(),

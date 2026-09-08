@@ -113,6 +113,7 @@ describe("per-book isolation and gates", () => {
     const database = createDatabase();
     expect(database.getAiSettings().longTaskTimeoutMinutes).toBe(10);
     expect(database.getAiSettings().protocol).toBe("openai-compatible");
+    expect(database.getAiSettings().reasoningEffort).toBeUndefined();
     const { hasApiKey: _hasApiKey, ...current } = database.getAiSettings();
     expect(
       database.saveAiSettings({
@@ -121,12 +122,14 @@ describe("per-book isolation and gates", () => {
         baseUrl: "https://api.anthropic.com/v1",
         model: "claude-model",
         longTaskTimeoutMinutes: 15,
+        reasoningEffort: "high",
       }),
     ).toMatchObject({
       protocol: "anthropic-messages",
       baseUrl: "https://api.anthropic.com/v1",
       model: "claude-model",
       longTaskTimeoutMinutes: 15,
+      reasoningEffort: "high",
     });
   });
 

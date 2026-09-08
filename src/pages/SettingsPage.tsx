@@ -62,12 +62,13 @@ export function SettingsPage({
   const [settings, setSettings] = useState<AiSettings>({
     protocol: "openai-compatible",
     baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4.1",
+    model: "gpt-6",
     embeddingModel: "text-embedding-3-small",
     hasApiKey: false,
     inputPricePerMillion: 0,
     outputPricePerMillion: 0,
     longTaskTimeoutMinutes: 10,
+    reasoningEffort: "medium",
   });
   const [apiKey, setApiKey] = useState("");
   const [workspace, setWorkspace] = useState("");
@@ -170,7 +171,7 @@ export function SettingsPage({
                   protocol,
                   baseUrl:
                     protocol === "anthropic-messages" ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1",
-                  model: protocol === "anthropic-messages" ? "claude-sonnet-4-20250514" : "gpt-4.1",
+                  model: protocol === "anthropic-messages" ? "claude-sonnet-4-20250514" : "gpt-6",
                   hasApiKey: false,
                 });
               }}
@@ -221,6 +222,23 @@ export function SettingsPage({
               <option value={15}>15 分钟</option>
             </Select>
           </Field>
+          {settings.protocol === "openai-compatible" && (
+            <Field
+              label="推理强度"
+              hint="对 GPT-6 等 Responses 模型的所有任务生效；日常创作使用中档，长篇结构复盘前可临时调高"
+            >
+              <Select
+                value={settings.reasoningEffort ?? "medium"}
+                onChange={(event) =>
+                  setSettings({ ...settings, reasoningEffort: event.target.value as AiSettings["reasoningEffort"] })
+                }
+              >
+                <option value="low">低：速度优先</option>
+                <option value="medium">中：创作推荐</option>
+                <option value="high">高：结构审查</option>
+              </Select>
+            </Field>
+          )}
           <div className="form-grid two">
             <Field label="输入价格 / 百万 Token">
               <Input
@@ -276,6 +294,7 @@ export function SettingsPage({
                       inputPricePerMillion: settings.inputPricePerMillion,
                       outputPricePerMillion: settings.outputPricePerMillion,
                       longTaskTimeoutMinutes: settings.longTaskTimeoutMinutes,
+                      reasoningEffort: settings.reasoningEffort,
                     },
                     apiKey || undefined,
                   );
