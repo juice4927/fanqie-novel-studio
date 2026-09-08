@@ -1361,6 +1361,8 @@ export class WorkspaceDatabase {
     model: string,
     inputSummary: string,
     retryContext?: string,
+    profileId?: string | null,
+    role?: string | null,
   ) {
     return this.aiAudit.start(
       projectId,
@@ -1371,6 +1373,8 @@ export class WorkspaceDatabase {
       model,
       inputSummary,
       retryContext,
+      profileId,
+      role,
     );
   }
 

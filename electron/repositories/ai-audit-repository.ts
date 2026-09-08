@@ -72,12 +72,14 @@ export class AiAuditRepository {
     model: string,
     inputSummary: string,
     retryContext?: string,
+    profileId?: string | null,
+    role?: string | null,
   ) {
     const id = randomUUID();
     const timestamp = now();
     this.db
-      .prepare(`INSERT INTO ai_jobs(id, project_id, task_type, input_hash, prompt_version, provider, model, status, input_summary, output, estimated_cost, error, retry_context, created_at, updated_at)
-      VALUES(?, ?, ?, ?, ?, ?, ?, '运行中', ?, NULL, 0, NULL, ?, ?, ?)`)
+      .prepare(`INSERT INTO ai_jobs(id, project_id, task_type, input_hash, prompt_version, provider, model, status, input_summary, output, estimated_cost, error, retry_context, profile_id, role, created_at, updated_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?, '运行中', ?, NULL, 0, NULL, ?, ?, ?, ?, ?)`)
       .run(
         id,
         projectId,
@@ -88,6 +90,8 @@ export class AiAuditRepository {
         model,
         inputSummary,
         retryContext ?? null,
+        profileId ?? null,
+        role ?? null,
         timestamp,
         timestamp,
       );

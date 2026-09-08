@@ -174,7 +174,8 @@ export class AiService {
     override?: TaskModelOverride;
   }): Promise<T> {
     const settings = this.database.getAiSettings();
-    const route = this.resolveRoute?.(options.role ?? roleForTask(options.taskType), options.override) ?? null;
+    const role = options.role ?? roleForTask(options.taskType);
+    const route = this.resolveRoute?.(role, options.override) ?? null;
     const apiKey = route?.apiKey || this.getApiKey();
     if ((route ? route.requiresKey : true) && !apiKey)
       throw new Error(
@@ -216,6 +217,8 @@ export class AiService {
       model,
       options.inputSummary,
       options.retryContext,
+      route?.profileId ?? null,
+      role,
     );
     options.onJobStarted?.(jobId);
     const startedAt = Date.now();
