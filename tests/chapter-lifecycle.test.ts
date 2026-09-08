@@ -32,6 +32,7 @@ describe("shared chapter lifecycle", () => {
       "待质检",
     );
     expect(deriveChapterStatus(chapter("待定稿"), chapter("待定稿", ""))).toBe("章纲");
+    expect(deriveChapterStatus(chapter("已发布"), chapter("已发布", ""), { protectedEdit: true })).toBe("待质检");
   });
 
   it("enforces ordered transitions and unresolved hard issue gates", () => {
@@ -48,6 +49,8 @@ describe("shared chapter lifecycle", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
     };
     expect(() => assertChapterTransition("待质检", "待定稿", "chapter-1", [issue])).toThrow("硬性问题");
+    expect(() => assertChapterTransition("待发布", "已发布", "chapter-1", [issue])).toThrow("硬性问题");
+    expect(() => assertChapterTransition("待发布", "已发布", "chapter-1", [])).not.toThrow();
     expect(() => assertChapterTransition("草稿", "待质检", "chapter-1", [issue])).not.toThrow();
   });
 

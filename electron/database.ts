@@ -826,7 +826,7 @@ export class WorkspaceDatabase {
       }),
       updatedAt: now(),
     });
-    if (protectedEdit && next.status === "待质检") {
+    if (protectedEdit) {
       for (const schedule of this.listRecords<ScheduleItem>(db, "schedule").filter(
         (item) => item.chapterId === next.id && item.status !== "已发布",
       ))

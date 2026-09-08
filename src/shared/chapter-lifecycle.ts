@@ -50,10 +50,12 @@ export function deriveChapterStatus(
   next: Chapter,
   options: { forcedStatus?: ChapterStatus; protectedEdit?: boolean } = {},
 ): ChapterStatus {
+  // 受保护章节的批准修改优先于空正文判定：清空正文也必须回到待质检，
+  // 否则会变成“章纲”而脱离保护，排期也不会失效。
+  if (options.protectedEdit) return "待质检";
   if (!next.content.trim()) return "章纲";
   if (options.forcedStatus) return options.forcedStatus;
   if (!previous) return "草稿";
-  if (options.protectedEdit) return "待质检";
   if (previous.status === "章纲") return "草稿";
   if (previous.content !== next.content && (previous.status === "待质检" || previous.status === "待定稿"))
     return "草稿";
@@ -119,7 +121,7 @@ export function assertChapterTransition(
 ) {
   if (!TRANSITIONS[from]?.includes(to)) throw new Error(`不允许从“${from}”直接变为“${to}”`);
   if (
-    (to === "待定稿" || to === "已定稿" || to === "待发布") &&
+    (to === "待定稿" || to === "已定稿" || to === "待发布" || to === "已发布") &&
     issues.some((issue) => issue.chapterId === chapterId && issue.severity === "硬性" && issue.status !== "已解决")
   )
     throw new Error("该章仍有未解决的硬性问题");
