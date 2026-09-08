@@ -190,7 +190,16 @@ export function ProjectPage({
         {tab === "规划台" && <PlanningPage project={project} api={api} reload={reload} notify={notify} />}
         {writingMounted && (
           <div hidden={tab !== "写作台"}>
-            <WritingPage project={project} api={api} reload={reload} notify={notify} active={tab === "写作台"} />
+            <WritingPage
+              project={project}
+              api={api}
+              reload={reload}
+              notify={notify}
+              active={tab === "写作台"}
+              onNavigate={(next) => {
+                if (confirmNavigation()) setTab(next);
+              }}
+            />
           </div>
         )}
         {tab === "状态账本" && <LedgerPage project={project} api={api} reload={reload} notify={notify} />}

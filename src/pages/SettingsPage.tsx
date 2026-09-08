@@ -426,8 +426,12 @@ export function SettingsPage({
                     variant="secondary"
                     icon={<Square size={13} />}
                     onClick={async () => {
-                      await api.cancelAiJob(job.id);
-                      setAiJobs(await api.listAiJobs());
+                      try {
+                        await api.cancelAiJob(job.id);
+                        setAiJobs(await api.listAiJobs());
+                      } catch (error) {
+                        notify(describeError(error), "error");
+                      }
                     }}
                   >
                     取消
@@ -714,8 +718,12 @@ export function SettingsPage({
                 variant="secondary"
                 icon={<Square size={14} />}
                 onClick={async () => {
-                  await api.cancelSystemHealthCheck(healthTask.id);
-                  setHealthTask(await api.getSystemHealthCheck(healthTask.id));
+                  try {
+                    await api.cancelSystemHealthCheck(healthTask.id);
+                    setHealthTask(await api.getSystemHealthCheck(healthTask.id));
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  }
                 }}
               >
                 取消检查

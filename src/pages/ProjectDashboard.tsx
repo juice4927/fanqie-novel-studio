@@ -298,19 +298,23 @@ export function ProjectDashboard({
                     variant="secondary"
                     disabled={concept.originalityRisk === "高"}
                     onClick={async () => {
-                      await api.saveContract(project.summary.id, {
-                        ...project.contract,
-                        premise: concept.oneLinePitch,
-                        readerPromise: concept.audience,
-                        coreEmotion: concept.coreConflict,
-                      });
-                      await api.updateProject(project.summary.id, {
-                        title: concept.title,
-                        status: "设定中",
-                      });
-                      await reload();
-                      onNavigate("故事圣经");
-                      notify("候选方向已写入故事圣经，仍需补全并审批");
+                      try {
+                        await api.saveContract(project.summary.id, {
+                          ...project.contract,
+                          premise: concept.oneLinePitch,
+                          readerPromise: concept.audience,
+                          coreEmotion: concept.coreConflict,
+                        });
+                        await api.updateProject(project.summary.id, {
+                          title: concept.title,
+                          status: "设定中",
+                        });
+                        await reload();
+                        onNavigate("故事圣经");
+                        notify("候选方向已写入故事圣经，仍需补全并审批");
+                      } catch (error) {
+                        notify(describeError(error), "error");
+                      }
                     }}
                   >
                     {concept.originalityRisk === "高" ? "需先人工复核" : "采用此方向"}
@@ -369,10 +373,14 @@ export function ProjectDashboard({
             </Button>
             <Button
               onClick={async () => {
-                await api.attachInsights(project.summary.id, selectedInsights);
-                await reload();
-                setShowInsights(false);
-                notify("关联洞察已更新");
+                try {
+                  await api.attachInsights(project.summary.id, selectedInsights);
+                  await reload();
+                  setShowInsights(false);
+                  notify("关联洞察已更新");
+                } catch (error) {
+                  notify(describeError(error), "error");
+                }
               }}
             >
               保存关联

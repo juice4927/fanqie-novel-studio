@@ -413,16 +413,24 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
                       <Button
                         variant="secondary"
                         onClick={async () => {
-                          await api.decideChangeRequest(project.summary.id, item.id, "拒绝");
-                          await reload();
+                          try {
+                            await api.decideChangeRequest(project.summary.id, item.id, "拒绝");
+                            await reload();
+                          } catch (error) {
+                            notify(describeError(error), "error");
+                          }
                         }}
                       >
                         拒绝
                       </Button>
                       <Button
                         onClick={async () => {
-                          await api.decideChangeRequest(project.summary.id, item.id, "批准");
-                          await reload();
+                          try {
+                            await api.decideChangeRequest(project.summary.id, item.id, "批准");
+                            await reload();
+                          } catch (error) {
+                            notify(describeError(error), "error");
+                          }
                         }}
                       >
                         批准
@@ -550,10 +558,14 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
               <Button
                 disabled={!change.targetId || !change.title || !change.reason || !change.impact || !change.rollback}
                 onClick={async () => {
-                  await api.saveChangeRequest(project.summary.id, change);
-                  await reload();
-                  setChangeModal(false);
-                  notify("变更单已提交待审批");
+                  try {
+                    await api.saveChangeRequest(project.summary.id, change);
+                    await reload();
+                    setChangeModal(false);
+                    notify("变更单已提交待审批");
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  }
                 }}
               >
                 提交变更单

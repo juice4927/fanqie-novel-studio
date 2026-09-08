@@ -111,8 +111,8 @@ describe("AI generated draft review (director mode)", () => {
       await screen.findByRole("dialog", { name: /审阅 AI 产出/ });
       await waitFor(() => expect(document.body.textContent ?? "").toContain("存在硬性问题"));
       expect(screen.queryByRole("button", { name: "采纳并进入待定稿" })).toBeNull();
-      expect(screen.getByRole("button", { name: "先保留草稿，去处理问题" })).toBeTruthy();
-      await userEvent.click(screen.getByRole("button", { name: "先保留草稿，去处理问题" }));
+      expect(screen.getByRole("button", { name: "去质检中心处理问题" })).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: "去质检中心处理问题" }));
       await waitFor(() => expect(screen.queryByRole("dialog", { name: /审阅 AI 产出/ })).toBeNull());
       expect(api.transitionChapter).not.toHaveBeenCalled();
     } finally {

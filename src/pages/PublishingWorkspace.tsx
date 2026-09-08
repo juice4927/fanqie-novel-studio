@@ -45,7 +45,12 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
               <BookMarked size={16} />
             </IconButton>
           </div>
-          <Button icon={<Plus size={16} />} onClick={() => setModal(true)}>
+          <Button
+            icon={<Plus size={16} />}
+            disabled={!draftable.length}
+            title={draftable.length ? undefined : "只有已定稿章节可以安排发布"}
+            onClick={() => setModal(true)}
+          >
             安排发布
           </Button>
         </div>
@@ -62,10 +67,14 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
                 min={1}
                 defaultValue={project.summary.safeStockLine}
                 onBlur={async (event) => {
-                  await api.updateProject(project.summary.id, {
-                    safeStockLine: Number(event.target.value) || 1,
-                  });
-                  await reload();
+                  try {
+                    await api.updateProject(project.summary.id, {
+                      safeStockLine: Number(event.target.value) || 1,
+                    });
+                    await reload();
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  }
                 }}
               />
               <em>章</em>
@@ -160,21 +169,25 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
               <Button
                 disabled={!chapterId || !publishAt}
                 onClick={async () => {
-                  const chapter = project.chapters.find((item) => item.id === chapterId)!;
-                  const item: ScheduleItem = {
-                    id: "",
-                    projectId: project.summary.id,
-                    projectTitle: project.summary.title,
-                    chapterId,
-                    chapterNumber: chapter.number,
-                    chapterTitle: chapter.title,
-                    publishAt: new Date(publishAt).toISOString(),
-                    status: "待发布",
-                  };
-                  await api.saveSchedule(project.summary.id, item);
-                  await reload();
-                  setModal(false);
-                  notify("发布任务已安排");
+                  try {
+                    const chapter = project.chapters.find((item) => item.id === chapterId)!;
+                    const item: ScheduleItem = {
+                      id: "",
+                      projectId: project.summary.id,
+                      projectTitle: project.summary.title,
+                      chapterId,
+                      chapterNumber: chapter.number,
+                      chapterTitle: chapter.title,
+                      publishAt: new Date(publishAt).toISOString(),
+                      status: "待发布",
+                    };
+                    await api.saveSchedule(project.summary.id, item);
+                    await reload();
+                    setModal(false);
+                    notify("发布任务已安排");
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  }
                 }}
               >
                 保存排期

@@ -259,10 +259,14 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
               <Button
                 disabled={!draft.title || !draft.goal}
                 onClick={async () => {
-                  await api.savePlan(project.summary.id, draft);
-                  await reload();
-                  setModal(false);
-                  notify("规划节点已保存");
+                  try {
+                    await api.savePlan(project.summary.id, draft);
+                    await reload();
+                    setModal(false);
+                    notify("规划节点已保存");
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  }
                 }}
               >
                 保存节点

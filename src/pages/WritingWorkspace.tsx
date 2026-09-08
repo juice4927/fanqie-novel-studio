@@ -80,7 +80,8 @@ export function WritingPage({
   reload,
   notify,
   active = true,
-}: CommonProjectProps & { active?: boolean }) {
+  onNavigate,
+}: CommonProjectProps & { active?: boolean; onNavigate?: (tab: "质检中心") => void }) {
   const { registerLeaveGuard } = useNavigationGuard();
   const [selectedId, setSelectedId] = useState(project.chapters[0]?.id ?? "");
   const selected = project.chapters.find((chapter) => chapter.id === selectedId);
@@ -544,10 +545,15 @@ export function WritingPage({
     try {
       const saved = await saveLatestForAction();
       const issues = await api.runQualityCheck(project.summary.id, saved.id);
-      await api.transitionChapter(project.summary.id, saved.id, "待定稿");
+      // 只有“草稿/待质检”才推进到待定稿；重复质检不应因状态机报错。
+      const canAdvance = saved.status === "草稿" || saved.status === "待质检";
+      if (canAdvance) await api.transitionChapter(project.summary.id, saved.id, "待定稿");
       await reload();
-      notify(issues.length ? `质检完成，发现 ${issues.length} 项问题` : "质检完成，未发现问题");
+      const summary = issues.length ? `质检完成，发现 ${issues.length} 项问题` : "质检完成，未发现问题";
+      notify(canAdvance ? summary : `${summary}（当前状态“${saved.status}”，状态未变）`);
     } catch (error) {
+      // 质检可能已经写入问题记录：失败时也要刷新，让问题列表可见。
+      await reload().catch(() => undefined);
       notify(describeError(error), "error");
     } finally {
       setBusy(false);
@@ -898,7 +904,11 @@ export function WritingPage({
             disabled={!draft.id || editorBusy}
             icon={<SearchCheck size={16} />}
             aria-keyshortcuts="Control+Enter"
-            title="运行质检并进入待定稿（Ctrl+Enter）"
+            title={
+              draft.status === "草稿" || draft.status === "待质检"
+                ? "运行质检并进入待定稿（Ctrl+Enter）"
+                : "重新运行质检（Ctrl+Enter）"
+            }
             onClick={runQualityCheck}
           >
             运行质检
@@ -1077,8 +1087,12 @@ export function WritingPage({
                 <button
                   type="button"
                   onClick={async () => {
-                    setHistory(await api.listRevisions(project.summary.id, "chapters", draft.id));
-                    setHistoryOpen(true);
+                    try {
+                      setHistory(await api.listRevisions(project.summary.id, "chapters", draft.id));
+                      setHistoryOpen(true);
+                    } catch (error) {
+                      notify(describeError(error), "error");
+                    }
                   }}
                 >
                   <History size={13} />
@@ -1236,6 +1250,9 @@ export function WritingPage({
                 )}
               </span>
             </div>
+            <p className="muted-line">
+              AI 正文已写入本章草稿（状态“待质检”）；关闭弹窗不会撤销写入，需要还原请点“打回重写”。
+            </p>
             <details open>
               <summary>本章摘要</summary>
               <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.7 }}>
@@ -1365,8 +1382,17 @@ export function WritingPage({
                   采纳并进入待定稿
                 </Button>
               ) : (
-                <Button variant="secondary" disabled={busy} onClick={() => setReview(null)}>
-                  先保留草稿，去处理问题
+                <Button
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    setReview(null);
+                    setReviewSelectionText("");
+                    setReviewContext(null);
+                    onNavigate?.("质检中心");
+                  }}
+                >
+                  去质检中心处理问题
                 </Button>
               )}
               <Button variant="secondary" disabled={busy} onClick={() => void rejectGeneratedDraft()}>
@@ -1607,16 +1633,20 @@ export function WritingPage({
                       <Button
                         variant="secondary"
                         onClick={async () => {
-                          await api.restoreRevision(project.summary.id, revision.id);
-                          await reload();
-                          const restored = await api.getChapter(project.summary.id, draftRef.current.id);
-                          draftRef.current = restored;
-                          lastSavedSignature.current = chapterDraftSignature(restored);
-                          clearRecoveredChapter(project.summary.id, restored);
-                          setDraft(restored);
-                          setSaveStatus("saved");
-                          setHistoryOpen(false);
-                          notify(`已从 v${revision.revision} 建立新的当前版本`);
+                          try {
+                            await api.restoreRevision(project.summary.id, revision.id);
+                            await reload();
+                            const restored = await api.getChapter(project.summary.id, draftRef.current.id);
+                            draftRef.current = restored;
+                            lastSavedSignature.current = chapterDraftSignature(restored);
+                            clearRecoveredChapter(project.summary.id, restored);
+                            setDraft(restored);
+                            setSaveStatus("saved");
+                            setHistoryOpen(false);
+                            notify(`已从 v${revision.revision} 建立新的当前版本`);
+                          } catch (error) {
+                            notify(describeError(error), "error");
+                          }
                         }}
                       >
                         恢复为新版本
