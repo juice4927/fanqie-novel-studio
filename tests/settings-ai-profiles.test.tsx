@@ -80,6 +80,7 @@ function createApi(overrides: Partial<Record<string, unknown>> = {}) {
     testAiProfile: vi.fn().mockResolvedValue({ ok: true, message: "连接成功：deepseek-chat" }),
     setDefaultAiProfile: vi.fn().mockResolvedValue(undefined),
     setAiRoleRoute: vi.fn().mockResolvedValue({ role: "draft", profileId: "p-main", modelId: "deepseek-reasoner" }),
+    listAiProfileModels: vi.fn().mockResolvedValue([]),
     refreshAiProfileModels: vi.fn().mockResolvedValue([]),
     exportAiProfiles: vi.fn().mockResolvedValue("{}"),
     importAiProfiles: vi.fn().mockResolvedValue([]),
@@ -121,6 +122,56 @@ describe("settings model sources", () => {
     await userEvent.tab();
 
     await waitFor(() => expect(api.setAiRoleRoute).toHaveBeenCalledWith("draft", "p-main", "deepseek-reasoner"));
+  });
+
+  it("suggests the fetched model list in the source editor", async () => {
+    const api = createApi({
+      listAiProfileModels: vi.fn().mockResolvedValue([
+        { modelId: "deepseek-chat", source: "remote", fetchedAt: "2026-09-08T00:00:00.000Z" },
+        { modelId: "deepseek-reasoner", source: "remote", fetchedAt: "2026-09-08T00:00:00.000Z" },
+      ]),
+    });
+    render(<SettingsPage api={api} notify={vi.fn()} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "编辑" }));
+
+    await waitFor(() => expect(api.refreshAiProfileModels).toHaveBeenCalledWith("p-main", false));
+    await waitFor(() => {
+      const values = [...document.querySelectorAll("datalist option")].map((node) => node.getAttribute("value"));
+      expect(values).toContain("deepseek-reasoner");
+    });
+    expect(await screen.findByText(/已获取 2 个模型/)).toBeTruthy();
+  });
+
+  it("forces a model refresh only from the explicit button", async () => {
+    const api = createApi({
+      refreshAiProfileModels: vi.fn().mockResolvedValue(["deepseek-chat"]),
+      listAiProfileModels: vi
+        .fn()
+        .mockResolvedValue([{ modelId: "deepseek-chat", source: "remote", fetchedAt: "2026-09-08T00:00:00.000Z" }]),
+    });
+    render(<SettingsPage api={api} notify={vi.fn()} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: /刷新模型/ }));
+
+    await waitFor(() => expect(api.refreshAiProfileModels).toHaveBeenCalledWith("p-main", true));
+  });
+
+  it("offers the source's models to the role route picker", async () => {
+    const api = createApi({
+      listAiRoleRoutes: vi.fn().mockResolvedValue([{ role: "draft", profileId: "p-main", modelId: null }]),
+      listAiProfileModels: vi
+        .fn()
+        .mockResolvedValue([{ modelId: "deepseek-reasoner", source: "remote", fetchedAt: "2026-09-08T00:00:00.000Z" }]),
+    });
+    render(<SettingsPage api={api} notify={vi.fn()} />);
+
+    await waitFor(() => {
+      const values = [...document.querySelectorAll("#ai-role-model-options-draft option")].map((node) =>
+        node.getAttribute("value"),
+      );
+      expect(values).toContain("deepseek-reasoner");
+    });
   });
 
   it("saves the outbound proxy settings", async () => {

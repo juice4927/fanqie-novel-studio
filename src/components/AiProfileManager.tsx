@@ -4,6 +4,7 @@ import { describeError } from "../lib/error-message";
 import { PROVIDER_PRESETS, type ProviderPreset } from "../shared/ai/provider-presets";
 import {
   type AiProfileHealth,
+  type AiProfileModelOption,
   type AiProfileView,
   type AiRoleRoute,
   MODEL_ROLE_LABELS,
@@ -67,6 +68,26 @@ function linesToMap(text: string): Record<string, string> {
   return result;
 }
 
+function modelListId(profileId: string) {
+  return `ai-model-options-${profileId}`;
+}
+
+function roleModelListId(role: ModelRole) {
+  return `ai-role-model-options-${role}`;
+}
+
+function describeModelsHint(profile: AiProfileView, options: AiProfileModelOption[]) {
+  if (profile.apiSurface === "anthropic-messages") return "该端点不支持模型清单，可手动填写";
+  if (!options.length) return "暂时没有模型清单，可手动填写";
+  const count = (source: AiProfileModelOption["source"]) => options.filter((option) => option.source === source).length;
+  return `已获取 ${options.length} 个模型（远端 ${count("remote")} / 探测 ${count("probe")} / 手填 ${count("user")}）`;
+}
+
+function describeRouteModelHint(profile: AiProfileView, options: AiProfileModelOption[]) {
+  const fallback = `该来源默认：${profile.defaultModel || "未设置"}`;
+  return options.length ? `${fallback} · 可选 ${options.length} 个` : fallback;
+}
+
 export function AiProfileManager({
   api,
   notify,
@@ -86,6 +107,7 @@ export function AiProfileManager({
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [health, setHealth] = useState<AiProfileHealth[]>([]);
   const [transfer, setTransfer] = useState<{ mode: "export" | "import"; text: string } | null>(null);
+  const [modelOptions, setModelOptions] = useState<Record<string, AiProfileModelOption[]>>({});
 
   const reload = useCallback(async () => {
     const [nextProfiles, nextRoutes, nextDefault, nextHealth] = await Promise.all([
@@ -100,10 +122,43 @@ export function AiProfileManager({
     setHealth(nextHealth);
   }, [api]);
 
+  /** 只读本地缓存的候选，不发网络请求；用于角色路由下拉。 */
+  const loadCachedModels = useCallback(
+    async (profileIds: string[]) => {
+      if (typeof api.listAiProfileModels !== "function") return;
+      const entries = await Promise.all(profileIds.map(async (id) => [id, await api.listAiProfileModels(id)] as const));
+      setModelOptions((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    },
+    [api],
+  );
+
+  /** 拉取清单并刷新本地候选；force 绕过主进程的 10 分钟节流。 */
+  const fetchModels = useCallback(
+    async (profileId: string, force: boolean) => {
+      if (typeof api.refreshAiProfileModels !== "function" || typeof api.listAiProfileModels !== "function") return [];
+      const models = await api.refreshAiProfileModels(profileId, force);
+      const options = await api.listAiProfileModels(profileId);
+      setModelOptions((current) => ({ ...current, [profileId]: options }));
+      return models;
+    },
+    [api],
+  );
+
   useEffect(() => {
     if (!supported) return;
     void reload().catch((error) => notify(describeError(error), "error"));
   }, [notify, reload, supported]);
+
+  useEffect(() => {
+    if (!supported || !profiles.length) return;
+    void loadCachedModels(profiles.map((profile) => profile.id)).catch(() => undefined);
+  }, [loadCachedModels, profiles, supported]);
+
+  const editingId = editing?.id ?? "";
+  useEffect(() => {
+    if (!editingId) return;
+    void fetchModels(editingId, false).catch(() => undefined);
+  }, [editingId, fetchModels]);
 
   if (!supported) return null;
 
@@ -142,6 +197,7 @@ export function AiProfileManager({
       );
       setEditing(null);
       await reload();
+      void fetchModels(saved.id, false).catch(() => undefined);
       notify(`来源「${saved.name}」已保存`);
     } catch (error) {
       notify(describeError(error), "error");
@@ -242,6 +298,7 @@ export function AiProfileManager({
                 onClick={() =>
                   void run(profile.id, async () => {
                     const result = await api.testAiProfile(profile.id);
+                    if (result.ok) void fetchModels(profile.id, false).catch(() => undefined);
                     return result.ok ? result.message : `测试失败：${result.message}`;
                   })
                 }
@@ -253,10 +310,8 @@ export function AiProfileManager({
                 disabled={busyId === profile.id}
                 onClick={() =>
                   void run(profile.id, async () => {
-                    const models = await api.refreshAiProfileModels(profile.id);
-                    return models.length
-                      ? `已获取 ${models.length} 个模型`
-                      : "该端点没有返回模型清单，可手动填写模型名";
+                    const models = await fetchModels(profile.id, true);
+                    return models.length ? `已获取 ${models.length} 个模型` : "该端点没有返回模型清单，可手动填写";
                   })
                 }
               >
@@ -332,9 +387,12 @@ export function AiProfileManager({
               </Field>
               <Field
                 label="模型"
-                hint={routeProfile ? `该来源默认：${routeProfile.defaultModel || "未设置"}` : undefined}
+                hint={
+                  routeProfile ? describeRouteModelHint(routeProfile, modelOptions[routeProfile.id] ?? []) : undefined
+                }
               >
                 <Input
+                  list={routeProfile ? roleModelListId(role) : undefined}
                   defaultValue={route?.modelId ?? ""}
                   placeholder="留空使用来源默认模型"
                   onBlur={(event) => {
@@ -343,6 +401,13 @@ export function AiProfileManager({
                   }}
                 />
               </Field>
+              {routeProfile && (
+                <datalist id={roleModelListId(role)}>
+                  {(modelOptions[routeProfile.id] ?? []).map((option) => (
+                    <option key={option.modelId} value={option.modelId} />
+                  ))}
+                </datalist>
+              )}
             </div>
           );
         })}
@@ -411,8 +476,12 @@ export function AiProfileManager({
               </Field>
             </div>
             <div className="form-grid two">
-              <Field label="默认模型">
+              <Field
+                label="默认模型"
+                hint={editing.id ? describeModelsHint(editing, modelOptions[editing.id] ?? []) : undefined}
+              >
                 <Input
+                  list={editing.id ? modelListId(editing.id) : undefined}
                   value={editing.defaultModel}
                   onChange={(event) => setEditing({ ...editing, defaultModel: event.target.value })}
                   placeholder="deepseek-chat"
@@ -428,6 +497,13 @@ export function AiProfileManager({
                 </Select>
               </Field>
             </div>
+            {editing.id && (
+              <datalist id={modelListId(editing.id)}>
+                {(modelOptions[editing.id] ?? []).map((option) => (
+                  <option key={option.modelId} value={option.modelId} />
+                ))}
+              </datalist>
+            )}
             <Field label="API 密钥" hint="只保存到 Windows 凭据管理器；留空表示不修改已保存的密钥">
               <Input
                 type="password"
