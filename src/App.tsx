@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { NewProjectModal } from "./components/NewProjectModal";
 import { Button, Field, Input, Modal } from "./components/UI";
 import { createBrowserApi } from "./lib/browser-api";
+import { NavigationGuardProvider, useNavigationGuard } from "./lib/navigation-guard";
 import { DashboardPage } from "./pages/DashboardPage";
 
 const ResearchPage = lazy(() => import("./pages/ResearchPage").then((m) => ({ default: m.ResearchPage })));
@@ -14,6 +15,15 @@ import type { DashboardData, ProjectSummary } from "./shared/types";
 type AppPage = "dashboard" | "research" | "project" | "settings";
 
 export default function App() {
+  return (
+    <NavigationGuardProvider>
+      <Workbench />
+    </NavigationGuardProvider>
+  );
+}
+
+function Workbench() {
+  const { confirmNavigation } = useNavigationGuard();
   const api = useMemo(() => window.novelStudio ?? createBrowserApi(), []);
   const [page, setPage] = useState<AppPage>("dashboard");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -41,10 +51,13 @@ export default function App() {
   }, [toast]);
   const notify = (message: string, tone: "success" | "error" = "success") => setToast({ message, tone });
   const openProject = (id: string) => {
+    if (page === "project" && selectedProjectId === id) return;
+    if (!confirmNavigation()) return;
     setSelectedProjectId(id);
     setPage("project");
   };
   const navigate = (next: AppPage) => {
+    if (next !== page && !confirmNavigation()) return;
     setPage(next);
     if (next !== "project") setSelectedProjectId(null);
     void reload();
@@ -132,6 +145,7 @@ export default function App() {
           {page === "settings" && <SettingsPage api={api} notify={notify} />}
           {page === "project" && selectedProjectId && (
             <ProjectPage
+              key={selectedProjectId}
               api={api}
               projectId={selectedProjectId}
               onBack={() => navigate("dashboard")}

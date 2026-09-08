@@ -8,10 +8,12 @@ import {
   Layers3,
   LoaderCircle,
   NotebookTabs,
+  RefreshCw,
   SearchCheck,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import { Select } from "../components/UI";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button, Select } from "../components/UI";
+import { useNavigationGuard } from "../lib/navigation-guard";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import { PROJECT_STATUSES } from "../shared/status-constants";
 import type { AppApi, InsightPack, ProjectDetail, ProjectStatus } from "../shared/types";
@@ -54,19 +56,46 @@ export function ProjectPage({
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [insights, setInsights] = useState<InsightPack[]>([]);
   const [loading, setLoading] = useState(true);
-  const [writingDirty, setWritingDirty] = useState(false);
-  const confirmLeaveWriting = () => !writingDirty || window.confirm("当前章节还有未保存内容，确定离开写作台吗？");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestRef = useRef(0);
+  const { confirmNavigation } = useNavigationGuard();
 
   const reload = useCallback(async () => {
-    const [detail, allInsights] = await Promise.all([api.getProject(projectId), api.listInsights()]);
-    setProject(detail);
-    setInsights(allInsights);
-    setLoading(false);
+    const requestId = ++requestRef.current;
+    try {
+      const [detail, allInsights] = await Promise.all([api.getProject(projectId), api.listInsights()]);
+      if (requestRef.current !== requestId) return;
+      setProject(detail);
+      setInsights(allInsights);
+      setLoadError(null);
+    } catch (error) {
+      if (requestRef.current === requestId) setLoadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (requestRef.current === requestId) setLoading(false);
+    }
   }, [api, projectId]);
   useEffect(() => {
     setLoading(true);
+    setProject(null);
+    setLoadError(null);
     void reload();
+    return () => {
+      requestRef.current += 1;
+    };
   }, [reload]);
+
+  if (loadError && !project)
+    return (
+      <div className="page loading-page" role="alert">
+        <span>打开作品失败：{loadError}</span>
+        <Button icon={<RefreshCw size={16} />} onClick={() => void reload()}>
+          重试
+        </Button>
+        <Button variant="secondary" icon={<ArrowLeft size={16} />} onClick={onBack}>
+          返回多书总览
+        </Button>
+      </div>
+    );
 
   if (loading || !project)
     return (
@@ -79,13 +108,7 @@ export function ProjectPage({
   return (
     <div className={styles.shell}>
       <aside className={styles.subnav}>
-        <button
-          type="button"
-          className={styles.backLink}
-          onClick={() => {
-            if (confirmLeaveWriting()) onBack();
-          }}
-        >
+        <button type="button" className={styles.backLink} onClick={onBack}>
           <ArrowLeft size={16} />
           返回多书总览
         </button>
@@ -101,7 +124,7 @@ export function ProjectPage({
               key={item.id}
               className={`${styles.navButton}${tab === item.id ? ` ${styles.active}` : ""}`}
               onClick={() => {
-                if (item.id === tab || confirmLeaveWriting()) setTab(item.id);
+                if (item.id === tab || confirmNavigation()) setTab(item.id);
               }}
             >
               <item.icon size={17} />
@@ -137,6 +160,14 @@ export function ProjectPage({
         </div>
       </aside>
       <main className={styles.content}>
+        {loadError && (
+          <div role="alert">
+            刷新失败：{loadError}
+            <Button variant="secondary" icon={<RefreshCw size={16} />} onClick={() => void reload()}>
+              重试
+            </Button>
+          </div>
+        )}
         {tab === "驾驶舱" && (
           <ProjectDashboard
             project={project}
@@ -146,15 +177,13 @@ export function ProjectPage({
             reload={reload}
             notify={notify}
             onNavigate={(next) => {
-              if (confirmLeaveWriting()) setTab(next);
+              if (confirmNavigation()) setTab(next);
             }}
           />
         )}
         {tab === "故事圣经" && <StoryBiblePage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "规划台" && <PlanningPage project={project} api={api} reload={reload} notify={notify} />}
-        {tab === "写作台" && (
-          <WritingPage project={project} api={api} reload={reload} notify={notify} onDirtyChange={setWritingDirty} />
-        )}
+        {tab === "写作台" && <WritingPage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "状态账本" && <LedgerPage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "质检中心" && <QualityPage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "发布日历" && <PublishingPage project={project} api={api} reload={reload} notify={notify} />}

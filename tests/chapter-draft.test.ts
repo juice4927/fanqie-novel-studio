@@ -85,6 +85,28 @@ describe("chapter draft reliability", () => {
     expect(readRecoveredChapter("project", server, storage).content).toBe("崩溃前草稿");
   });
 
+  it("keeps an unsaved new chapter draft under a provisional key", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const empty: Chapter = {
+      ...chapter(""),
+      id: "",
+      number: 3,
+      title: "",
+      outline: "",
+      revision: 0,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    };
+    const draft: Chapter = { ...empty, content: "新章草稿", updatedAt: "2026-08-02T00:00:00.000Z" };
+
+    expect(writeRecoveredChapter("project", draft, storage)).toBe(true);
+    expect(chapterRecoveryKey("project", empty)).toBe("novel-studio.chapter-draft.project.new-3");
+    expect(readRecoveredChapter("project", empty, storage).content).toBe("新章草稿");
+  });
+
   it("reports when the local recovery copy cannot be written", () => {
     const storage = {
       setItem: () => {

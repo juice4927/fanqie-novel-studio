@@ -22,6 +22,7 @@ import {
   writeRecoveredChapter,
 } from "../lib/chapter-draft";
 import { formatCount, formatDate } from "../lib/format";
+import { useNavigationGuard } from "../lib/navigation-guard";
 import { canAcceptGeneratedDraft, summarizeQualityOverview } from "../shared/generated-review";
 import type { GenerationQuality } from "../shared/generation-quality";
 import { diffParagraphs } from "../shared/paragraph-diff";
@@ -72,13 +73,8 @@ const EMPTY_CHAPTER = (number: number): Chapter => ({
   updatedAt: new Date().toISOString(),
 });
 
-export function WritingPage({
-  project,
-  api,
-  reload,
-  notify,
-  onDirtyChange,
-}: CommonProjectProps & { onDirtyChange?: (dirty: boolean) => void }) {
+export function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
+  const { registerLeaveGuard } = useNavigationGuard();
   const [selectedId, setSelectedId] = useState(project.chapters[0]?.id ?? "");
   const selected = project.chapters.find((chapter) => chapter.id === selectedId);
   const [draft, setDraft] = useState<Chapter>(
@@ -215,16 +211,16 @@ export function WritingPage({
     setDraft(merged);
     lastSavedSignature.current = chapterDraftSignature(merged);
   }, [project, selectedId]);
-  const chapter = project.chapters.find((item) => item.id === selectedId);
+  const chapterId = project.chapters.find((item) => item.id === selectedId)?.id;
   useEffect(() => {
-    if (!chapter) {
+    if (!chapterId) {
       setChapterLoading(false);
       return;
     }
     const requestId = ++chapterRequestRef.current;
     setChapterLoading(true);
     void api
-      .getChapter(project.summary.id, chapter.id)
+      .getChapter(project.summary.id, chapterId)
       .then((loaded) => {
         if (chapterRequestRef.current !== requestId) return;
         const recovered = readRecoveredChapter(project.summary.id, loaded);
@@ -243,12 +239,24 @@ export function WritingPage({
     return () => {
       chapterRequestRef.current += 1;
     };
-  }, [api, chapter, project.summary.id]);
+  }, [api, chapterId, project.summary.id]);
+  useEffect(
+    () =>
+      registerLeaveGuard(() => {
+        const current = draftRef.current;
+        if (chapterDraftSignature(current) === lastSavedSignature.current) return true;
+        // Persist immediately: navigation may happen before the recovery debounce fires.
+        const recovered = writeRecoveredChapter(project.summary.id, current);
+        setRecoveryAvailable(recovered);
+        return window.confirm(
+          recovered
+            ? "当前章节还有未保存内容，已保留本地恢复稿，确定离开写作台吗？"
+            : "当前章节还有未保存内容，且无法保留恢复稿。离开可能丢失修改，确定离开吗？",
+        );
+      }),
+    [project.summary.id, registerLeaveGuard],
+  );
   const dirty = chapterDraftSignature(draft) !== lastSavedSignature.current;
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-    return () => onDirtyChange?.(false);
-  }, [dirty, onDirtyChange]);
   useEffect(() => {
     if (busy || chapterLoading) return;
     if (!dirty) {
@@ -548,12 +556,17 @@ export function WritingPage({
               chapterRequestRef.current += 1;
               setChapterLoading(false);
               const empty = EMPTY_CHAPTER(project.chapters.length + 1);
+              // 新章没有服务端记录，只能靠本地恢复稿兜底：重新点“新建章节”时先取回它。
+              const recovered = readRecoveredChapter(project.summary.id, empty);
+              const recoveredDraft = chapterDraftSignature(recovered) !== chapterDraftSignature(empty);
               setSelectedId("");
-              setDraft(empty);
-              draftRef.current = empty;
+              setDraft(recovered);
+              draftRef.current = recovered;
               lastSavedSignature.current = chapterDraftSignature(empty);
-              setSaveStatus("saved");
+              setSaveStatus(recoveredDraft ? "dirty" : "saved");
+              setRecoveryAvailable(recoveredDraft);
               setContext(null);
+              if (recoveredDraft) notify("已恢复上次未保存的新章草稿");
             }}
           >
             <Plus size={17} />
