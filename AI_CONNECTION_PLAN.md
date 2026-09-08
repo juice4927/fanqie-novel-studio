@@ -30,7 +30,8 @@
 - 旧版单来源表单保留为「模型供应商（单来源回退）」区块：没有配置来源时仍然生效，已配置来源时以来源与角色路由为准（避免破坏既有设置页测试与用户配置）。
 - 路由解析是**同步**的（`startDraftChapter` 必须在返回前拿到 jobId），来源密钥因此由主进程内存缓存提供、启动后预热；密钥尚未预热时任务会提示「来源 X 还没有可用的 API 密钥」。
 - 单次覆盖到别的来源时会丢弃角色路由里属于原来源的模型名，改用目标来源的默认模型。
-- 新增 17 个测试文件；`tests/database.test.ts` 的 catalog `user_version` 断言随新迁移由 6 更新为 7。
+- 新增 20 个测试文件；`tests/database.test.ts` 的 catalog `user_version` 断言随新迁移由 6 更新为 7。
+- 审计表 `ai_jobs` 的 `profile_id` / `role` 列现在会真实写入（此前只建列未赋值），任务可追溯到来源与角色。
 - 代理线（`OUTBOUND_PROXY_PLAN.md`）已合并实施，`netguard.ts` 的 dispatcher 优先级为 `options.dispatcher ?? 代理 dispatcher ?? 公网 dispatcher`；本地端点走独立直连通道，两者都只放宽“连接目标”，不放宽目的地校验。
 
 ## 0. 一句话结论
