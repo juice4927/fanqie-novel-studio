@@ -101,51 +101,64 @@ export class AiProfileRepository {
 
   saveProfile(profile: AiProfile): AiProfile {
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO ai_profiles (
-           id, name, api_surface, base_url, default_model, auth_scheme, extra_headers, extra_query,
-           local_endpoint, enabled, sort_order, notes, last_used_at, last_test_at, last_test_ok, last_error,
-           created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           name = excluded.name,
-           api_surface = excluded.api_surface,
-           base_url = excluded.base_url,
-           default_model = excluded.default_model,
-           auth_scheme = excluded.auth_scheme,
-           extra_headers = excluded.extra_headers,
-           extra_query = excluded.extra_query,
-           local_endpoint = excluded.local_endpoint,
-           enabled = excluded.enabled,
-           sort_order = excluded.sort_order,
-           notes = excluded.notes,
-           last_used_at = excluded.last_used_at,
-           last_test_at = excluded.last_test_at,
-           last_test_ok = excluded.last_test_ok,
-           last_error = excluded.last_error,
-           updated_at = excluded.updated_at`,
-      )
-      .run(
-        profile.id,
-        profile.name,
-        profile.apiSurface,
-        profile.baseUrl,
-        profile.defaultModel,
-        profile.authScheme,
-        JSON.stringify(profile.extraHeaders ?? {}),
-        JSON.stringify(profile.extraQuery ?? {}),
-        profile.localEndpoint ? 1 : 0,
-        profile.enabled ? 1 : 0,
-        profile.sortOrder,
-        profile.notes,
-        profile.lastUsedAt,
-        profile.lastTestAt,
-        fromBoolean(profile.lastTestOk),
-        profile.lastError,
-        now,
-        now,
-      );
+    const previous = this.findProfile(profile.id);
+    // 换端点（地址或协议面）后旧清单与旧探测结论都不再适用，必须清掉，
+    // 否则模型下拉会列出别家来源的模型。
+    const endpointChanged =
+      previous !== null && (previous.baseUrl !== profile.baseUrl || previous.apiSurface !== profile.apiSurface);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO ai_profiles (
+             id, name, api_surface, base_url, default_model, auth_scheme, extra_headers, extra_query,
+             local_endpoint, enabled, sort_order, notes, last_used_at, last_test_at, last_test_ok, last_error,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             name = excluded.name,
+             api_surface = excluded.api_surface,
+             base_url = excluded.base_url,
+             default_model = excluded.default_model,
+             auth_scheme = excluded.auth_scheme,
+             extra_headers = excluded.extra_headers,
+             extra_query = excluded.extra_query,
+             local_endpoint = excluded.local_endpoint,
+             enabled = excluded.enabled,
+             sort_order = excluded.sort_order,
+             notes = excluded.notes,
+             last_used_at = excluded.last_used_at,
+             last_test_at = excluded.last_test_at,
+             last_test_ok = excluded.last_test_ok,
+             last_error = excluded.last_error,
+             updated_at = excluded.updated_at`,
+        )
+        .run(
+          profile.id,
+          profile.name,
+          profile.apiSurface,
+          profile.baseUrl,
+          profile.defaultModel,
+          profile.authScheme,
+          JSON.stringify(profile.extraHeaders ?? {}),
+          JSON.stringify(profile.extraQuery ?? {}),
+          profile.localEndpoint ? 1 : 0,
+          profile.enabled ? 1 : 0,
+          profile.sortOrder,
+          profile.notes,
+          profile.lastUsedAt,
+          profile.lastTestAt,
+          fromBoolean(profile.lastTestOk),
+          profile.lastError,
+          now,
+          now,
+        );
+      if (endpointChanged) this.db.prepare("DELETE FROM model_capabilities WHERE profile_id = ?").run(profile.id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
     return this.findProfile(profile.id) as AiProfile;
   }
 

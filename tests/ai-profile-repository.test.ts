@@ -120,6 +120,38 @@ describe("AI 来源仓储", () => {
     expect(database.listModelCapabilities("p-a")).toEqual([{ ...record, supportsStreamUsage: false, source: "user" }]);
   });
 
+  it("换地址或协议面时清空该来源的能力缓存", () => {
+    const database = createDatabase();
+    database.saveAiProfile(profile({ id: "p-cache" }));
+    const record: StoredModelCapability = {
+      profileId: "p-cache",
+      modelId: "deepseek-chat",
+      apiSurface: "openai-chat",
+      supportsJsonSchema: null,
+      supportsJsonMode: null,
+      supportsStreaming: null,
+      supportsStreamUsage: null,
+      supportsReasoning: null,
+      maxOutputTokens: null,
+      contextWindow: null,
+      probedAt: "2026-09-08T00:00:00.000Z",
+      source: "remote",
+    };
+    database.saveModelCapability(record);
+
+    database.saveAiProfile(profile({ id: "p-cache", name: "只改名字" }));
+    expect(database.listModelCapabilities("p-cache")).toHaveLength(1);
+
+    database.saveAiProfile(profile({ id: "p-cache", baseUrl: "https://api.other.example/v1" }));
+    expect(database.listModelCapabilities("p-cache")).toEqual([]);
+
+    database.saveModelCapability(record);
+    database.saveAiProfile(
+      profile({ id: "p-cache", baseUrl: "https://api.other.example/v1", apiSurface: "openai-responses" }),
+    );
+    expect(database.listModelCapabilities("p-cache")).toEqual([]);
+  });
+
   it("审计任务记录来源与角色", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "novel-studio-audit-"));
     roots.push(root);
