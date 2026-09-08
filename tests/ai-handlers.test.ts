@@ -390,7 +390,11 @@ describe("AI handlers", () => {
     await expect(handlers.get("reviseChapterFromQuality")!("project-1", qualityChapter.id)).resolves.toEqual(revised);
 
     expect(markGenerationActive).toHaveBeenCalledWith("project-1");
-    expect(database.saveGeneratedChapter).toHaveBeenCalledWith("project-1", revised);
+    expect(database.saveGeneratedChapter).toHaveBeenCalledWith(
+      "project-1",
+      revised,
+      expect.objectContaining({ revision: qualityChapter.revision }),
+    );
     expect(markGenerationIdle).toHaveBeenCalledWith("project-1");
     expect(markGenerationActive.mock.invocationCallOrder[0]).toBeLessThan(
       markGenerationIdle.mock.invocationCallOrder[0],

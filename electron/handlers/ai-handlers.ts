@@ -8,7 +8,7 @@ import type {
   ProjectDetail,
   QualityIssue,
 } from "../../src/shared/types";
-import { assertChapterRetrySnapshot, validateChapterAiRetrySource } from "../ai-retry";
+import { assertChapterRetrySnapshot, createChapterGenerationGuard, validateChapterAiRetrySource } from "../ai-retry";
 import type { AiService, StartedAiTask } from "../ai-service";
 import type { WorkspaceDatabase } from "../database";
 import { analyzeRankings } from "../ranking-service";
@@ -231,13 +231,15 @@ export function registerAiHandlers({
     );
     markGenerationActive(id);
     try {
+      // 与正文生成一致：请求期间的编辑必须让旧修订稿保存失败，而不是静默覆盖新内容。
+      const generationGuard = createChapterGenerationGuard(chapter);
       const revised = await ai.reviseChapter(
         { ...project, facts },
         chapter,
         compileContext(project, chapter, facts),
         issues,
       );
-      return database.saveGeneratedChapter(id, revised);
+      return database.saveGeneratedChapter(id, revised, generationGuard);
     } finally {
       markGenerationIdle(id);
     }
