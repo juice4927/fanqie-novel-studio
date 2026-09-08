@@ -26,6 +26,11 @@ describe("story constraints", () => {
     expect(parseStoryNumber("一万零三十")).toBe(10030);
     expect(parseStoryNumber("三万五")).toBe(35000);
     expect(parseStoryNumber("3.5万")).toBe(35000);
+    expect(parseStoryNumber("三亿")).toBe(300_000_000);
+    expect(parseStoryNumber("一亿三千万")).toBe(130_000_000);
+    expect(parseStoryNumber("两千三")).toBe(2300);
+    expect(parseStoryNumber("一百二")).toBe(120);
+    expect(parseStoryNumber("一万零三")).toBe(10_003);
   });
 
   it("blocks unresolved and overlapping confirmed state", () => {

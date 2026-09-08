@@ -28,38 +28,62 @@ const CHINESE_DIGITS: Record<string, number> = {
   九: 9,
 };
 
+const CHINESE_UNITS: Record<string, number> = {
+  十: 10,
+  百: 100,
+  千: 1_000,
+  万: 10_000,
+  亿: 100_000_000,
+};
+
 export function parseStoryNumber(value: string): number | null {
   const arabic = value.match(/\d+(?:\.\d+)?\s*([十百千万亿])?/);
   if (arabic) {
-    const multiplier = { 十: 10, 百: 100, 千: 1_000, 万: 10_000, 亿: 100_000_000 }[arabic[1] ?? ""] ?? 1;
+    const multiplier = CHINESE_UNITS[arabic[1] ?? ""] ?? 1;
     return Number(arabic[0].match(/\d+(?:\.\d+)?/)![0]) * multiplier;
   }
-  const text = value.match(/[零〇一二两三四五六七八九十百千万]+/)?.[0];
+  const text = value.match(/[零〇一二两三四五六七八九十百千万亿]+/)?.[0];
   if (!text) return null;
+  const tail = text.match(/([一二两三四五六七八九])$/)?.[1];
+  const body = tail ? text.slice(0, -1) : text;
   let total = 0;
   let section = 0;
   let digit = 0;
-  for (const char of text) {
-    if (char in CHINESE_DIGITS) digit = CHINESE_DIGITS[char];
-    else if (char === "十" || char === "百" || char === "千") {
-      const unit = char === "十" ? 10 : char === "百" ? 100 : 1000;
-      section += (digit || 1) * unit;
-      digit = 0;
-    } else if (char === "万") {
-      total += (section + digit || 1) * 10_000;
+  let lastUnit = 0;
+  for (const char of body) {
+    if (char in CHINESE_DIGITS) {
+      digit = CHINESE_DIGITS[char];
+      continue;
+    }
+    const unit = CHINESE_UNITS[char];
+    if (!unit) continue;
+    lastUnit = unit;
+    if (unit === 100_000_000) {
+      total = (total + section + digit) * unit;
       section = 0;
+      digit = 0;
+    } else if (unit === 10_000) {
+      total += (section + digit || 1) * unit;
+      section = 0;
+      digit = 0;
+    } else {
+      section += (digit || 1) * unit;
       digit = 0;
     }
   }
-  const omittedTail = text.match(/万([一二两三四五六七八九])$/);
-  if (omittedTail && !text.includes("零")) return total + section + CHINESE_DIGITS[omittedTail[1]] * 1_000;
+  if (tail && lastUnit > 10 && !body.includes("零")) {
+    // “一万三”“两千三”这类省略尾数：末位数字取上一级单位。
+    section += CHINESE_DIGITS[tail] * (lastUnit / 10);
+  } else if (tail) {
+    digit = CHINESE_DIGITS[tail];
+  }
   return total + section + digit;
 }
 
 function resourceLabel(fact: LedgerFact) {
   const clean = (value: string) =>
     compact(value)
-      .replace(/[零〇一二两三四五六七八九十百千万\d.,，.]/g, "")
+      .replace(/[零〇一二两三四五六七八九十百千万亿\d.,，.]/g, "")
       .replace(/余额|数量|库存|剩余|现有|持有|当前|仅|共|为/g, "")
       .replace(/枚|块|个|份|张|瓶|斤|两|元/g, "");
   return clean(fact.predicate) || clean(fact.value);

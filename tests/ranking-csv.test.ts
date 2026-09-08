@@ -55,4 +55,9 @@ describe("ranking CSV parser", () => {
     expect(snapshot.entries.map((entry) => entry.words)).toEqual([12_000, 150_000_000]);
     expect(snapshot.entries.map((entry) => entry.sourceUrl)).toEqual(["", "https://example.com/book"]);
   });
+
+  it("parses thousand and hundred units instead of dropping the suffix", () => {
+    const snapshot = parseRankingCsv("书名,字数\n甲,3千\n乙,十万\n丙,五百", "单位", options());
+    expect(snapshot.entries.map((entry) => entry.words)).toEqual([3_000, 100_000, 500]);
+  });
 });

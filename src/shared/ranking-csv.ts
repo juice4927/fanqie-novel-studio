@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import { parseStoryNumber } from "./story-constraints";
 import type { RankingSnapshot } from "./types";
 
 interface ParseRankingCsvOptions {
@@ -14,13 +15,14 @@ function value(row: Record<string, string>, keys: string[], fallback = ""): stri
 }
 
 function parseNumber(raw: string): number {
-  const text = String(raw).replace(/[,，]/g, "");
-  const match = text.match(/[-+]?\d+(?:\.\d+)?/);
-  if (!match) return 0;
-  const numeric = Number(match[0]);
-  const multiplier = text.includes("亿") ? 100_000_000 : text.includes("万") ? 10_000 : 1;
-  const result = Math.round(numeric * multiplier);
-  return Number.isFinite(result) ? result : 0;
+  const text = String(raw).replace(/[,，\s]/g, "");
+  if (!text) return 0;
+  // 与资源守恒共用同一套中英文数量解析，避免“3千”“十万”被吞值。
+  const parsed = parseStoryNumber(text);
+  if (parsed !== null && Number.isFinite(parsed)) return Math.round(parsed);
+  const fallback = text.match(/[-+]?\d+(?:\.\d+)?/);
+  const numeric = fallback ? Number(fallback[0]) : 0;
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function safeHttpUrl(raw: string) {
