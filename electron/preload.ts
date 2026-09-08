@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppApi, ChapterDraftStreamEvent, ChapterFactsExtractionEvent } from "../src/shared/types";
+import type { AppApi, ChapterDraftStreamEvent, ChapterFactsExtractionEvent, UpdateStatus } from "../src/shared/types";
 
 const invoke = <T>(channel: string, ...args: unknown[]) =>
   ipcRenderer.invoke(`studio:${channel}`, ...args) as Promise<T>;
@@ -109,6 +109,15 @@ const api: AppApi = {
   rebuildSearchIndexes: (projectId) => invoke("rebuildSearchIndexes", projectId),
   exportDiagnosticBundle: () => invoke("exportDiagnosticBundle"),
   getWorkspacePath: () => invoke("getWorkspacePath"),
+  getUpdateStatus: () => invoke("getUpdateStatus"),
+  checkForUpdates: () => invoke("checkForUpdates"),
+  installUpdate: (password) => invoke("installUpdate", password),
+  saveUpdateSettings: (input) => invoke("saveUpdateSettings", input),
+  onUpdateStatus: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: UpdateStatus) => listener(payload);
+    ipcRenderer.on("studio:update-status", wrapped);
+    return () => ipcRenderer.removeListener("studio:update-status", wrapped);
+  },
 };
 
 contextBridge.exposeInMainWorld("novelStudio", api);

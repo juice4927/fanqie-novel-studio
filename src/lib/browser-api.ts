@@ -64,6 +64,7 @@ import type {
   ReviewExperiment,
   ScheduleItem,
   StoryContract,
+  UpdateStatus,
 } from "../shared/types";
 import type { DemoState } from "./browser-demo";
 import { analyzeBrowserNovelRevision, id, key, now, seed, summary } from "./browser-demo";
@@ -209,6 +210,20 @@ function browserConceptSkeleton(concept: BookConceptCandidate): BookConceptSkele
     ],
   };
 }
+
+const WEB_UPDATE_STATUS: UpdateStatus = {
+  phase: "idle",
+  currentVersion: "浏览器预览",
+  availableVersion: null,
+  progressPercent: null,
+  releaseNotes: null,
+  lastCheckedAt: null,
+  error: "自动更新仅在打包后的桌面版可用",
+  autoCheck: false,
+  autoInstallOnQuit: false,
+  backupPasswordRequired: false,
+  canInstall: false,
+};
 
 export function createBrowserApi(): AppApi {
   const state = load();
@@ -1113,6 +1128,21 @@ export function createBrowserApi(): AppApi {
     },
     async getWorkspacePath() {
       return "浏览器预览使用 localStorage";
+    },
+    async getUpdateStatus() {
+      return { ...WEB_UPDATE_STATUS };
+    },
+    async checkForUpdates() {
+      return { ...WEB_UPDATE_STATUS };
+    },
+    async installUpdate() {
+      throw new Error("自动更新仅在打包后的桌面版可用");
+    },
+    async saveUpdateSettings(input) {
+      return { ...WEB_UPDATE_STATUS, autoCheck: input.autoCheck, autoInstallOnQuit: input.autoInstallOnQuit };
+    },
+    onUpdateStatus() {
+      return () => undefined;
     },
   };
 }

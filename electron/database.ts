@@ -1624,6 +1624,19 @@ export class WorkspaceDatabase {
     return computeGenerationQuality(decisions);
   }
 
+  getUpdateSettings() {
+    return {
+      autoCheck: this.getSetting("update.autoCheck", "1") !== "0",
+      autoInstallOnQuit: this.getSetting("update.autoInstallOnQuit", "0") === "1",
+    };
+  }
+
+  saveUpdateSettings(input: { autoCheck: boolean; autoInstallOnQuit: boolean }) {
+    this.setSetting("update.autoCheck", input.autoCheck ? "1" : "0");
+    this.setSetting("update.autoInstallOnQuit", input.autoInstallOnQuit ? "1" : "0");
+    return this.getUpdateSettings();
+  }
+
   private consumeApprovedChange(
     db: DatabaseSync,
     targetKind: ChangeRequest["targetKind"],

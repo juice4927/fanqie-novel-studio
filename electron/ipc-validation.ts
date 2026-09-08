@@ -406,7 +406,7 @@ const noArgs = z.tuple([]);
 const idOnly = z.tuple([id]);
 const projectEntity = z.tuple([id, id]);
 
-export type InvokeApiKey = Exclude<keyof AppApi, "onChapterFactsExtracted">;
+export type InvokeApiKey = Exclude<keyof AppApi, "onChapterFactsExtracted" | "onUpdateStatus">;
 
 const schemas = {
   getDashboard: noArgs,
@@ -627,6 +627,17 @@ const schemas = {
   getWorkspacePath: noArgs,
   getSystemHealthCheck: z.tuple([id]),
   cancelSystemHealthCheck: z.tuple([id]),
+  getUpdateStatus: noArgs,
+  checkForUpdates: noArgs,
+  installUpdate: z.tuple([z.string().min(8).max(1000).optional()]),
+  saveUpdateSettings: z.tuple([
+    z
+      .object({
+        autoCheck: z.boolean(),
+        autoInstallOnQuit: z.boolean(),
+      })
+      .strict(),
+  ]),
 };
 
 void (schemas satisfies Record<InvokeApiKey, z.ZodType<unknown[]>>);
