@@ -11,7 +11,7 @@
 
 ## 实施状态（2026-09-08）
 
-验收基线：`npx tsc --noEmit` ✅、`npm run lint` ✅、`npm test` 540 通过 / 1 跳过、`npm run test:quality` 16 通过、`npm run build` ✅、`npm run test:e2e` 20 通过。
+验收基线：`npx tsc --noEmit` ✅、`npm run lint` ✅、`npm test` 547 通过 / 1 跳过、`npm run test:quality` 16 通过、`npm run build` ✅、`npm run test:e2e` 20 通过。
 
 | 阶段 | 状态 | 落地内容 |
 |---|---|---|
@@ -387,12 +387,12 @@ ALTER TABLE ai_jobs ADD COLUMN role TEXT;
 - 配套：按仓库既有先例（`153d0bf docs(update): document the update channel and security exception`）在 `docs/security.md` 补一节“本地模型端点例外”，写明：仅显式配置、仅字面量回环/私网 IP、不解析域名、不跟随重定向、不进备份、不在默认配置中出现。
 - 与 §5.10 的关系：本地模型端点是“来源级”豁免，代理端点是“全局出站”豁免，两者都需要 netguard 放宽 loopback/私网，但**都只放宽连接目标，不放宽业务目标 URL 的校验**；两处例外都要在 `docs/security.md` 分别记录。
 
-### 5.8 失败、熔断、并发与预算（P5 可选）
+### 5.8 失败、熔断、并发与预算（熔断/并发已实现，预算待做）
 
-- **熔断**：同一来源连续 3 次可重试类失败 → 冷却 5 分钟，切换器显示“降级中”；冷却结束半开探测一次。
-- **并发**：每来源默认最多 2 个在途请求（现有 `isGenerationActive(projectId)` 只管单作品）。
-- **限流**：客户端令牌桶 + 遵守 `Retry-After`，避免 429 风暴。
-- **预算**：每来源可设每日/每月上限，接近时提醒、超出时拒绝并建议切换；默认关闭，避免误伤。
+- **熔断**（✅ 已实现）：同一来源连续 3 次可重试类失败 → 冷却 5 分钟，设置页显示「降级中」；冷却期内新任务直接拒绝并提示切换来源，成功一次即重置计数。取消与 4xx 不计入。
+- **并发**（✅ 已实现）：每来源默认最多 2 个在途请求，超出排队等待（60 秒超时），取消会立即释放。
+- **限流**：客户端令牌桶 + 遵守 `Retry-After`，避免 429 风暴（退避与 `Retry-After` 已用于重试调度，令牌桶未做）。
+- **预算**（未做）：每来源可设每日/每月上限，接近时提醒、超出时拒绝并建议切换；默认关闭，避免误伤。
 
 ### 5.9 迁移
 
@@ -484,7 +484,7 @@ ALTER TABLE ai_jobs ADD COLUMN role TEXT;
 | P3a | 三张表 + 迁移 + `ai-profile-repository` + 凭据改造（`CredEnumerate` 与缓存）+ 8 个 IPC | 2 | 新增 `tests/ai-profile-repository.test.ts`、`tests/ai-profile-secrets.test.ts`、`tests/ai-profile-migration.test.ts`、`tests/provider-url.test.ts` |
 | P3b | 设置页来源列表 + 添加弹窗 + 角色路由 UI + 空状态 + browser-demo 对齐 | 1.5–2 | 新增 `tests/settings-ai-profiles.test.tsx`；`tests/settings-page.test.tsx` 扩展；`npm run test:e2e` |
 | P4 | 快速切换器 + 单次覆盖通道 + 测试五项清单 + `/models` 刷新 + 导入导出 | 1.5–2 | 新增 `tests/ai-role-routing.test.ts`、`tests/ai-task-override.test.ts`、`tests/provider-presets.test.ts`；`npm run test:e2e` |
-| P5（可选/并行） | §5.7 本地端点（已定 B）/ §5.10 全局代理（并行线）/ 熔断与并发 / 预算 / 作品级锁定 / fallback 链 | 1–2 + 代理线 | 新增 `tests/netguard-local-endpoint.test.ts`、`tests/netguard-proxy.test.ts`；`npm run test:e2e` |
+| P5 可靠性 | ⚠️ 部分 | ✅ §5.7 本地端点、§5.10 全局代理、来源熔断与并发上限（`profile-runtime.ts`：连续 3 次可重试失败冷却 5 分钟、每来源最多 2 个在途请求、设置页显示「降级中」）。**未做**：预算上限、作品级锁定、fallback 链 | — | 新增 `tests/ai-profile-runtime.test.ts`、`tests/ai-runtime-integration.test.ts`；`npm run test:e2e` |
 
 每阶段合并前：`npx tsc --noEmit` → `npm run lint` → `npm test` → `npm run build`；涉及 UI 加 `npm run test:e2e`，涉及提示词/质检加 `npm run test:quality`，发布前 `npm run test:scale` 与 `npm run test:electron`。
 
