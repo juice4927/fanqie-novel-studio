@@ -36,11 +36,17 @@ function Workbench() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
 
   const reload = useCallback(async () => {
-    const [nextDashboard, nextProjects] = await Promise.all([api.getDashboard(), api.listProjects()]);
+    const [nextDashboard, nextProjects, settings] = await Promise.all([
+      api.getDashboard(),
+      api.listProjects(),
+      api.getAiSettings().catch(() => null),
+    ]);
     setDashboard(nextDashboard);
     setProjects(nextProjects);
+    setHasApiKey(settings?.hasApiKey ?? null);
   }, [api]);
   useEffect(() => {
     void reload();
@@ -134,8 +140,10 @@ function Workbench() {
           {page === "dashboard" && dashboard && (
             <DashboardPage
               data={dashboard}
+              hasApiKey={hasApiKey}
               onCreate={() => setCreateModal(true)}
               onOpenProject={openProject}
+              onOpenSettings={() => navigate("settings")}
               onDeleteProject={(project) => {
                 setDeleteProject(project);
                 setDeleteConfirmation("");

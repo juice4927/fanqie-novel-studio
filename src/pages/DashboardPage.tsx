@@ -17,15 +17,26 @@ function riskTone(risk: ProjectSummary["riskLevel"]) {
   return risk === "告警" ? "danger" : risk === "注意" ? "warning" : "success";
 }
 
+const SETUP_STEPS = [
+  { title: "配置 AI 密钥", detail: "生成正文和语义拆书需要，密钥只写入 Windows 凭据管理器" },
+  { title: "新建作品", detail: "填写题材与目标字数，系统会同时创建创作契约草案" },
+  { title: "审批创作契约", detail: "在“故事圣经”补全并审批，AI 才会开始生成正文" },
+  { title: "生成或手写正文", detail: "在“写作台”质检通过后定稿，再进入发布排期" },
+] as const;
+
 export function DashboardPage({
   data,
+  hasApiKey,
   onCreate,
   onOpenProject,
+  onOpenSettings,
   onDeleteProject,
 }: {
   data: DashboardData;
+  hasApiKey?: boolean | null;
   onCreate: () => void;
   onOpenProject: (id: string) => void;
+  onOpenSettings?: () => void;
   onDeleteProject: (project: ProjectSummary) => void;
 }) {
   return (
@@ -132,7 +143,29 @@ export function DashboardPage({
           <EmptyState
             icon={<BookOpen />}
             title="还没有作品"
-            description="三步开始：① 新建作品并填写题材与目标字数；② 到“故事圣经”完成并审批创作契约；③ 到“写作台”生成或手写正文，质检通过后定稿。每本书都会创建独立数据库和内容目录。"
+            description={
+              <ol className="setup-checklist">
+                {SETUP_STEPS.map((step, index) => {
+                  const done = index === 0 && hasApiKey === true;
+                  return (
+                    <li key={step.title} className={done ? "done" : ""}>
+                      <span className="setup-mark" aria-hidden="true">
+                        {done ? "✓" : index + 1}
+                      </span>
+                      <span>
+                        <strong>{step.title}</strong>
+                        <small>{step.detail}</small>
+                      </span>
+                      {index === 0 && !done && onOpenSettings && (
+                        <button type="button" className="setup-action" onClick={onOpenSettings}>
+                          去配置
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            }
             action={
               <Button onClick={onCreate} icon={<Plus size={17} />}>
                 新建作品

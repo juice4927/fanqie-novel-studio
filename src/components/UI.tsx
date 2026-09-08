@@ -165,14 +165,14 @@ export function EmptyState({
 }: {
   icon: ReactNode;
   title: string;
-  description: string;
+  description: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <div className="empty-state">
       <div className="empty-icon">{icon}</div>
       <h3>{title}</h3>
-      <p>{description}</p>
+      <div className="empty-state-description">{description}</div>
       {action}
     </div>
   );
