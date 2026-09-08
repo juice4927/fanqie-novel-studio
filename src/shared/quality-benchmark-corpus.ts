@@ -122,5 +122,33 @@ export const QUALITY_BENCHMARK = {
       },
       baselineOutput: { issues: [] },
     },
+    {
+      fixture: {
+        id: "scene-summary-dump",
+        title: "概述替代关键场景",
+        genre: "都市脑洞",
+        stage: "追读",
+        chapter: "林舟想起了那天的争执，也想了很多以后要做的事。几天后，事情就这样过去了，他决定继续调查。",
+        contextEvidence: ["本章章纲要求林舟当面向搭档说明证据并承担关系破裂的风险。"],
+        expectedIssues: [
+          {
+            id: "skipped-scene-choice",
+            category: "场景推进",
+            severity: "警告",
+            matchAny: ["概述", "选择", "关系", "风险"],
+          },
+        ],
+      },
+      baselineOutput: {
+        issues: [
+          {
+            severity: "警告",
+            category: "场景推进",
+            message: "本章用概述跳过了当面说明证据、承担关系风险这一关键选择，关系位移没有被呈现。",
+            evidence: "几天后，事情就这样过去了",
+          },
+        ],
+      },
+    },
   ] satisfies QualityBenchmarkCase[],
 } as const;

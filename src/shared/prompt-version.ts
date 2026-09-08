@@ -1,1 +1,1 @@
-export const PROMPT_VERSION = "2026-07-31.v8-motif-balance";
+export const PROMPT_VERSION = "2026-09-08.v9-gpt6-longform";
