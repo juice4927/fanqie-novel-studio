@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { autoUpdater } from "electron-updater";
 import { compileProjectChapterContext } from "../src/shared/context-compiler";
 import {
   applyContractRepairs,
@@ -25,9 +26,10 @@ import { registerProjectHandlers } from "./handlers/project-handlers";
 import { type ResearchHandlerRuntime, registerResearchHandlers } from "./handlers/research-handlers";
 import { registerSystemHandlers, type SystemHandlerRuntime } from "./handlers/system-handlers";
 import type { RegisterHandler } from "./handlers/types";
+import { registerUpdateHandlers } from "./handlers/update-handlers";
 import { validateIpcArgs } from "./ipc-validation";
 import { StructuredLogger } from "./structured-log";
-import { configureAutoUpdates } from "./update-service";
+import { createUpdateService, type UpdateService } from "./update-service";
 import { BackgroundWorker } from "./worker-client";
 
 let mainWindow: BrowserWindow | null = null;
@@ -41,6 +43,8 @@ let researchHandlers: ResearchHandlerRuntime;
 let autoBackupTimer: ReturnType<typeof setInterval> | null = null;
 let systemHandlers: SystemHandlerRuntime;
 let logger: StructuredLogger;
+let updateService: UpdateService | null = null;
+let quitInstallAttempted = false;
 const singleInstanceLockDisabled = process.env.NOVEL_STUDIO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
 const hasSingleInstanceLock = singleInstanceLockDisabled || app.requestSingleInstanceLock();
 
@@ -229,6 +233,8 @@ function registerHandlers() {
     startChapterRetry: (projectId, chapterId) => chapterGeneration.startOne(projectId, chapterId, undefined, "bypass"),
     logRetryFailure: (details) => logger.write("error", "ai.retry.failed", { ...details }),
   });
+  if (!updateService) throw new Error("更新服务尚未初始化");
+  registerUpdateHandlers({ register: handle, update: updateService });
   handle("analyzeNovelRevision", (id, input) => ai.analyzeNovelRevision(database.getProject(id), input));
   handle("applyNovelRevision", (id, proposal: NovelRevisionProposal, selectedRepairIds: string[]) => {
     const selected = new Set(selectedRepairIds);
@@ -408,22 +414,32 @@ if (hasSingleInstanceLock)
       getApiKey,
       compileContext: compileProjectChapterContext,
     });
+    updateService = createUpdateService({
+      logger,
+      updater: autoUpdater,
+      enabled: app.isPackaged && process.env.NOVEL_STUDIO_DISABLE_AUTO_UPDATE !== "1",
+      currentVersion: app.getVersion(),
+      getSettings: () => database.getUpdateSettings(),
+      saveSettings: (input) => database.saveUpdateSettings(input),
+      hasBackupPassword: async () => Boolean(await readAutoBackupCredential()),
+      readBackupPassword: () => readAutoBackupCredential(),
+      createBackup: async (password) => {
+        database.checkpointAll();
+        await createEncryptedBackup(
+          database.root,
+          path.join(database.backupRoot, `pre-update-${app.getVersion()}.novelbak`),
+          password,
+        );
+      },
+      hasActiveGeneration: () => database.listProjects().some((project) => chapterGeneration.isActive(project.id)),
+      publish: (status) => mainWindow?.webContents.send("studio:update-status", status),
+    });
     registerHandlers();
     void researchHandlers.runDueRankingSchedules();
     void systemHandlers.runAutomaticBackup();
     rankingScheduleTimer = setInterval(() => void researchHandlers.runDueRankingSchedules(), 15 * 60 * 1000);
     autoBackupTimer = setInterval(() => void systemHandlers.runAutomaticBackup(), 15 * 60 * 1000);
     createWindow();
-    configureAutoUpdates(logger, async () => {
-      database.checkpointAll();
-      const password = await readAutoBackupCredential();
-      if (!password) throw new Error("自动更新前需要先在设置中保存自动备份密码");
-      await createEncryptedBackup(
-        database.root,
-        path.join(database.backupRoot, `pre-update-${app.getVersion()}.novelbak`),
-        password,
-      );
-    });
     process.on("uncaughtException", (error) =>
       logger.write("error", "process.uncaughtException", { error: error.message, stack: error.stack }),
     );
@@ -438,6 +454,20 @@ if (hasSingleInstanceLock)
 app.on("window-all-closed", () => {
   if (rankingScheduleTimer) clearInterval(rankingScheduleTimer);
   if (autoBackupTimer) clearInterval(autoBackupTimer);
+  const status = updateService?.status();
+  // 退出时安装：在关闭数据库之前完成备份与安装，失败则正常退出。
+  if (updateService && !quitInstallAttempted && status?.phase === "downloaded" && status.autoInstallOnQuit) {
+    quitInstallAttempted = true;
+    void updateService
+      .install()
+      .catch((error) => logger.write("error", "update.quit_install_failed", { error: String(error) }))
+      .finally(() => {
+        void worker?.close();
+        database?.close();
+        if (process.platform !== "darwin") app.quit();
+      });
+    return;
+  }
   void worker?.close();
   database?.close();
   if (process.platform !== "darwin") app.quit();

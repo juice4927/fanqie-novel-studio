@@ -872,6 +872,35 @@ export interface HealthCheckTask {
   error: string | null;
 }
 
+export type UpdatePhase =
+  | "idle"
+  | "checking"
+  | "up-to-date"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "installing"
+  | "error";
+
+export interface UpdateStatus {
+  phase: UpdatePhase;
+  currentVersion: string;
+  availableVersion: string | null;
+  progressPercent: number | null;
+  releaseNotes: string | null;
+  lastCheckedAt: string | null;
+  error: string | null;
+  autoCheck: boolean;
+  autoInstallOnQuit: boolean;
+  backupPasswordRequired: boolean;
+  canInstall: boolean;
+}
+
+export interface UpdateSettingsInput {
+  autoCheck: boolean;
+  autoInstallOnQuit: boolean;
+}
+
 export interface AppApi {
   getDashboard(): Promise<DashboardData>;
   listProjects(): Promise<ProjectSummary[]>;
@@ -973,4 +1002,9 @@ export interface AppApi {
   rebuildSearchIndexes(projectId: string): Promise<SystemHealthReport>;
   exportDiagnosticBundle(): Promise<string | null>;
   getWorkspacePath(): Promise<string>;
+  getUpdateStatus(): Promise<UpdateStatus>;
+  checkForUpdates(): Promise<UpdateStatus>;
+  installUpdate(password?: string): Promise<UpdateStatus>;
+  saveUpdateSettings(input: UpdateSettingsInput): Promise<UpdateStatus>;
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
 }

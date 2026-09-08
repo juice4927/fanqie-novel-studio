@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "../src/pages/SettingsPage";
-import type { AiJobRecord, AiSettings, AppApi, AutoBackupSettings } from "../src/shared/types";
+import type { AiJobRecord, AiSettings, AppApi, AutoBackupSettings, UpdateStatus } from "../src/shared/types";
 
 const settings: AiSettings = {
   protocol: "openai-compatible",
@@ -27,6 +27,25 @@ const autoBackup: AutoBackupSettings = {
   lastError: null,
   nextRunAt: null,
 };
+
+const updateStatus: UpdateStatus = {
+  phase: "idle",
+  currentVersion: "0.2.1",
+  availableVersion: null,
+  progressPercent: null,
+  releaseNotes: null,
+  lastCheckedAt: null,
+  error: null,
+  autoCheck: true,
+  autoInstallOnQuit: false,
+  backupPasswordRequired: false,
+  canInstall: false,
+};
+
+const updateApi = (status: Partial<UpdateStatus> = {}) => ({
+  getUpdateStatus: vi.fn().mockResolvedValue({ ...updateStatus, ...status }),
+  onUpdateStatus: vi.fn(() => () => undefined),
+});
 
 afterEach(() => cleanup());
 
@@ -68,6 +87,7 @@ describe("settings AI task center", () => {
       getAiSettings: vi.fn().mockResolvedValue(settings),
       getWorkspacePath: vi.fn().mockResolvedValue("C:\\workspace"),
       getAutoBackupSettings: vi.fn().mockResolvedValue(autoBackup),
+      ...updateApi(),
       listAiJobs: vi.fn().mockResolvedValue([]),
       saveAiSettings,
     } as unknown as AppApi;
@@ -118,6 +138,7 @@ describe("settings AI task center", () => {
       getAiSettings: vi.fn().mockResolvedValue(settings),
       getWorkspacePath: vi.fn().mockResolvedValue("C:\\workspace"),
       getAutoBackupSettings: vi.fn().mockResolvedValue(autoBackup),
+      ...updateApi(),
       listAiJobs,
       retryAiJob,
     } as unknown as AppApi;
@@ -152,6 +173,7 @@ describe("settings AI task center", () => {
       getAiSettings: vi.fn().mockResolvedValue(settings),
       getWorkspacePath: vi.fn().mockResolvedValue("C:\\workspace"),
       getAutoBackupSettings: vi.fn().mockResolvedValue(autoBackup),
+      ...updateApi(),
       listAiJobs,
       retryAiJob,
     } as unknown as AppApi;
@@ -165,5 +187,50 @@ describe("settings AI task center", () => {
     await waitFor(() => expect(notify).toHaveBeenCalledWith("重试启动失败", "error"));
     expect(screen.getByText("原失败任务")).toBeTruthy();
     expect(listAiJobs).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("settings software update", () => {
+  const baseApi = (status: Partial<UpdateStatus> = {}) => ({
+    getAiSettings: vi.fn().mockResolvedValue(settings),
+    getWorkspacePath: vi.fn().mockResolvedValue("C:\\workspace"),
+    getAutoBackupSettings: vi.fn().mockResolvedValue(autoBackup),
+    listAiJobs: vi.fn().mockResolvedValue([]),
+    ...updateApi(status),
+  });
+
+  it("shows the current version and reports a manual check", async () => {
+    const checkForUpdates = vi.fn().mockResolvedValue({ ...updateStatus, phase: "up-to-date" });
+    const api = { ...baseApi(), checkForUpdates } as unknown as AppApi;
+
+    render(<SettingsPage api={api} notify={vi.fn()} />);
+
+    expect(await screen.findByText("0.2.1")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "检查更新" }));
+    await waitFor(() => expect(checkForUpdates).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("已是最新")).toBeTruthy();
+  });
+
+  it("requires an eight-character backup password before installing", async () => {
+    const installUpdate = vi.fn().mockResolvedValue(updateStatus);
+    const api = {
+      ...baseApi({
+        phase: "downloaded",
+        availableVersion: "0.2.2",
+        progressPercent: 100,
+        backupPasswordRequired: true,
+        canInstall: false,
+      }),
+      installUpdate,
+    } as unknown as AppApi;
+
+    render(<SettingsPage api={api} notify={vi.fn()} />);
+
+    const install = (await screen.findByRole("button", { name: "立即重启并安装" })) as HTMLButtonElement;
+    expect(install.disabled).toBe(true);
+    await userEvent.type(screen.getByLabelText("安装前备份密码"), "12345678");
+    await waitFor(() => expect(install.disabled).toBe(false));
+    await userEvent.click(install);
+    await waitFor(() => expect(installUpdate).toHaveBeenCalledWith("12345678"));
   });
 });
