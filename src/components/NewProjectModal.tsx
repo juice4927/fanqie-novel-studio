@@ -4,23 +4,25 @@ import { describeError } from "../lib/error-message";
 import type { CategoryTagStat } from "../shared/category-tags";
 import {
   DEFAULT_WORDS_PER_CHAPTER,
+  dedupePositioningTags,
   LENGTH_SHAPES,
   MAX_WORDS_PER_CHAPTER,
   MIN_WORDS_PER_CHAPTER,
   NARRATIVE_PERSONS,
   OPENING_ARCHETYPES,
+  type PositioningTagSource,
   PROTAGONIST_ROLES,
+  positioningTagOwners,
   TONE_TAGS,
 } from "../shared/creation-options";
 import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile, listFanqieSubGenres } from "../shared/fanqie-taxonomy";
-import { GENRE_ELEMENT_GROUPS, NARRATIVE_GENRES, type NarrativeGenre } from "../shared/genre-composition";
+import { NARRATIVE_GENRES, type NarrativeGenre, PRIMARY_GENRE_ELEMENT_GROUPS } from "../shared/genre-composition";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import type { IncubationPositioning } from "../shared/incubation";
 import { positioningToConceptInput } from "../shared/incubation";
 import { blockingFindings, reviewIncubationCandidate, summarizeFindings } from "../shared/incubation-review";
 import type {
   AppApi,
-  Genre,
   IncubationCandidate,
   IncubationDraft,
   InsightPack,
@@ -63,6 +65,12 @@ function toggleValue<T>(list: T[], value: T, max?: number) {
   return [...list, value];
 }
 
+/** 主题材跟随番茄分类；同名标签按层去重，保证一个词只出现在一个面板。 */
+function normalizePositioning(input: IncubationPositioning): IncubationPositioning {
+  const category = getFanqieCategoryProfile(input.fanqieCategoryKey);
+  return dedupePositioningTags(category ? { ...input, genre: category.genre } : input);
+}
+
 export function NewProjectModal({
   api,
   initialDraft = null,
@@ -78,8 +86,8 @@ export function NewProjectModal({
 }) {
   const [mode, setMode] = useState<CreateMode>("AI 从零开书");
   const [draftId, setDraftId] = useState<string | null>(initialDraft?.id ?? null);
-  const [positioning, setPositioning] = useState<IncubationPositioning>(
-    () => initialDraft?.positioning ?? defaultPositioning(),
+  const [positioning, setPositioning] = useState<IncubationPositioning>(() =>
+    normalizePositioning(initialDraft?.positioning ?? defaultPositioning()),
   );
   const [seed, setSeed] = useState(initialDraft?.seed ?? "");
   const [manualTitle, setManualTitle] = useState("");
@@ -103,6 +111,12 @@ export function NewProjectModal({
   const plugin = GENRE_PLUGINS[positioning.genre];
   const selected = concepts.find((item) => item.id === selectedId) ?? null;
   const selectedSubGenres = subGenreOptions.filter((item) => selected?.subGenreIds.includes(item.id));
+  const tagOwners = useMemo(() => positioningTagOwners(positioning), [positioning]);
+  /** 该标签已被更高优先级的层占用时返回来源，用于置灰并提示。 */
+  const claimedBy = (label: string, layer: PositioningTagSource) => {
+    const owner = tagOwners.get(label);
+    return owner && owner !== layer ? owner : null;
+  };
   const findings = useMemo(
     () =>
       selected
@@ -189,7 +203,7 @@ export function NewProjectModal({
   }, [api, positioning.fanqieCategoryKey]);
 
   const patch = (next: Partial<IncubationPositioning>) => {
-    setPositioning((current) => ({ ...current, ...next }));
+    setPositioning((current) => normalizePositioning({ ...current, ...next }));
     setConcepts([]);
     setSelectedId(null);
     setAcknowledged([]);
@@ -200,7 +214,6 @@ export function NewProjectModal({
     if (!profile) return;
     patch({
       fanqieCategoryKey: key,
-      genre: profile.genre,
       subGenreIds: [],
       secondaryGenres: [...profile.narrativeGenres],
       genreElements: [...profile.genreElements],
@@ -342,32 +355,35 @@ export function NewProjectModal({
                 ))}
               </Select>
             </Field>
-            <Field label="平台主题材" hint="由分类自动推导，决定写作基线规则">
-              <Select
-                value={positioning.genre}
-                onChange={(event) => patch({ genre: event.target.value as Genre })}
-                disabled={busy}
-              >
-                {(Object.keys(GENRE_PLUGINS) as Genre[]).map((genre) => (
-                  <option key={genre}>{genre}</option>
-                ))}
-              </Select>
+            <Field label="平台主题材" hint="跟随番茄分类自动确定，决定写作基线规则">
+              <div className="field-static" title="由番茄分类推导，不单独修改">
+                {positioning.genre}
+              </div>
             </Field>
-            <Field label="二级流派" hint={`可选 1–2 个；${subGenreOptions.length} 个可选`}>
+            <Field label="二级流派" hint={`可选 1–2 个；${subGenreOptions.length} 个可选；灰色项与分类/主题材重名`}>
               <div className="genre-option-grid compact">
-                {subGenreOptions.map((item) => (
-                  <label key={item.id} className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={positioning.subGenreIds.includes(item.id)}
-                      disabled={
-                        busy || (!positioning.subGenreIds.includes(item.id) && positioning.subGenreIds.length >= 2)
-                      }
-                      onChange={() => patch({ subGenreIds: toggleValue(positioning.subGenreIds, item.id, 2) })}
-                    />
-                    {item.name}
-                  </label>
-                ))}
+                {subGenreOptions.map((item) => {
+                  const owner = claimedBy(item.name, "二级流派");
+                  return (
+                    <label
+                      key={item.id}
+                      className={`check-row${owner ? " claimed" : ""}`}
+                      title={owner ? `已在「${owner}」中选择` : undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={positioning.subGenreIds.includes(item.id)}
+                        disabled={
+                          busy ||
+                          Boolean(owner) ||
+                          (!positioning.subGenreIds.includes(item.id) && positioning.subGenreIds.length >= 2)
+                        }
+                        onChange={() => patch({ subGenreIds: toggleValue(positioning.subGenreIds, item.id, 2) })}
+                      />
+                      {item.name}
+                    </label>
+                  );
+                })}
               </div>
             </Field>
           </div>
@@ -518,76 +534,116 @@ export function NewProjectModal({
               </Select>
             </Field>
           </div>
-          <Field label="复合叙事类型" hint="最多 3 项；决定主要冲突与情绪体验">
+          <Field label="复合叙事类型" hint="最多 3 项；决定主要冲突与情绪体验；灰色项已在更高优先级的选择中出现">
             <div className="genre-option-grid">
-              {NARRATIVE_GENRES.map((genre) => (
-                <label key={genre} className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={positioning.secondaryGenres.includes(genre)}
-                    disabled={
-                      busy || (!positioning.secondaryGenres.includes(genre) && positioning.secondaryGenres.length >= 3)
-                    }
-                    onChange={() =>
-                      patch({ secondaryGenres: toggleValue(positioning.secondaryGenres, genre as NarrativeGenre, 3) })
-                    }
-                  />
-                  {genre}
-                </label>
-              ))}
-            </div>
-          </Field>
-          {GENRE_ELEMENT_GROUPS.map((group) => (
-            <Field key={group.label} label={group.label} hint="按需多选，不会要求每章都出现">
-              <div className="genre-option-grid">
-                {group.elements.map((element) => (
-                  <label key={element} className="check-row">
+              {NARRATIVE_GENRES.map((genre) => {
+                const owner = claimedBy(genre, "复合叙事类型");
+                return (
+                  <label
+                    key={genre}
+                    className={`check-row${owner ? " claimed" : ""}`}
+                    title={owner ? `已在「${owner}」中选择` : undefined}
+                  >
                     <input
                       type="checkbox"
-                      checked={positioning.genreElements.includes(element)}
+                      checked={positioning.secondaryGenres.includes(genre)}
                       disabled={
-                        busy || (!positioning.genreElements.includes(element) && positioning.genreElements.length >= 8)
+                        busy ||
+                        Boolean(owner) ||
+                        (!positioning.secondaryGenres.includes(genre) && positioning.secondaryGenres.length >= 3)
                       }
-                      onChange={() => patch({ genreElements: toggleValue(positioning.genreElements, element, 8) })}
+                      onChange={() =>
+                        patch({ secondaryGenres: toggleValue(positioning.secondaryGenres, genre as NarrativeGenre, 3) })
+                      }
                     />
-                    {element}
+                    {genre}
                   </label>
-                ))}
+                );
+              })}
+            </div>
+          </Field>
+          <p className="positioning-note">
+            情绪基调与主角身份在下方单独选择；灰色项已在更高优先级的选择中出现，同一个词只保留一层。
+          </p>
+          {PRIMARY_GENRE_ELEMENT_GROUPS.map((group) => (
+            <Field key={group.label} label={group.label} hint="按需多选，不会要求每章都出现">
+              <div className="genre-option-grid">
+                {group.elements.map((element) => {
+                  const owner = claimedBy(element, "题材元素");
+                  return (
+                    <label
+                      key={element}
+                      className={`check-row${owner ? " claimed" : ""}`}
+                      title={owner ? `已在「${owner}」中选择` : undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={positioning.genreElements.includes(element)}
+                        disabled={
+                          busy ||
+                          Boolean(owner) ||
+                          (!positioning.genreElements.includes(element) && positioning.genreElements.length >= 8)
+                        }
+                        onChange={() => patch({ genreElements: toggleValue(positioning.genreElements, element, 8) })}
+                      />
+                      {element}
+                    </label>
+                  );
+                })}
               </div>
             </Field>
           ))}
           <div className="form-grid three">
             <Field label="主角身份" hint="最多 2 项">
               <div className="genre-option-grid compact">
-                {PROTAGONIST_ROLES.map((role) => (
-                  <label key={role} className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={positioning.protagonistRoles.includes(role)}
-                      disabled={
-                        busy ||
-                        (!positioning.protagonistRoles.includes(role) && positioning.protagonistRoles.length >= 2)
-                      }
-                      onChange={() => patch({ protagonistRoles: toggleValue(positioning.protagonistRoles, role, 2) })}
-                    />
-                    {role}
-                  </label>
-                ))}
+                {PROTAGONIST_ROLES.map((role) => {
+                  const owner = claimedBy(role, "主角身份");
+                  return (
+                    <label
+                      key={role}
+                      className={`check-row${owner ? " claimed" : ""}`}
+                      title={owner ? `已在「${owner}」中选择` : undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={positioning.protagonistRoles.includes(role)}
+                        disabled={
+                          busy ||
+                          Boolean(owner) ||
+                          (!positioning.protagonistRoles.includes(role) && positioning.protagonistRoles.length >= 2)
+                        }
+                        onChange={() => patch({ protagonistRoles: toggleValue(positioning.protagonistRoles, role, 2) })}
+                      />
+                      {role}
+                    </label>
+                  );
+                })}
               </div>
             </Field>
             <Field label="情绪基调" hint="最多 2 项">
               <div className="genre-option-grid compact">
-                {TONE_TAGS.map((tone) => (
-                  <label key={tone} className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={positioning.toneTags.includes(tone)}
-                      disabled={busy || (!positioning.toneTags.includes(tone) && positioning.toneTags.length >= 2)}
-                      onChange={() => patch({ toneTags: toggleValue(positioning.toneTags, tone, 2) })}
-                    />
-                    {tone}
-                  </label>
-                ))}
+                {TONE_TAGS.map((tone) => {
+                  const owner = claimedBy(tone, "情绪基调");
+                  return (
+                    <label
+                      key={tone}
+                      className={`check-row${owner ? " claimed" : ""}`}
+                      title={owner ? `已在「${owner}」中选择` : undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={positioning.toneTags.includes(tone)}
+                        disabled={
+                          busy ||
+                          Boolean(owner) ||
+                          (!positioning.toneTags.includes(tone) && positioning.toneTags.length >= 2)
+                        }
+                        onChange={() => patch({ toneTags: toggleValue(positioning.toneTags, tone, 2) })}
+                      />
+                      {tone}
+                    </label>
+                  );
+                })}
               </div>
             </Field>
           </div>

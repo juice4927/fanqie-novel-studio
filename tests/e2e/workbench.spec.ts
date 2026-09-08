@@ -166,6 +166,9 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await expect(page.getByRole("dialog", { name: "从 0 开始创建一本书" })).toBeVisible();
   await expect(page.getByText("AI 从零开书", { exact: true })).toBeVisible();
   await expect(page.getByText("番茄目标分类", { exact: true })).toBeVisible();
+  // 情绪基调与主角身份只在专属字段出现一次，不再作为题材元素重复渲染。
+  await expect(page.getByText("情绪基调", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("主角身份", { exact: true })).toHaveCount(1);
   await expect(page.getByText("本次定位", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "生成三套方案" }).click();
   await expect(page.getByRole("heading", { name: "她能看见事故留下的断点" })).toBeVisible();

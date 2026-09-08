@@ -122,7 +122,7 @@ describe("incubation review", () => {
 
   it("blocks mutually exclusive elements and high originality risk", () => {
     const findings = review({
-      genreElements: ["系统", "无金手指"],
+      genreElements: ["无CP", "先婚后爱"],
       differentiation: { ...candidate().differentiation, originalityRisk: "高" },
     });
     const ids = blockingFindings(findings, []).map((item) => item.id);

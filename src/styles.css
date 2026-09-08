@@ -3580,6 +3580,28 @@ p {
 .check-row input {
   margin-top: 2px;
 }
+.check-row.claimed {
+  color: var(--muted);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.positioning-note {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.field-static {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 10px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px dashed var(--line-strong);
+  border-radius: 5px;
+  font-size: 12px;
+}
 .inline-warning {
   margin: 0;
   padding: 8px 10px;

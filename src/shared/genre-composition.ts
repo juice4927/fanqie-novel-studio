@@ -1,3 +1,5 @@
+import { PROTAGONIST_ROLES, TONE_TAGS } from "./creation-options";
+
 export const NARRATIVE_GENRES = [
   "成长",
   "悬疑",
@@ -21,9 +23,14 @@ export const NARRATIVE_GENRES = [
 
 export type NarrativeGenre = (typeof NARRATIVE_GENRES)[number];
 
+/**
+ * 题材元素词表。`dedicated` 标记该组在开书面板已有专属字段：
+ * 这些标签只在专属字段里选一次，不再作为题材元素重复渲染。
+ */
 export const GENRE_ELEMENT_GROUPS = [
   {
     label: "世界与时代",
+    dedicated: null,
     elements: [
       "现代都市",
       "古代",
@@ -43,6 +50,7 @@ export const GENRE_ELEMENT_GROUPS = [
   },
   {
     label: "故事机制",
+    dedicated: null,
     elements: [
       "重生",
       "穿越",
@@ -66,19 +74,25 @@ export const GENRE_ELEMENT_GROUPS = [
   },
   {
     label: "人物关系",
+    dedicated: null,
     elements: ["师徒", "兄弟", "家族", "群像", "双强", "契约关系", "破镜重圆", "养成", "宿敌", "搭档"],
   },
-  {
-    label: "情绪基调",
-    elements: ["热血", "轻松", "甜宠", "虐恋", "悬疑紧张", "治愈", "沙雕", "冷峻"],
-  },
-  {
-    label: "主角身份",
-    elements: ["学生", "职场新人", "店主/创业者", "医生", "教师", "军人", "警察/调查员", "艺人/主播", "匠人", "继承人"],
-  },
+  { label: "情绪基调", dedicated: "toneTags", elements: TONE_TAGS },
+  { label: "主角身份", dedicated: "protagonistRoles", elements: PROTAGONIST_ROLES },
 ] as const;
 
+/** 开书面板真正作为「题材元素」呈现的分组；情绪基调与主角身份走专属字段。 */
+export const PRIMARY_GENRE_ELEMENT_GROUPS = GENRE_ELEMENT_GROUPS.filter((group) => !group.dedicated);
+
 export const GENRE_ELEMENTS = GENRE_ELEMENT_GROUPS.flatMap((group) => group.elements);
+
+export const PRIMARY_GENRE_ELEMENTS = PRIMARY_GENRE_ELEMENT_GROUPS.flatMap((group) => group.elements);
+
+/** 去掉与更高优先级层重名的标签，保证同一个词只出现在一层。 */
+export function dedupeLabels(higher: readonly string[] | undefined, lower: readonly string[] | undefined) {
+  const taken = new Set(higher ?? []);
+  return (lower ?? []).filter((label) => !taken.has(label));
+}
 
 export interface GenreComposition {
   secondaryGenres?: NarrativeGenre[];
@@ -88,7 +102,7 @@ export interface GenreComposition {
 
 export function compileGenreComposition(composition?: GenreComposition) {
   const secondaryGenres = composition?.secondaryGenres?.filter(Boolean) ?? [];
-  const genreElements = composition?.genreElements?.filter(Boolean) ?? [];
+  const genreElements = dedupeLabels(secondaryGenres, composition?.genreElements?.filter(Boolean));
   const customDirection = composition?.customGenreDirection?.trim() ?? "";
 
   if (!secondaryGenres.length && !genreElements.length && !customDirection) {

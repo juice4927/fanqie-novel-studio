@@ -1,6 +1,7 @@
 import { compileAestheticGuidance } from "./aesthetic-profile";
 import { compileChapterGuidance, resolveStoryStage } from "./commercial-knowledge";
 import { buildContextDiagnostics, type ContextContentKey } from "./context-diagnostics";
+import { dedupeLabels } from "./genre-composition";
 import { normalizeGuidanceMode } from "./guidance-mode";
 import { findCurrentVolume } from "./planning";
 import { analyzeProseTemperature } from "./prose-temperature";
@@ -134,7 +135,7 @@ export function compileChapterContext(
       `故事前提：${contract.premise}`,
       `题材子类型：${contract.genreSubtype || "未选择"}`,
       `复合叙事类型：${contract.secondaryGenres?.join(" + ") || "未选择"}`,
-      `题材元素：${contract.genreElements?.join("、") || "未选择"}`,
+      `题材元素：${dedupeLabels(contract.secondaryGenres, contract.genreElements).join("、") || "未选择"}`,
       `自定义创作方向：${contract.customGenreDirection || "未填写"}`,
       `番茄分类：${contract.fanqieCategoryKey || "未选择"}`,
       `主角欲望：${contract.protagonistDesire}`,

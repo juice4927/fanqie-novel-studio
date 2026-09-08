@@ -1,4 +1,5 @@
 import { missingContractApprovalFields } from "./contract-service";
+import { PROTAGONIST_ROLES, TONE_TAGS } from "./creation-options";
 import { type FanqieCategoryProfile, type FanqieSubGenreProfile, getFanqieCategoryProfile } from "./fanqie-taxonomy";
 import type { BookConceptSkeleton, IncubationCandidate, StoryContract } from "./types";
 
@@ -39,12 +40,16 @@ const ACTIONABLE_DESIRE_VERBS = [
   "建立",
   "改变",
 ];
-const MUTUALLY_EXCLUSIVE_ELEMENTS: Array<[string, string]> = [
-  ["系统", "无金手指"],
-  ["系统", "无系统"],
-  ["重生", "无重生"],
-  ["穿越", "无穿越"],
+/**
+ * 真正互斥的题材元素。表里的每个词都必须是开书面板可选项，
+ * 否则规则永远不会触发（tests/positioning-tags.test.ts 会守住这一点）。
+ */
+export const MUTUALLY_EXCLUSIVE_ELEMENTS: Array<[string, string]> = [
+  ["无CP", "先婚后爱"],
+  ["无CP", "破镜重圆"],
 ];
+/** 由专属字段收集的标签，不计入题材元素额度。 */
+const DEDICATED_FIELD_LABELS = new Set<string>([...PROTAGONIST_ROLES, ...TONE_TAGS]);
 const LIGHT_TONE_WORDS = ["轻松", "治愈", "甜宠", "沙雕"];
 const HEAVY_TONE_WORDS = ["压抑", "沉重", "虐恋", "冷峻", "绝望"];
 
@@ -147,9 +152,10 @@ export function reviewIncubationCandidate(input: IncubationReviewInput): Incubat
   }
 
   // 3 元素过量与互斥
-  const elements = input.genreElements;
+  const selectedElements = input.genreElements;
+  const elements = selectedElements.filter((element) => !DEDICATED_FIELD_LABELS.has(element));
   const conflicts = MUTUALLY_EXCLUSIVE_ELEMENTS.filter(
-    ([left, right]) => elements.includes(left) && elements.includes(right),
+    ([left, right]) => selectedElements.includes(left) && selectedElements.includes(right),
   );
   findings.push(
     conflicts.length
