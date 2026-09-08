@@ -27,6 +27,7 @@ Guidance for AI coding agents working in this repository.
 4. **Shared code must stay pure.** `src/shared/` must never import from `electron/` or React. Deterministic rules are reused by both renderer and main process.
 5. **State transitions are transactional.** Multi-statement writes wrap in `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`. Approved content edits require an approved change request first.
 6. **Prompt/quality changes need evidence.** Before touching quality prompts, add a reproducible benchmark case (`src/shared/quality-benchmark-corpus.ts`) and compare against baseline (`npm run test:quality`).
+7. **Prompts guide, they do not gate.** Generation prompts are briefs, not checklists. Keep prohibitions rare and always paired with a positive alternative. Genre knowledge is retrieved **on demand only** (`compileChapterGuidance` + `guidance-retrieval.ts`): nothing is injected unless a signal fires — repeated mechanism fatigue, a key/climax/reveal chapter, or no approved stage/volume structure at all — and the full reference (`compileCommercialGuidance`) is reserved for planning/concept/review tasks and the explicit 严谨 mode. Statistics (length, temperature, density) are observations, never issues. Hard gates stay limited to contract rules, fact conflicts, knowledge boundaries, originality, and privacy. See `PROMPT_GUIDANCE_OPTIMIZATION_PLAN.md`.
 
 ## Commands
 
