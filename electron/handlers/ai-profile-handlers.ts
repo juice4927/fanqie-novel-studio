@@ -3,6 +3,7 @@ import { assertNoSecretHeaders, resolveAuthHeaders } from "../../src/shared/ai/a
 import { canonicalizeProviderUrl } from "../../src/shared/ai/provider-url";
 import type {
   AiProfile,
+  AiProfileHealth,
   AiProfileView,
   AiRoleRoute,
   ApiSurface,
@@ -42,6 +43,8 @@ export interface AiProfileHandlerDependencies {
   credentials: AiProfileCredentials;
   log: (level: "info" | "warn" | "error", event: string, data: Record<string, unknown>) => void;
   now: () => string;
+  /** 来源熔断状态（内存态）。 */
+  health?: () => AiProfileHealth[];
 }
 
 const MODELS_RESPONSE_LIMIT_BYTES = 2 * 1024 * 1024;
@@ -156,6 +159,7 @@ export function registerAiProfileHandlers({
   credentials,
   log,
   now,
+  health,
 }: AiProfileHandlerDependencies): void {
   const credentialIds = new Set<string>();
   const refreshCredentialIds = async () => {
@@ -203,6 +207,8 @@ export function registerAiProfileHandlers({
   register("getDefaultAiProfileId", () => database.getDefaultAiProfileId());
 
   register("listAiRoleRoutes", () => database.listAiRoleRoutes());
+
+  register("listAiProfileHealth", () => health?.() ?? []);
 
   register("setAiRoleRoute", (role: ModelRole, profileId: string | null, modelId: string | null) => {
     if (!isModelRole(role)) throw new Error(`未知的任务角色：${role}`);

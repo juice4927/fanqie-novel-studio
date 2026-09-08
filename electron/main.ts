@@ -11,6 +11,7 @@ import {
   sameRevisionSnapshot,
 } from "../src/shared/novel-revision";
 import type { Chapter, ChapterFactsExtractionEvent, NovelRevisionProposal } from "../src/shared/types";
+import { createProfileRuntime } from "./ai/profile-runtime";
 import { createAiRouteResolver } from "./ai/route-resolver";
 import { AiService } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
@@ -48,6 +49,8 @@ let database: WorkspaceDatabase;
 let worker: BackgroundWorker;
 let ai: AiService;
 let apiCredential = "";
+/** 来源熔断与并发控制：进程内共享，任务成功/失败都会更新。 */
+const profileRuntime = createProfileRuntime();
 /** 来源密钥内存缓存：路由解析必须同步，启动后预热，保存/删除时增量更新。 */
 const profileCredentials = new Map<string, string>();
 const profileCredentialsBridge: AiProfileCredentials = {
@@ -366,6 +369,7 @@ function registerHandlers() {
     },
     log: (level, event, data) => logger.write(level, event, data),
     now,
+    health: () => profileRuntime.snapshot(),
   });
   registerNetworkHandlers({
     register: handle,
@@ -584,6 +588,7 @@ if (hasSingleInstanceLock)
           });
         }
       },
+      profileRuntime,
     );
     chapterGeneration = createChapterGenerationCoordinator({
       database,

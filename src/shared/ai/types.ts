@@ -85,6 +85,13 @@ export interface AiProfileView extends AiProfile {
   hasApiKey: boolean;
 }
 
+/** 来源熔断状态；degradedUntil 非空表示正在冷却。 */
+export interface AiProfileHealth {
+  profileId: string;
+  failures: number;
+  degradedUntil: string | null;
+}
+
 /** 单次任务覆盖：只对本次请求生效，不落库。 */
 export interface TaskModelOverride {
   profileId?: string;

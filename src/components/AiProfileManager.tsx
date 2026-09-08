@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { describeError } from "../lib/error-message";
 import { PROVIDER_PRESETS, type ProviderPreset } from "../shared/ai/provider-presets";
 import {
+  type AiProfileHealth,
   type AiProfileView,
   type AiRoleRoute,
   MODEL_ROLE_LABELS,
@@ -83,17 +84,20 @@ export function AiProfileManager({
   const [queryText, setQueryText] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [health, setHealth] = useState<AiProfileHealth[]>([]);
   const [transfer, setTransfer] = useState<{ mode: "export" | "import"; text: string } | null>(null);
 
   const reload = useCallback(async () => {
-    const [nextProfiles, nextRoutes, nextDefault] = await Promise.all([
+    const [nextProfiles, nextRoutes, nextDefault, nextHealth] = await Promise.all([
       api.listAiProfiles(),
       api.listAiRoleRoutes(),
       api.getDefaultAiProfileId(),
+      typeof api.listAiProfileHealth === "function" ? api.listAiProfileHealth() : Promise.resolve([]),
     ]);
     setProfiles(nextProfiles);
     setRoutes(nextRoutes);
     setDefaultId(nextDefault);
+    setHealth(nextHealth);
   }, [api]);
 
   useEffect(() => {
@@ -212,91 +216,98 @@ export function AiProfileManager({
         <p className="muted">还没有配置来源。添加一个后，正文、规划、质检与拆书可以各自指定模型。</p>
       )}
 
-      {profiles.map((profile) => (
-        <div className="settings-form" key={profile.id}>
-          <div className="settings-actions">
-            <strong>{profile.name}</strong>
-            {profile.id === defaultId && <Badge tone="accent">默认</Badge>}
-            {!profile.enabled && <Badge tone="neutral">已停用</Badge>}
-            {profile.lastTestOk === true && <Badge tone="success">连接正常</Badge>}
-            {profile.lastTestOk === false && <Badge tone="danger">连接失败</Badge>}
-            {profile.hasApiKey ? <Badge tone="success">密钥已保存</Badge> : <Badge tone="warning">无密钥</Badge>}
-          </div>
-          <p className="muted">
-            {profile.baseUrl} · {SURFACE_LABELS[profile.apiSurface] ?? profile.apiSurface} · 默认模型{" "}
-            {profile.defaultModel || "未设置"}
-          </p>
-          {profile.lastError && <p className="muted">{profile.lastError}</p>}
-          <div className="settings-actions">
-            <Button
-              variant="secondary"
-              disabled={busyId === profile.id}
-              onClick={() =>
-                void run(profile.id, async () => {
-                  const result = await api.testAiProfile(profile.id);
-                  return result.ok ? result.message : `测试失败：${result.message}`;
-                })
-              }
-            >
-              测试连接
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={busyId === profile.id}
-              onClick={() =>
-                void run(profile.id, async () => {
-                  const models = await api.refreshAiProfileModels(profile.id);
-                  return models.length ? `已获取 ${models.length} 个模型` : "该端点没有返回模型清单，可手动填写模型名";
-                })
-              }
-            >
-              <RefreshCw size={14} /> 刷新模型
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={profile.id === defaultId || !profile.enabled}
-              onClick={() =>
-                void run(profile.id, async () => {
-                  await api.setDefaultAiProfile(profile.id);
-                  return `已把「${profile.name}」设为默认来源`;
-                })
-              }
-            >
-              <Star size={14} /> 设为默认
-            </Button>
-            <Button variant="secondary" onClick={() => openEdit(profile)}>
-              编辑
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() =>
-                void run(profile.id, async () => {
-                  await api.saveAiProfile({ ...profile, enabled: !profile.enabled });
-                  return profile.enabled ? `已停用「${profile.name}」` : `已启用「${profile.name}」`;
-                })
-              }
-            >
-              {profile.enabled ? "停用" : "启用"}
-            </Button>
-            <Button
-              variant="danger"
-              onClick={() => {
-                if (pendingDelete !== profile.id) {
-                  setPendingDelete(profile.id);
-                  return;
+      {profiles.map((profile) => {
+        const degradedUntil = health.find((item) => item.profileId === profile.id)?.degradedUntil ?? null;
+        const degraded = degradedUntil !== null && Date.parse(degradedUntil) > Date.now();
+        return (
+          <div className="settings-form" key={profile.id}>
+            <div className="settings-actions">
+              <strong>{profile.name}</strong>
+              {profile.id === defaultId && <Badge tone="accent">默认</Badge>}
+              {!profile.enabled && <Badge tone="neutral">已停用</Badge>}
+              {degraded && <Badge tone="danger">降级中</Badge>}
+              {profile.lastTestOk === true && <Badge tone="success">连接正常</Badge>}
+              {profile.lastTestOk === false && <Badge tone="danger">连接失败</Badge>}
+              {profile.hasApiKey ? <Badge tone="success">密钥已保存</Badge> : <Badge tone="warning">无密钥</Badge>}
+            </div>
+            <p className="muted">
+              {profile.baseUrl} · {SURFACE_LABELS[profile.apiSurface] ?? profile.apiSurface} · 默认模型{" "}
+              {profile.defaultModel || "未设置"}
+            </p>
+            {profile.lastError && <p className="muted">{profile.lastError}</p>}
+            <div className="settings-actions">
+              <Button
+                variant="secondary"
+                disabled={busyId === profile.id}
+                onClick={() =>
+                  void run(profile.id, async () => {
+                    const result = await api.testAiProfile(profile.id);
+                    return result.ok ? result.message : `测试失败：${result.message}`;
+                  })
                 }
-                setPendingDelete(null);
-                void run(profile.id, async () => {
-                  await api.deleteAiProfile(profile.id);
-                  return `已删除「${profile.name}」`;
-                });
-              }}
-            >
-              <Trash2 size={14} /> {pendingDelete === profile.id ? "确认删除" : "删除"}
-            </Button>
+              >
+                测试连接
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={busyId === profile.id}
+                onClick={() =>
+                  void run(profile.id, async () => {
+                    const models = await api.refreshAiProfileModels(profile.id);
+                    return models.length
+                      ? `已获取 ${models.length} 个模型`
+                      : "该端点没有返回模型清单，可手动填写模型名";
+                  })
+                }
+              >
+                <RefreshCw size={14} /> 刷新模型
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={profile.id === defaultId || !profile.enabled}
+                onClick={() =>
+                  void run(profile.id, async () => {
+                    await api.setDefaultAiProfile(profile.id);
+                    return `已把「${profile.name}」设为默认来源`;
+                  })
+                }
+              >
+                <Star size={14} /> 设为默认
+              </Button>
+              <Button variant="secondary" onClick={() => openEdit(profile)}>
+                编辑
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  void run(profile.id, async () => {
+                    await api.saveAiProfile({ ...profile, enabled: !profile.enabled });
+                    return profile.enabled ? `已停用「${profile.name}」` : `已启用「${profile.name}」`;
+                  })
+                }
+              >
+                {profile.enabled ? "停用" : "启用"}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  if (pendingDelete !== profile.id) {
+                    setPendingDelete(profile.id);
+                    return;
+                  }
+                  setPendingDelete(null);
+                  void run(profile.id, async () => {
+                    await api.deleteAiProfile(profile.id);
+                    return `已删除「${profile.name}」`;
+                  });
+                }}
+              >
+                <Trash2 size={14} /> {pendingDelete === profile.id ? "确认删除" : "删除"}
+              </Button>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       <h3>角色路由</h3>
       <p className="muted">留空表示使用默认来源与其默认模型；角色路由优先于默认来源。</p>

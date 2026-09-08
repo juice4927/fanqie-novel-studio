@@ -643,6 +643,7 @@ const schemas = {
   setDefaultAiProfile: idOnly,
   getDefaultAiProfileId: noArgs,
   listAiRoleRoutes: noArgs,
+  listAiProfileHealth: noArgs,
   setAiRoleRoute: z.tuple([
     z.enum(["draft", "plan", "review", "extract", "utility"]),
     id.nullable(),

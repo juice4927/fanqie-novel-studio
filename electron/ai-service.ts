@@ -48,6 +48,7 @@ import type {
   ResearchBook,
 } from "../src/shared/types";
 import { createDriver, type DriverRequest } from "./ai/drivers";
+import type { ProfileRuntime } from "./ai/profile-runtime";
 import { type ResolvedAiRoute, roleForTask } from "./ai/route-resolver";
 import { ProviderHttpError } from "./ai/transport";
 import type {
@@ -134,6 +135,8 @@ export class AiService {
       apiSurface: ApiSurface;
       supported: boolean;
     }) => void,
+    /** 来源熔断与并发控制（仅注入时生效）。 */
+    private readonly profileRuntime?: ProfileRuntime,
   ) {}
 
   cancelJob(id: string) {
@@ -203,6 +206,7 @@ export class AiService {
       options.onCacheHit?.();
       return options.schema.parse(JSON.parse(cached));
     }
+    if (route?.profileId) this.profileRuntime?.assertReady(route.profileId, route.profileName ?? route.profileId);
     const jobId = this.database.startAiJob(
       options.projectId,
       options.taskType,
@@ -281,6 +285,7 @@ export class AiService {
       fallbackGuard += 1;
       let attemptStartedAt = Date.now();
       let attemptUsage = { inputTokens: 0, outputTokens: 0 };
+      let releaseSlot: (() => void) | undefined;
       try {
         const activeSurface: ApiSurface = useAnthropic
           ? "anthropic-messages"
@@ -298,6 +303,12 @@ export class AiService {
           ...(route?.localEndpoint ? { localEndpoint: true } : {}),
         });
         const endpoint = driver.endpoint;
+        if (route?.profileId && this.profileRuntime)
+          releaseSlot = await this.profileRuntime.acquire(
+            route.profileId,
+            route.profileName ?? route.profileId,
+            controller.signal,
+          );
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0)
           throw new AppError("PROVIDER_TIMEOUT", `模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`);
@@ -450,6 +461,7 @@ export class AiService {
             cumulativeInputTokens: cumulativeUsage.inputTokens,
             cumulativeOutputTokens: cumulativeUsage.outputTokens,
           });
+          if (route?.profileId) this.profileRuntime?.noteSuccess(route.profileId);
           this.activeRequests.delete(jobId);
           this.cancelledJobs.delete(jobId);
           return parsed;
@@ -557,6 +569,8 @@ export class AiService {
           throw new Error(lastError);
         }
         if (lastCode === "PROVIDER_TIMEOUT" || lastError.startsWith("模型请求超时")) {
+          if (route?.profileId)
+            this.profileRuntime?.noteFailure(route.profileId, route.profileName ?? route.profileId, true);
           try {
             this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
           } finally {
@@ -630,7 +644,13 @@ export class AiService {
           continue;
         }
         break;
+      } finally {
+        releaseSlot?.();
       }
+    }
+    if (route?.profileId) {
+      const retryableFailure = lastError.startsWith("模型服务暂时不可用") || lastError.startsWith("模型请求超时");
+      this.profileRuntime?.noteFailure(route.profileId, route.profileName ?? route.profileId, retryableFailure);
     }
     try {
       this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));

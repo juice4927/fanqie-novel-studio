@@ -1037,6 +1037,9 @@ export function createBrowserApi(): AppApi {
     async listAiRoleRoutes() {
       return [];
     },
+    async listAiProfileHealth() {
+      return [];
+    },
     async setAiRoleRoute(role) {
       return { role, profileId: null, modelId: null };
     },

@@ -1,4 +1,11 @@
-import type { AiProfileView, AiRoleRoute, ApiSurfacePreference, ModelRole, TaskModelOverride } from "./ai/types";
+import type {
+  AiProfileHealth,
+  AiProfileView,
+  AiRoleRoute,
+  ApiSurfacePreference,
+  ModelRole,
+  TaskModelOverride,
+} from "./ai/types";
 import type { GenerationQuality } from "./generation-quality";
 import type { GenreComposition, NarrativeGenre } from "./genre-composition";
 import type { CHAPTER_STATUSES, PROJECT_STATUSES } from "./status-constants";
@@ -1013,6 +1020,7 @@ export interface AppApi {
   setDefaultAiProfile(id: string): Promise<void>;
   getDefaultAiProfileId(): Promise<string | null>;
   listAiRoleRoutes(): Promise<AiRoleRoute[]>;
+  listAiProfileHealth(): Promise<AiProfileHealth[]>;
   setAiRoleRoute(role: ModelRole, profileId: string | null, modelId: string | null): Promise<AiRoleRoute>;
   testAiProfile(id: string): Promise<{ ok: boolean; message: string }>;
   refreshAiProfileModels(id: string): Promise<string[]>;

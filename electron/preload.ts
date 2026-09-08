@@ -96,6 +96,7 @@ const api: AppApi = {
   setDefaultAiProfile: (id) => invoke("setDefaultAiProfile", id),
   getDefaultAiProfileId: () => invoke("getDefaultAiProfileId"),
   listAiRoleRoutes: () => invoke("listAiRoleRoutes"),
+  listAiProfileHealth: () => invoke("listAiProfileHealth"),
   setAiRoleRoute: (role, profileId, modelId) => invoke("setAiRoleRoute", role, profileId, modelId),
   testAiProfile: (id) => invoke("testAiProfile", id),
   refreshAiProfileModels: (id) => invoke("refreshAiProfileModels", id),
