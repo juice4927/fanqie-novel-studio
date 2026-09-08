@@ -1,5 +1,6 @@
 import { missingContractApprovalFields } from "./contract-service";
 import { PROTAGONIST_ROLES, TONE_TAGS } from "./creation-options";
+import { CHAPTERS_PER_LADDER_LEVEL, type CreationPreset } from "./creation-presets";
 import { type FanqieCategoryProfile, type FanqieSubGenreProfile, getFanqieCategoryProfile } from "./fanqie-taxonomy";
 import type { BookConceptSkeleton, IncubationCandidate, StoryContract } from "./types";
 
@@ -23,6 +24,8 @@ export interface IncubationReviewInput {
   skeleton?: BookConceptSkeleton | null;
   existingContracts?: Array<{ title: string; premise: string; openingMechanism: string }>;
   tagStats?: string[];
+  /** 分类/篇幅形态预设；缺省时退回分类画像与全局阈值。 */
+  preset?: CreationPreset;
 }
 
 const VAGUE_OPENING_WORDS = ["命运", "宿命", "觉醒", "神秘力量", "冥冥之中", "不知为何", "忽然之间"];
@@ -194,7 +197,7 @@ export function reviewIncubationCandidate(input: IncubationReviewInput): Incubat
 
   // 5 首个回报窗口
   if (category) {
-    const [from, to] = category.firstPayoffWindow;
+    const [from, to] = input.preset?.structure.firstPayoffWindow ?? category.firstPayoffWindow;
     const payoffChapter = candidate.openingDesign.firstPayoffChapter;
     const late = payoffChapter - to;
     findings.push(
@@ -264,14 +267,15 @@ export function reviewIncubationCandidate(input: IncubationReviewInput): Incubat
 
   // 7 发动机容量
   const perChapter = input.wordsPerChapter > 0 ? input.wordsPerChapter : 2500;
-  const capacity = ladder.length * 60 * perChapter;
+  const chaptersPerLevel = input.preset ? CHAPTERS_PER_LADDER_LEVEL[input.preset.lengthShape] : 60;
+  const capacity = ladder.length * chaptersPerLevel * perChapter;
   findings.push(
     input.targetWords > capacity
       ? finding(
           "engine-capacity",
           "发动机容量",
           "警告",
-          `按 ${ladder.length} 级、每级约 60 章估算，可承载约 ${Math.round(capacity / 10000)} 万字，低于目标 ${Math.round(input.targetWords / 10000)} 万字。`,
+          `按 ${ladder.length} 级、每级约 ${chaptersPerLevel} 章估算，可承载约 ${Math.round(capacity / 10000)} 万字，低于目标 ${Math.round(input.targetWords / 10000)} 万字。`,
           "增加升级层级，或把每级的可承载章节量写得更具体。",
         )
       : finding("engine-capacity", "发动机容量", "通过", "升级阶梯与目标字数匹配。", ""),
@@ -465,7 +469,7 @@ export function reviewIncubationCandidate(input: IncubationReviewInput): Incubat
 
   // 18 单章字数匹配
   if (category) {
-    const [min, max] = category.typicalChapterWords;
+    const [min, max] = input.preset?.structure.chapterWords ?? category.typicalChapterWords;
     findings.push(
       input.wordsPerChapter >= min && input.wordsPerChapter <= max
         ? finding("chapter-words", "单章字数匹配", "通过", `单章 ${input.wordsPerChapter} 字在分类参考区间内。`, "")

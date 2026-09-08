@@ -224,6 +224,8 @@ export interface StoryContract extends GenreComposition {
   premise: string;
   genreSubtype?: string;
   fanqieCategoryKey?: string;
+  /** 开书时选定的篇幅形态；决定规划期的阶段与分卷区间。 */
+  lengthShape?: string;
   audience?: string;
   commercialHook?: string;
   openingMechanism?: string;
@@ -236,6 +238,8 @@ export interface StoryContract extends GenreComposition {
   worldRules?: string[];
   majorForces?: string[];
   timelineAnchors?: string[];
+  /** 题材专属骨架栏目；不进审批必填项。 */
+  genreSpecificSections?: SkeletonSection[];
   readerPromise: string;
   coreEmotion: string;
   ending: string;
@@ -578,6 +582,8 @@ export interface BookConceptInput extends GenreComposition {
   safeStockLine?: number;
   updateCadence: string;
   seed: string;
+  /** 本次生成几套候选：探索 3、定向 2、直达 1；缺省 3。 */
+  candidateCount?: number;
 }
 
 export type { NarrativeGenre };
@@ -647,17 +653,26 @@ export interface IncubationCandidate extends BookConceptCandidate {
   suggestedTags: string[];
 }
 
+export interface SkeletonSection {
+  label: string;
+  items: string[];
+}
+
 export interface BookConceptSkeleton {
   protagonistArc: string;
   keyRelationships: string[];
   worldRules: string[];
   majorForces: string[];
   timelineAnchors: string[];
+  /** 题材专属栏目；不同题材的骨架栏目不同。 */
+  genreSpecificSections?: SkeletonSection[];
 }
 
 export interface CreateProjectInput extends GenreComposition {
   title: string;
   genre: Genre;
+  /** 开书时选定的篇幅形态；缺省跟随分类推荐。 */
+  lengthShape?: string;
   targetWords: number;
   wordsPerChapter?: number;
   updateCadence: string;

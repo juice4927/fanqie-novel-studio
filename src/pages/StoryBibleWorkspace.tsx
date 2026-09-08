@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Field, Input, Select, Textarea } from "../components/UI";
 import { describeError } from "../lib/error-message";
 import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
+import { LENGTH_SHAPES } from "../shared/creation-options";
+import { resolveCreationPreset } from "../shared/creation-presets";
 import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
 import { GENRE_ELEMENT_GROUPS, NARRATIVE_GENRES } from "../shared/genre-composition";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
@@ -31,6 +33,7 @@ function splitLines(value: string) {
 
 const normalizeContract = (value: StoryContract): StoryContract => ({
   ...value,
+  lengthShape: value.lengthShape ?? "",
   secondaryGenres: value.secondaryGenres ?? [],
   genreElements: value.genreElements ?? [],
   customGenreDirection: value.customGenreDirection ?? "",
@@ -45,6 +48,7 @@ const normalizeContract = (value: StoryContract): StoryContract => ({
   worldRules: value.worldRules ?? [],
   majorForces: value.majorForces ?? [],
   timelineAnchors: value.timelineAnchors ?? [],
+  genreSpecificSections: value.genreSpecificSections ?? [],
   majorStateChanges: value.majorStateChanges ?? { include: [], exclude: [] },
   aestheticProfile: normalizeAestheticProfile(value.aestheticProfile),
   guidanceMode: value.guidanceMode ?? "均衡",
@@ -137,6 +141,8 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
               setContract((current) => ({
                 ...current,
                 fanqieCategoryKey: event.target.value,
+                lengthShape:
+                  current.lengthShape || resolveCreationPreset({ categoryKey: event.target.value }).lengthShape,
                 genreSubtype: current.genreSubtype || profile?.recommendedSubtype || "",
                 secondaryGenres: current.secondaryGenres?.length
                   ? current.secondaryGenres
@@ -156,6 +162,16 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
                     </option>
                   ))}
               </optgroup>
+            ))}
+          </Select>
+        </Field>
+        <Field label="篇幅形态" hint="决定规划期的阶段与分卷区间；保存契约后生效，留空则跟随分类推荐">
+          <Select value={contract.lengthShape ?? ""} onChange={(event) => set("lengthShape", event.target.value)}>
+            <option value="">跟随分类推荐</option>
+            {LENGTH_SHAPES.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.name}
+              </option>
             ))}
           </Select>
         </Field>
@@ -423,6 +439,31 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
             </Field>
           ))}
         </div>
+        {(contract.genreSpecificSections ?? []).length > 0 && (
+          <div className="form-grid two">
+            {(contract.genreSpecificSections ?? []).map((section, index) => (
+              <Field key={section.label} label={section.label} hint="每行一条">
+                <Textarea
+                  rows={4}
+                  value={section.items.join("\n")}
+                  onChange={(event) =>
+                    setContract((current) => {
+                      const next = [...(current.genreSpecificSections ?? [])];
+                      next[index] = {
+                        ...section,
+                        items: event.target.value
+                          .split("\n")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
+                      };
+                      return { ...current, genreSpecificSections: next };
+                    })
+                  }
+                />
+              </Field>
+            ))}
+          </div>
+        )}
         <div className="bible-subsection-heading">
           <div>
             <h2>审美设定</h2>

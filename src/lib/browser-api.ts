@@ -370,7 +370,8 @@ export function createBrowserApi(): AppApi {
           suggestedTags: ["乡村", "种田", "女性成长", "经营", "创业"],
         },
       ];
-      return ideas.map(([title, premise], index) => {
+      const count = Math.min(3, Math.max(1, input.candidateCount ?? 3));
+      return ideas.slice(0, count).map(([title, premise], index) => {
         const route = routes[index];
         return {
           id: id(),

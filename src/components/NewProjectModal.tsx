@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { describeError } from "../lib/error-message";
 import type { CategoryTagStat } from "../shared/category-tags";
 import {
-  DEFAULT_WORDS_PER_CHAPTER,
   dedupePositioningTags,
   LENGTH_SHAPES,
   MAX_WORDS_PER_CHAPTER,
@@ -15,11 +14,12 @@ import {
   positioningTagOwners,
   TONE_TAGS,
 } from "../shared/creation-options";
+import { resolveCreationPreset, TARGET_WORD_PRESETS } from "../shared/creation-presets";
 import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile, listFanqieSubGenres } from "../shared/fanqie-taxonomy";
 import { NARRATIVE_GENRES, type NarrativeGenre, PRIMARY_GENRE_ELEMENT_GROUPS } from "../shared/genre-composition";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
-import type { IncubationPositioning } from "../shared/incubation";
-import { positioningToConceptInput } from "../shared/incubation";
+import type { IncubationPath, IncubationPositioning } from "../shared/incubation";
+import { candidateCountForPath, positioningToConceptInput } from "../shared/incubation";
 import { blockingFindings, reviewIncubationCandidate, summarizeFindings } from "../shared/incubation-review";
 import type {
   AppApi,
@@ -33,25 +33,32 @@ import { Badge, Button, Field, Input, Modal, Segmented, Select, Textarea } from 
 
 type CreateMode = "AI 从零开书" | "手动创建";
 
-const TARGET_WORD_PRESETS = [1_000_000, 1_500_000, 3_000_000];
+/** 开书路径：作者带多少信息进来，决定出几套方案。 */
+const PATH_OPTIONS = [
+  { value: "探索", label: "没想法，出三套" },
+  { value: "定向", label: "有方向，出两套" },
+  { value: "直达", label: "有想法，出一套" },
+] as const satisfies ReadonlyArray<{ value: IncubationPath; label: string }>;
 
+/** 打开面板即用首个分类的推荐值；分类差异从第一步就可见。 */
 function defaultPositioning(): IncubationPositioning {
   const category = FANQIE_CATEGORY_PROFILES[0];
+  const preset = resolveCreationPreset({ categoryKey: category.key });
   return {
     genre: category.genre,
     fanqieCategoryKey: category.key,
     subGenreIds: [],
-    openingArchetype: OPENING_ARCHETYPES[0],
-    lengthShape: LENGTH_SHAPES[0].name,
-    narrativePerson: NARRATIVE_PERSONS[0],
-    protagonistRoles: [],
-    toneTags: [],
+    openingArchetype: preset.openingArchetypes[0],
+    lengthShape: preset.lengthShape,
+    narrativePerson: preset.narrativePerson,
+    protagonistRoles: [...preset.protagonistRoles],
+    toneTags: [...preset.toneTags],
     secondaryGenres: [...category.narrativeGenres],
     genreElements: [...category.genreElements],
     customGenreDirection: "",
-    targetWords: 1_000_000,
-    wordsPerChapter: DEFAULT_WORDS_PER_CHAPTER,
-    updateCadence: "每日 2 章",
+    targetWords: preset.targetWords,
+    wordsPerChapter: preset.structure.chapterWords[0],
+    updateCadence: preset.updateCadence,
     safeStockLine: 10,
     readerPersona: category.readerAgeBand,
     readerPromise: category.baselineDelta?.readerPromise ?? "",
@@ -105,13 +112,38 @@ export function NewProjectModal({
   const [signatures, setSignatures] = useState<Array<{ title: string; premise: string; openingMechanism: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [busyMessage, setBusyMessage] = useState("正在处理…");
+  const [path, setPath] = useState<IncubationPath>(initialDraft?.path ?? "探索");
+  const pathOption = PATH_OPTIONS.find((item) => item.value === path) ?? PATH_OPTIONS[0];
 
   const category = getFanqieCategoryProfile(positioning.fanqieCategoryKey);
   const subGenreOptions = listFanqieSubGenres(positioning.fanqieCategoryKey);
   const plugin = GENRE_PLUGINS[positioning.genre];
+  const preset = useMemo(
+    () =>
+      resolveCreationPreset({
+        categoryKey: positioning.fanqieCategoryKey,
+        subGenreIds: positioning.subGenreIds,
+      }),
+    [positioning.fanqieCategoryKey, positioning.subGenreIds],
+  );
+  const recommended = useMemo(
+    () => ({
+      openings: new Set<string>(preset.openingArchetypes),
+      lengthShapes: new Set<string>([preset.lengthShape]),
+      narrativePersons: new Set<string>([preset.narrativePerson]),
+      tones: new Set<string>(preset.toneTags),
+      roles: new Set<string>(preset.protagonistRoles),
+      narrativeGenres: new Set<string>(category?.narrativeGenres ?? []),
+      elements: new Set<string>(category?.genreElements ?? []),
+    }),
+    [preset, category],
+  );
   const selected = concepts.find((item) => item.id === selectedId) ?? null;
   const selectedSubGenres = subGenreOptions.filter((item) => selected?.subGenreIds.includes(item.id));
   const tagOwners = useMemo(() => positioningTagOwners(positioning), [positioning]);
+  /** 推荐项排到前面，其余保持原顺序；不隐藏任何选项。 */
+  const rankByRecommended = <T,>(items: readonly T[], isRecommended: (item: T) => boolean) =>
+    [...items].sort((left, right) => Number(isRecommended(right)) - Number(isRecommended(left)));
   /** 该标签已被更高优先级的层占用时返回来源，用于置灰并提示。 */
   const claimedBy = (label: string, layer: PositioningTagSource) => {
     const owner = tagOwners.get(label);
@@ -130,9 +162,10 @@ export function NewProjectModal({
             skeleton: null,
             tagStats: category?.tags,
             existingContracts: signatures,
+            preset,
           })
         : [],
-    [selected, positioning.targetWords, positioning.wordsPerChapter, category, selectedSubGenres, signatures],
+    [selected, positioning.targetWords, positioning.wordsPerChapter, category, selectedSubGenres, signatures, preset],
   );
   const summary = summarizeFindings(findings);
   const blocking = blockingFindings(findings, acknowledged);
@@ -212,26 +245,36 @@ export function NewProjectModal({
   const selectCategory = (key: string) => {
     const profile = getFanqieCategoryProfile(key);
     if (!profile) return;
+    const preset = resolveCreationPreset({ categoryKey: key });
     patch({
       fanqieCategoryKey: key,
       subGenreIds: [],
+      openingArchetype: preset.openingArchetypes[0],
+      lengthShape: preset.lengthShape,
+      narrativePerson: preset.narrativePerson,
+      protagonistRoles: [...preset.protagonistRoles],
+      toneTags: [...preset.toneTags],
       secondaryGenres: [...profile.narrativeGenres],
       genreElements: [...profile.genreElements],
-      wordsPerChapter: profile.typicalChapterWords[0],
+      targetWords: preset.targetWords,
+      wordsPerChapter: preset.structure.chapterWords[0],
+      updateCadence: preset.updateCadence,
       readerPersona: profile.readerAgeBand,
       readerPromise: profile.baselineDelta?.readerPromise ?? "",
     });
   };
 
   const generate = async () => {
-    setBusyMessage("正在构思三套方案…");
+    setBusyMessage(path === "直达" ? "正在按你的设定立项…" : "正在构思开书方案…");
     setBusy(true);
     try {
       const next = await api.generateBookConcepts(
-        positioningToConceptInput(positioning, seed, {
-          insightIds: evidenceInsights,
-          notes: evidenceOpportunities,
-        }),
+        positioningToConceptInput(
+          positioning,
+          seed,
+          { insightIds: evidenceInsights, notes: evidenceOpportunities },
+          candidateCountForPath(path),
+        ),
       );
       setConcepts(next);
       setSelectedId(next[0]?.id ?? null);
@@ -254,10 +297,12 @@ export function NewProjectModal({
           project = await api.promoteIncubation(draftId);
         } else {
           project = await api.createProjectFromConcept(
-            positioningToConceptInput(positioning, seed, {
-              insightIds: evidenceInsights,
-              notes: evidenceOpportunities,
-            }),
+            positioningToConceptInput(
+              positioning,
+              seed,
+              { insightIds: evidenceInsights, notes: evidenceOpportunities },
+              candidateCountForPath(path),
+            ),
             selected,
           );
         }
@@ -267,6 +312,7 @@ export function NewProjectModal({
           genre: positioning.genre,
           targetWords: positioning.targetWords,
           wordsPerChapter: positioning.wordsPerChapter,
+          lengthShape: positioning.lengthShape,
           updateCadence: positioning.updateCadence,
           safeStockLine: positioning.safeStockLine,
           secondaryGenres: positioning.secondaryGenres,
@@ -285,6 +331,7 @@ export function NewProjectModal({
     id: draftId ?? crypto.randomUUID(),
     status: "孵化中",
     step: "体检",
+    path,
     positioning,
     evidence: {
       insightIds: evidenceInsights,
@@ -400,6 +447,11 @@ export function NewProjectModal({
               <span>常见毒点：{category.clicheTraps.join("；")}</span>
             </div>
           )}
+          <div className="positioning-reset">
+            <Button variant="secondary" disabled={busy} onClick={() => selectCategory(positioning.fanqieCategoryKey)}>
+              用分类推荐值重置
+            </Button>
+          </div>
         </details>
         <details className="positioning-group" open>
           <summary>
@@ -506,8 +558,10 @@ export function NewProjectModal({
                 onChange={(event) => patch({ openingArchetype: event.target.value })}
                 disabled={busy}
               >
-                {OPENING_ARCHETYPES.map((item) => (
-                  <option key={item}>{item}</option>
+                {rankByRecommended(OPENING_ARCHETYPES, (item) => recommended.openings.has(item)).map((item) => (
+                  <option key={item} value={item}>
+                    {recommended.openings.has(item) ? `${item}（推荐）` : item}
+                  </option>
                 ))}
               </Select>
             </Field>
@@ -517,8 +571,11 @@ export function NewProjectModal({
                 onChange={(event) => patch({ lengthShape: event.target.value })}
                 disabled={busy}
               >
-                {LENGTH_SHAPES.map((item) => (
-                  <option key={item.name}>{item.name}</option>
+                {rankByRecommended(LENGTH_SHAPES, (item) => recommended.lengthShapes.has(item.name)).map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {item.name}
+                    {recommended.lengthShapes.has(item.name) ? "（推荐）" : ""}
+                  </option>
                 ))}
               </Select>
             </Field>
@@ -528,20 +585,24 @@ export function NewProjectModal({
                 onChange={(event) => patch({ narrativePerson: event.target.value })}
                 disabled={busy}
               >
-                {NARRATIVE_PERSONS.map((item) => (
-                  <option key={item}>{item}</option>
+                {rankByRecommended(NARRATIVE_PERSONS, (item) => recommended.narrativePersons.has(item)).map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                    {recommended.narrativePersons.has(item) ? "（推荐）" : ""}
+                  </option>
                 ))}
               </Select>
             </Field>
           </div>
           <Field label="复合叙事类型" hint="最多 3 项；决定主要冲突与情绪体验；灰色项已在更高优先级的选择中出现">
             <div className="genre-option-grid">
-              {NARRATIVE_GENRES.map((genre) => {
+              {rankByRecommended(NARRATIVE_GENRES, (genre) => recommended.narrativeGenres.has(genre)).map((genre) => {
                 const owner = claimedBy(genre, "复合叙事类型");
+                const isRecommended = recommended.narrativeGenres.has(genre);
                 return (
                   <label
                     key={genre}
-                    className={`check-row${owner ? " claimed" : ""}`}
+                    className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
                     title={owner ? `已在「${owner}」中选择` : undefined}
                   >
                     <input
@@ -557,6 +618,7 @@ export function NewProjectModal({
                       }
                     />
                     {genre}
+                    {isRecommended && <small className="preset-badge">推荐</small>}
                   </label>
                 );
               })}
@@ -568,12 +630,13 @@ export function NewProjectModal({
           {PRIMARY_GENRE_ELEMENT_GROUPS.map((group) => (
             <Field key={group.label} label={group.label} hint="按需多选，不会要求每章都出现">
               <div className="genre-option-grid">
-                {group.elements.map((element) => {
+                {rankByRecommended(group.elements, (element) => recommended.elements.has(element)).map((element) => {
                   const owner = claimedBy(element, "题材元素");
+                  const isRecommended = recommended.elements.has(element);
                   return (
                     <label
                       key={element}
-                      className={`check-row${owner ? " claimed" : ""}`}
+                      className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
                       title={owner ? `已在「${owner}」中选择` : undefined}
                     >
                       <input
@@ -587,6 +650,7 @@ export function NewProjectModal({
                         onChange={() => patch({ genreElements: toggleValue(positioning.genreElements, element, 8) })}
                       />
                       {element}
+                      {isRecommended && <small className="preset-badge">推荐</small>}
                     </label>
                   );
                 })}
@@ -596,12 +660,13 @@ export function NewProjectModal({
           <div className="form-grid three">
             <Field label="主角身份" hint="最多 2 项">
               <div className="genre-option-grid compact">
-                {PROTAGONIST_ROLES.map((role) => {
+                {rankByRecommended(PROTAGONIST_ROLES, (role) => recommended.roles.has(role)).map((role) => {
                   const owner = claimedBy(role, "主角身份");
+                  const isRecommended = recommended.roles.has(role);
                   return (
                     <label
                       key={role}
-                      className={`check-row${owner ? " claimed" : ""}`}
+                      className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
                       title={owner ? `已在「${owner}」中选择` : undefined}
                     >
                       <input
@@ -615,6 +680,7 @@ export function NewProjectModal({
                         onChange={() => patch({ protagonistRoles: toggleValue(positioning.protagonistRoles, role, 2) })}
                       />
                       {role}
+                      {isRecommended && <small className="preset-badge">推荐</small>}
                     </label>
                   );
                 })}
@@ -622,12 +688,13 @@ export function NewProjectModal({
             </Field>
             <Field label="情绪基调" hint="最多 2 项">
               <div className="genre-option-grid compact">
-                {TONE_TAGS.map((tone) => {
+                {rankByRecommended(TONE_TAGS, (tone) => recommended.tones.has(tone)).map((tone) => {
                   const owner = claimedBy(tone, "情绪基调");
+                  const isRecommended = recommended.tones.has(tone);
                   return (
                     <label
                       key={tone}
-                      className={`check-row${owner ? " claimed" : ""}`}
+                      className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
                       title={owner ? `已在「${owner}」中选择` : undefined}
                     >
                       <input
@@ -641,6 +708,7 @@ export function NewProjectModal({
                         onChange={() => patch({ toneTags: toggleValue(positioning.toneTags, tone, 2) })}
                       />
                       {tone}
+                      {isRecommended && <small className="preset-badge">推荐</small>}
                     </label>
                   );
                 })}
@@ -717,8 +785,29 @@ export function NewProjectModal({
         ) : (
           <>
             <Field
-              label="你已有的灵感（可不填）"
-              hint={`系统以 ${positioning.genre} 与所选分类为商业基线；可只写一句人物、情境或想要的情绪。`}
+              label="开书路径"
+              hint={
+                path === "直达"
+                  ? "只出一套方案，严格按你的灵感落地；需要先写下你的想法。"
+                  : path === "定向"
+                    ? "出两套方案，都围绕你的灵感展开，差异门禁放宽到两维。"
+                    : "出三套方案，保持完整的差异门禁。"
+              }
+            >
+              <Segmented
+                options={PATH_OPTIONS.map((item) => item.label)}
+                value={pathOption.label}
+                onChange={(label) => setPath(PATH_OPTIONS.find((item) => item.label === label)?.value ?? "探索")}
+                disabled={busy}
+              />
+            </Field>
+            <Field
+              label={path === "直达" ? "你的完整想法（必填）" : "你已有的灵感（可不填）"}
+              hint={
+                path === "直达"
+                  ? "写清人物、处境、核心冲突与边界；这一套方案会严格按它生成，不会另起炉灶。"
+                  : `系统以 ${positioning.genre} 与所选分类为商业基线；可只写一句人物、情境或想要的情绪。`
+              }
             >
               <Textarea
                 value={seed}
@@ -735,15 +824,27 @@ export function NewProjectModal({
               <div className="wizard-generate">
                 <Sparkles size={24} />
                 <div>
-                  <strong>AI 会先给出 3 套完整开书方案</strong>
+                  <strong>
+                    {path === "直达"
+                      ? "AI 会按你的设定生成一套完整方案"
+                      : path === "定向"
+                        ? "AI 会围绕你的灵感给出两套方案"
+                        : "AI 会先给出三套完整开书方案"}
+                  </strong>
                   <span>每套包含书名候选、故事前提、开局设计、升级阶梯、差异化说明与未审批创作契约。</span>
                 </div>
                 <Button
                   icon={busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-                  disabled={busy}
+                  disabled={busy || (path === "直达" && !seed.trim())}
                   onClick={generate}
                 >
-                  {busy ? "正在构思…" : "生成三套方案"}
+                  {busy
+                    ? "正在构思…"
+                    : path === "直达"
+                      ? "按我的设定生成一套"
+                      : path === "定向"
+                        ? "生成两套方案"
+                        : "生成三套方案"}
                 </Button>
               </div>
             ) : (

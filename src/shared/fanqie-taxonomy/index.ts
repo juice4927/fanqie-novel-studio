@@ -1,15 +1,17 @@
+import { FANQIE_CREATION_PRESETS } from "./creation-presets";
 import { FEMALE_CATEGORY_PROFILES } from "./female";
 import { MALE_CATEGORY_PROFILES } from "./male";
 import { FANQIE_SUBGENRE_SEEDS } from "./subgenres";
 import type { FanqieCategoryProfile, FanqieChannel, FanqieRankKind, FanqieSubGenreProfile } from "./types";
 
+export { FANQIE_CREATION_PRESETS } from "./creation-presets";
 export * from "./types";
 
 /** 番茄榜单分类（categoryId 与线上公开榜单页核对一致）。 */
 export const FANQIE_CATEGORY_PROFILES: FanqieCategoryProfile[] = [
   ...MALE_CATEGORY_PROFILES,
   ...FEMALE_CATEGORY_PROFILES,
-];
+].map((profile) => ({ ...profile, creationPreset: FANQIE_CREATION_PRESETS[profile.key] ?? profile.creationPreset }));
 
 const categoryByKey = new Map(FANQIE_CATEGORY_PROFILES.map((profile) => [profile.key, profile]));
 

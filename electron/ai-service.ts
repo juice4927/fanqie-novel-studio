@@ -9,10 +9,12 @@ import {
 } from "../src/shared/commercial-knowledge";
 import { renderContextForPrompt } from "../src/shared/context-compiler";
 import { compilePositioningCard } from "../src/shared/creation-options";
+import { resolveStructurePreset } from "../src/shared/creation-presets";
 import { AppError, isAppError } from "../src/shared/error-codes";
 import { getFanqieCategoryProfile, listFanqieSubGenres } from "../src/shared/fanqie-taxonomy";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
+import { GENRE_SKELETON_SECTIONS } from "../src/shared/genre-skeleton-sections";
 import {
   compileBeatSuggestion,
   compileGuidanceModeInstruction,
@@ -931,7 +933,23 @@ export class AiService {
     const defaultMotifBoundary = allowDebtAccounting
       ? "作者已明确选择债务或账目相关内容，可以据此创作，但仍需避免重复套路。"
       : "作者没有选择债务或账目题材。不得把债务、欠款、欠薪、讨债、催收、还债、清账、旧账、账本或清算作为人物困境、开局钩子、能力隐喻、冲突主线或成长载体；请从身份、生存、竞争、关系、规则、探索、技艺、责任或外部危机中选择更贴合题材的压力。";
-    const system = `你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案要在主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机中至少有四项实质不同，避免共享同一套升级换皮结构。genreSubtype 分别概括三条不同路线，用词差异要对应真实差异。书名应清楚传达题材、身份反差或核心看点，并避开已有作品、热榜书名和独特设定。结局要明确主线如何收束，而不是开放式占位语。
+    const count = Math.min(3, Math.max(1, input.candidateCount ?? 3));
+    const countLabel = count === 1 ? "一套" : count === 2 ? "两套" : "三套";
+    const diversityBrief =
+      count >= 3
+        ? "各案要在主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机中至少有四项实质不同，避免共享同一套升级换皮结构。"
+        : count === 2
+          ? "两案要在核心矛盾、开局触发、成长载体和主要回报中至少两项实质不同，不要只换名字。"
+          : "作者已经带来明确想法，只产出一套可直接立项的方案，必须忠实体现作者灵感中的核心设定（人物、处境、情绪与边界），不得替换成通用套路。";
+    const seedFidelity =
+      count < 3 && input.seed.trim()
+        ? "每个方案都必须体现作者灵感中的核心设定，不得把它替换成通用开局或通用身份。"
+        : "";
+    const payoffWindow = resolveStructurePreset({
+      categoryKey: input.fanqieCategoryKey,
+      wordsPerChapter: input.wordsPerChapter,
+    }).firstPayoffWindow;
+    const system = `你是面向番茄小说的原创商业网文总编。为作者提供${countLabel}可立项方案。${diversityBrief}${seedFidelity}genreSubtype 分别概括每条不同路线，用词差异要对应真实差异。书名应清楚传达题材、身份反差或核心看点，并避开已有作品、热榜书名和独特设定。结局要明确主线如何收束，而不是开放式占位语。
 每个方案还必须给出：
 - titleOptions：3–5 个书名候选，每个含标题、为什么这样起名、建议标签。
 - openingDesign：首章钩子（谁在什么处境下做了什么选择、立刻产生什么后果）、前三章向读者承诺什么、首个实质回报落在第几章、2–4 个追读锚点。
@@ -940,15 +958,15 @@ export class AiService {
 - differentiation：与同类常见套路的三点差异、原创风险、风险说明。
 - suggestedTags：读者会用来搜索这本书的标签。
 首章钩子必须具体到事件与选择，不得使用"命运、宿命、觉醒、神秘力量"这类空泛表述；首个回报章必须落在所选分类的建议窗口内。${defaultMotifBoundary}`;
-    const baseUser = `平台主题材：${input.genre}\n番茄分类：${category ? `${category.channel}·${category.name}` : "未指定"}\n定位卡：${compilePositioningCard(input)}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。三个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n单章目标字数：${input.wordsPerChapter ?? 2500}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, fanqieCategoryKey: input.fanqieCategoryKey, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n${subGenreOptions.length ? `可选二级流派（最多选 2 个，id 必须来自此列表）：${subGenreOptions.map((item) => `${item.id}=${item.name}`).join("、")}` : "二级流派：无"}${insights.length ? `\n脱敏市场洞察（只作读者需求证据，不得复述或模仿任何具体作品）：${JSON.stringify(insights)}` : ""}\n输出 candidates，严格三项。fanqieCategoryKey 必须等于「${input.fanqieCategoryKey ?? ""}」；subGenreIds 只能从上面列表里选，最多两个。先在内部为三案分别确定叙事主轴、开局机制、成长载体和主要回报，确认至少四项互不相同后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，每个方案的 secondaryGenres 都必须包含作者所选类型，但三案仍须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、secondaryGenres、genreElements、openingMechanism、growthCarrier、primaryPayoff、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine，以及 fanqieCategoryKey、subGenreIds、titleOptions、openingDesign、escalationLadder、sustainability、differentiation、suggestedTags。secondaryGenres 必须使用给定的叙事主轴枚举。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`;
+    const baseUser = `平台主题材：${input.genre}\n番茄分类：${category ? `${category.channel}·${category.name}` : "未指定"}\n定位卡：${compilePositioningCard(input)}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。每个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n单章目标字数：${input.wordsPerChapter ?? 2500}\n首个实质回报必须落在第 ${payoffWindow[0]}–${payoffWindow[1]} 章\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, fanqieCategoryKey: input.fanqieCategoryKey, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n${subGenreOptions.length ? `可选二级流派（最多选 2 个，id 必须来自此列表）：${subGenreOptions.map((item) => `${item.id}=${item.name}`).join("、")}` : "二级流派：无"}${insights.length ? `\n脱敏市场洞察（只作读者需求证据，不得复述或模仿任何具体作品）：${JSON.stringify(insights)}` : ""}\n输出 candidates，严格${count}项。fanqieCategoryKey 必须等于「${input.fanqieCategoryKey ?? ""}」；subGenreIds 只能从上面列表里选，最多两个。先在内部为每个方案分别确定叙事主轴、开局机制、成长载体和主要回报，确认差异达标后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，每个方案的 secondaryGenres 都必须包含作者所选类型，但各方案仍须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、secondaryGenres、genreElements、openingMechanism、growthCarrier、primaryPayoff、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine，以及 fanqieCategoryKey、subGenreIds、titleOptions、openingDesign、escalationLadder、sustainability、differentiation、suggestedTags。secondaryGenres 必须使用给定的叙事主轴枚举。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`;
     const run = (retryIssues?: string[]) =>
       this.runJson({
         projectId: null,
         taskType: retryIssues ? "generate-book-concepts-diversity-retry" : "generate-book-concepts",
-        inputSummary: `${input.genre} 从零开书三案${retryIssues ? "差异重试" : ""}`,
+        inputSummary: `${input.genre} 从零开书${countLabel}${retryIssues ? "差异重试" : ""}`,
         system,
         user: retryIssues
-          ? `${baseUser}\n上一次方案未通过差异检查：${retryIssues.join("；")}。请完全重做三案，不要只改名称。`
+          ? `${baseUser}\n上一次方案未通过检查：${retryIssues.join("；")}。请完全重做，不要只改名称。`
           : baseUser,
         schema: BookConceptSchema,
         longTask: true,
@@ -962,6 +980,7 @@ export class AiService {
           : [`部分方案未保留作者选择的叙事主轴：${genre}`],
       );
     const collectIssues = (candidates: GeneratedBookConcept[]) => [
+      ...(candidates.length === count ? [] : [`模型返回 ${candidates.length} 套方案，预期 ${count} 套`]),
       ...conceptDiversityIssues(candidates, !input.secondaryGenres?.length),
       ...selectionIssues(candidates),
       ...conceptDefaultMotifIssues(candidates, allowDebtAccounting),
@@ -972,7 +991,7 @@ export class AiService {
       result = await run(issues);
       issues = collectIssues(result.candidates);
       if (issues.length)
-        throw new Error(`三套方案未通过立项检查：${issues.join("；")}。请补充更具体的复合类型或自定义方向后重试。`);
+        throw new Error(`开书方案未通过立项检查：${issues.join("；")}。请补充更具体的复合类型或自定义方向后重试。`);
     }
     return result.candidates.map((candidate) => ({
       ...candidate,
@@ -988,6 +1007,7 @@ export class AiService {
     const defaultMotifBoundary = authorRequestsDebtAccounting(input)
       ? ""
       : "作者没有选择债务或账目题材，不得在扩展时新增欠债、欠款、讨债、清账、旧账、账本或清算等冲突与隐喻。";
+    const sections = GENRE_SKELETON_SECTIONS[input.genre] ?? [];
     return this.runJson({
       projectId: null,
       taskType: "expand-book-concept-skeleton",
@@ -1001,7 +1021,7 @@ export class AiService {
         "时间锚点必须覆盖开局前因、开局触发、至少一个中期不可逆节点和终局兑现，使用相对阶段，不要编造具体公历日期。",
         "各项要能直接进入故事圣经，不写空泛的‘关系逐渐加深、世界更加广阔、经历重重困难’。",
       ].join("\n"),
-      user: `平台主题材：${input.genre}\n复合叙事类型：${concept.secondaryGenres.join(" + ")}\n题材元素：${concept.genreElements.join("、") || "无固定元素"}\n自定义方向：${input.customGenreDirection?.trim() || "无"}\n已选开书方案：${JSON.stringify(concept)}\n输出 protagonistArc、keyRelationships、worldRules、majorForces、timelineAnchors。所有内容必须能由已选方案推出，并共同支撑 longFormEngine。`,
+      user: `平台主题材：${input.genre}\n复合叙事类型：${concept.secondaryGenres.join(" + ")}\n题材元素：${concept.genreElements.join("、") || "无固定元素"}\n自定义方向：${input.customGenreDirection?.trim() || "无"}\n已选开书方案：${JSON.stringify(concept)}\n输出 protagonistArc、keyRelationships、worldRules、majorForces、timelineAnchors，以及 genreSpecificSections。本书题材专属栏目：${sections.map((item) => `${item.label}（${item.hint}）`).join("；") || "无"}；若给出栏目，genreSpecificSections 的 label 必须与栏目名一致，每个栏目给 2–6 条具体条目。所有内容必须能由已选方案推出，并共同支撑 longFormEngine。`,
       schema: BookConceptSkeletonSchema,
       longTask: true,
       stream: true,
@@ -1017,20 +1037,44 @@ export class AiService {
   ): Promise<PlanningGenerationResult> {
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
     const startChapter = input.fromChapter ?? Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1));
-    const shared = `项目：${project.summary.title}\n题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n创作契约：${JSON.stringify(project.contract)}\n商业规则：${compileCommercialGuidance(project.summary.genre, startChapter, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, subtype: project.contract.genreSubtype, fanqieCategoryKey: project.contract.fanqieCategoryKey, secondaryGenres: project.contract.secondaryGenres, genreElements: project.contract.genreElements, customGenreDirection: project.contract.customGenreDirection, storyStage: resolveStoryStage(project.plans, project.summary.currentWords) })}\n已批准规划：${JSON.stringify(project.plans.filter((plan) => plan.status === "已批准"))}\n已有章节：${JSON.stringify(project.chapters.slice(-20).map((chapter) => ({ number: chapter.number, title: chapter.title, outline: chapter.outline, endingExpectation: chapter.endingExpectation })))}`;
+    const structure = resolveStructurePreset({
+      categoryKey: project.contract.fanqieCategoryKey,
+      lengthShape: project.contract.lengthShape,
+      wordsPerChapter: project.summary.wordsPerChapter,
+    });
+    const shared = `项目：${project.summary.title}\n题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n创作契约：${JSON.stringify(project.contract)}\n商业规则：${compileCommercialGuidance(project.summary.genre, startChapter, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, subtype: project.contract.genreSubtype, fanqieCategoryKey: project.contract.fanqieCategoryKey, secondaryGenres: project.contract.secondaryGenres, genreElements: project.contract.genreElements, customGenreDirection: project.contract.customGenreDirection, storyStage: resolveStoryStage(project.plans, project.summary.currentWords) })}\n已批准规划：${JSON.stringify(project.plans.filter((plan) => plan.status === "已批准"))}\n已有章节：${JSON.stringify(project.chapters.slice(-20).map((chapter) => ({ number: chapter.number, title: chapter.title, outline: chapter.outline, endingExpectation: chapter.endingExpectation })))}\n单章目标字数：${project.summary.wordsPerChapter}\n结构参数：阶段 ${structure.stages[0]}–${structure.stages[1]} 个；分卷 ${structure.volumes[0]}–${structure.volumes[1]} 个；首个实质回报建议落在第 ${structure.firstPayoffWindow[0]}–${structure.firstPayoffWindow[1]} 章`;
     if (input.mode === "全书结构") {
-      const result = await this.runJson({
-        projectId: project.summary.id,
-        taskType: "generate-story-structure",
-        override,
-        inputSummary: `${project.summary.title} 自适应阶段与分卷`,
-        system:
-          "你是中国商业网文总编。根据已审批契约规划作品自己的宏观阶段和分卷，只细化结构，不写正文。阶段数量与功能由核心矛盾、叙事主轴和长篇发动机决定，每个阶段用本书自己的事件命名和驱动；阶段切换绑定不可逆的状态变化，终局兑现契约。",
-        user: `${shared}\n输出 stages（4至8项）和 volumes（3至6项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。阶段标题必须是本书专属事件或状态，不得直接使用“开篇、追读、扩张、中期、高潮、收束”。各阶段目标字数之和应接近项目目标。`,
-        schema: StructurePlanningSchema,
-        longTask: true,
-        stream: true,
-      });
+      const structureUser = `${shared}\n输出 stages（${structure.stages[0]}至${structure.stages[1]}项）和 volumes（${structure.volumes[0]}至${structure.volumes[1]}项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。阶段标题必须是本书专属事件或状态，不得直接使用“开篇、追读、扩张、中期、高潮、收束”。各阶段目标字数之和应接近项目目标。`;
+      const rangeIssues = (value: { stages: unknown[]; volumes: unknown[] }) => [
+        ...(value.stages.length < structure.stages[0] || value.stages.length > structure.stages[1]
+          ? [`阶段应为 ${structure.stages[0]}–${structure.stages[1]} 个，实际 ${value.stages.length} 个`]
+          : []),
+        ...(value.volumes.length < structure.volumes[0] || value.volumes.length > structure.volumes[1]
+          ? [`分卷应为 ${structure.volumes[0]}–${structure.volumes[1]} 个，实际 ${value.volumes.length} 个`]
+          : []),
+      ];
+      const generateStructure = (retryIssues?: string[]) =>
+        this.runJson({
+          projectId: project.summary.id,
+          taskType: retryIssues ? "generate-story-structure-retry" : "generate-story-structure",
+          override,
+          inputSummary: `${project.summary.title} 自适应阶段与分卷`,
+          system:
+            "你是中国商业网文总编。根据已审批契约规划作品自己的宏观阶段和分卷，只细化结构，不写正文。阶段数量与功能由核心矛盾、叙事主轴和长篇发动机决定，每个阶段用本书自己的事件命名和驱动；阶段切换绑定不可逆的状态变化，终局兑现契约。",
+          user: retryIssues
+            ? `${structureUser}\n上一次输出未落在本书的结构区间：${retryIssues.join("；")}。请严格按区间数量重新输出。`
+            : structureUser,
+          schema: StructurePlanningSchema,
+          longTask: true,
+          stream: true,
+        });
+      let result = await generateStructure();
+      const issues = rangeIssues(result);
+      if (issues.length) {
+        this.log("warn", "planning.structure-range-retry", { issues });
+        const retry = await generateStructure(issues);
+        if (rangeIssues(retry).length < issues.length) result = retry;
+      }
       return {
         startChapter: 1,
         chapters: [],
@@ -1082,13 +1126,21 @@ export class AiService {
         inputSummary: `${project.summary.title} 第${batchStart}-${batchStart + batchCount - 1}章章纲`,
         system:
           "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。先判断每章承担行动、调查、关系、经营、训练、生存、群像、氛围、过渡、揭秘或高潮中的哪种主要功能，再决定节奏。章节要承接上一章的状态与悬念；关系、调查、氛围和过渡章可以通过认知、情绪、证据、关系或气氛积累推进，推进方式贴合本章功能。相邻章节在功能、场景数量和回报形态上保持变化。",
-        user: `${shared}\n本次任务前面刚生成且必须承接的章纲：${JSON.stringify(priorChapters)}\n从第${batchStart}章开始，严格输出${batchCount}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterFunction、targetWords、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter 和 scenes。chapterFunction 必须使用规定枚举；targetWords 在 1400–3500 之间，按内容密度决定，不要全都相同；scenes 为 1–5 个真正需要的场景，每个包含 title、goal、conflict、outcome、targetWords，标题必须是本章具体事件，不得使用“入场、对抗、转向”等通用功能名。关系或氛围章可以只有 1–2 场，高潮章可以 4–5 场。各场景目标字数之和应接近本章 targetWords。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
+        user: `${shared}\n本次任务前面刚生成且必须承接的章纲：${JSON.stringify(priorChapters)}\n从第${batchStart}章开始，严格输出${batchCount}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterFunction、targetWords、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter 和 scenes。chapterFunction 必须使用规定枚举；targetWords 在 ${structure.chapterWords[0]}–${structure.chapterWords[1]} 之间（本书单章目标 ${project.summary.wordsPerChapter} 字），按内容密度决定，不要全都相同；scenes 为 ${structure.scenesPerChapter[0]}–${structure.scenesPerChapter[1]} 个真正需要的场景，每个包含 title、goal、conflict、outcome、targetWords，标题必须是本章具体事件，不得使用“入场、对抗、转向”等通用功能名。关系或氛围章可以只有 1–2 场，高潮章可以取区间上限。各场景目标字数之和应接近本章 targetWords。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
         schema: ChapterPlanningSchema,
         longTask: true,
         stream: true,
       });
       if (result.chapters.length !== batchCount)
         throw new Error(`模型返回 ${result.chapters.length} 章，预期 ${batchCount} 章，请重试`);
+      const outOfRange = result.chapters.filter(
+        (chapter) => chapter.targetWords < structure.chapterWords[0] || chapter.targetWords > structure.chapterWords[1],
+      );
+      if (outOfRange.length)
+        this.log("warn", "chapter-plan.words-out-of-range", {
+          count: outOfRange.length,
+          expected: structure.chapterWords,
+        });
       const roughPlan = {
         id: randomUUID(),
         kind: "粗纲" as const,

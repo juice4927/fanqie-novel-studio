@@ -3585,6 +3585,24 @@ p {
   opacity: 0.55;
   cursor: not-allowed;
 }
+.check-row.recommended {
+  color: var(--ink);
+  font-weight: 600;
+}
+.check-row .preset-badge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 10px;
+  line-height: 16px;
+}
+.positioning-reset {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
 .positioning-note {
   margin: 0 0 6px;
   color: var(--muted);

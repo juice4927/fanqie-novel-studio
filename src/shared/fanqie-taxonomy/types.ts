@@ -15,6 +15,19 @@ export interface CategoryBaselineDelta {
   rewardLadder?: string[];
 }
 
+/**
+ * 分类开书预设：只放无法从画像派生的手写字段。
+ * 结构区间（阶段数、卷数、场景数、单章字数、首回报窗口）由 src/shared/creation-presets.ts 派生。
+ */
+export interface CategoryCreationPreset {
+  lengthShape: string;
+  narrativePerson: string;
+  targetWords: number;
+  openingArchetypes: string[];
+  toneTags: string[];
+  protagonistRoles: string[];
+}
+
 export interface FanqieCategoryProfile {
   key: string;
   channel: FanqieChannel;
@@ -47,6 +60,8 @@ export interface FanqieCategoryProfile {
   clicheTraps: string[];
   differentiationAngles: string[];
   baselineDelta?: CategoryBaselineDelta;
+  /** 开书面板的分类推荐值；由 creation-presets.ts 在模块加载时合并进来。 */
+  creationPreset?: CategoryCreationPreset;
   profileVersion: string;
 }
 
@@ -70,4 +85,4 @@ export interface FanqieSubGenreProfile {
 
 export type SubGenreSeed = Omit<FanqieSubGenreProfile, "genre">;
 
-export const FANQIE_PROFILE_VERSION = "2026-09.v1";
+export const FANQIE_PROFILE_VERSION = "2026-09.v2";

@@ -65,6 +65,7 @@ export function prepareProjectCreation(
       premise: "",
       genreSubtype: "",
       fanqieCategoryKey: "",
+      lengthShape: input.lengthShape ?? "",
       secondaryGenres: [...(input.secondaryGenres ?? [])],
       genreElements: [...(input.genreElements ?? [])],
       customGenreDirection: input.customGenreDirection ?? "",

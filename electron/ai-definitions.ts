@@ -137,7 +137,8 @@ export const BookConceptSchema = z.object({
         suggestedTags: z.array(z.string().min(1).max(20)).min(2).max(10),
       }),
     )
-    .length(3),
+    .min(1)
+    .max(3),
 });
 
 /** 立项候选使用同一份 schema；保留别名便于调用点表达意图。 */
@@ -156,6 +157,15 @@ export const BookConceptSkeletonSchema = z.object({
   worldRules: distinctSkeletonList(2, 10),
   majorForces: distinctSkeletonList(2, 8),
   timelineAnchors: distinctSkeletonList(3, 10),
+  genreSpecificSections: z
+    .array(
+      z.object({
+        label: z.string().min(2).max(20),
+        items: distinctSkeletonList(2, 6),
+      }),
+    )
+    .max(2)
+    .optional(),
 });
 
 export type GeneratedBookConcept = z.infer<typeof BookConceptSchema>["candidates"][number];
@@ -253,6 +263,8 @@ export function conceptDiversityIssues(
   requireDistinctNarrativeAxis = false,
 ) {
   const issues: string[] = [];
+  // 候选越少越不该强求四个维度完全不同：两案只要求两维不同。
+  const minimumDistinctDimensions = candidates.length >= 3 ? 4 : 2;
   const dimensions: Array<[string, (candidate: (typeof candidates)[number]) => string]> = [
     ["子类型", (candidate) => candidate.genreSubtype],
     ["开局机制", (candidate) => candidate.openingMechanism],
@@ -264,17 +276,17 @@ export function conceptDiversityIssues(
   const fullyDistinct = dimensions.filter(
     ([, select]) => new Set(candidates.map((candidate) => diversityKey(select(candidate)))).size === candidates.length,
   );
-  if (fullyDistinct.length < 4) {
+  if (fullyDistinct.length < minimumDistinctDimensions) {
     const repeated = dimensions
       .filter(([name]) => !fullyDistinct.some(([distinctName]) => distinctName === name))
       .map(([name]) => name);
-    issues.push(`至少四个核心维度必须完全不同；当前重复：${repeated.join("、")}`);
+    issues.push(`至少${minimumDistinctDimensions}个核心维度必须完全不同；当前重复：${repeated.join("、")}`);
   }
   if (
     requireDistinctNarrativeAxis &&
     new Set(candidates.map((candidate) => candidate.secondaryGenres[0])).size < candidates.length
   )
-    issues.push("未指定复合方向时，三个方案的首要叙事主轴必须不同");
+    issues.push(`未指定复合方向时，${candidates.length} 个方案的首要叙事主轴必须不同`);
   for (let left = 0; left < candidates.length; left += 1) {
     for (let right = left + 1; right < candidates.length; right += 1) {
       const similarCoreDimensions = dimensions
@@ -390,7 +402,7 @@ export const StructurePlanningSchema = z.object({
       }),
     )
     .min(3)
-    .max(6),
+    .max(8),
 });
 
 const PlannedChapterSchema = z

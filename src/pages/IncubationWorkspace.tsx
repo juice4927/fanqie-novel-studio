@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, EmptyState, IconButton, Progress } from "../components/UI";
 import { describeError } from "../lib/error-message";
 import { formatDate } from "../lib/format";
+import { resolveCreationPreset } from "../shared/creation-presets";
 import { getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
-import { describeIncubationPositioning, INCUBATION_STEPS, type IncubationDraft } from "../shared/incubation";
+import { describeIncubationPositioning, type IncubationDraft, stepsForPath } from "../shared/incubation";
 import { blockingFindings, reviewIncubationCandidate, summarizeFindings } from "../shared/incubation-review";
 import type { AppApi, IncubationCandidate } from "../shared/types";
 
@@ -69,6 +70,16 @@ export function IncubationWorkspace({
   }, [draft, drafts]);
 
   const category = draft ? getFanqieCategoryProfile(draft.positioning.fanqieCategoryKey) : undefined;
+  const preset = useMemo(
+    () =>
+      draft
+        ? resolveCreationPreset({
+            categoryKey: draft.positioning.fanqieCategoryKey,
+            subGenreIds: draft.positioning.subGenreIds,
+          })
+        : undefined,
+    [draft],
+  );
   const selectedCandidate =
     draft?.candidates.find((item) => item.id === draft.selectedCandidateId) ?? draft?.candidates[0] ?? null;
   const findings = useMemo(
@@ -84,9 +95,10 @@ export function IncubationWorkspace({
             skeleton: draft.skeleton,
             tagStats: category?.tags,
             existingContracts: signatures,
+            preset,
           })
         : [],
-    [draft, selectedCandidate, category, signatures],
+    [draft, selectedCandidate, category, signatures, preset],
   );
   const summary = summarizeFindings(findings);
   const blocking = blockingFindings(findings, acknowledged);
@@ -188,7 +200,7 @@ export function IncubationWorkspace({
         {draft && (
           <div className="incubation-detail">
             <ol className="step-bar">
-              {INCUBATION_STEPS.map((step) => (
+              {stepsForPath(draft.path).map((step) => (
                 <li key={step} className={step === draft.step ? "current" : ""}>
                   {step}
                 </li>

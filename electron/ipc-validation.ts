@@ -40,6 +40,8 @@ const createProject = z
     targetWords: z.number().int().min(10_000).max(20_000_000),
     updateCadence: z.string().trim().min(1).max(100),
     safeStockLine: z.number().int().min(0).max(1000).optional(),
+    wordsPerChapter: z.number().int().min(1800).max(4000).optional(),
+    lengthShape: shortText.optional(),
     secondaryGenres,
     genreElements,
     customGenreDirection,
@@ -66,6 +68,7 @@ const bookConceptInput = z
     safeStockLine: z.number().int().min(0).max(1000).optional(),
     updateCadence: z.string().trim().min(1).max(100),
     seed: z.string().max(5000),
+    candidateCount: z.number().int().min(1).max(3).optional(),
     secondaryGenres,
     genreElements,
     customGenreDirection,
@@ -162,6 +165,7 @@ const incubationDraft = z
     id,
     status: z.enum(["孵化中", "已立项", "已放弃"]),
     step: z.enum(["定位", "证据", "候选", "体检", "骨架", "开书包"]),
+    path: z.enum(["探索", "定向", "直达"]).optional(),
     positioning: incubationPositioning,
     evidence: z
       .object({
@@ -181,6 +185,10 @@ const incubationDraft = z
         worldRules: z.array(shortText).max(50),
         majorForces: z.array(shortText).max(50),
         timelineAnchors: z.array(shortText).max(50),
+        genreSpecificSections: z
+          .array(z.object({ label: shortText, items: z.array(shortText).max(20) }).strict())
+          .max(2)
+          .optional(),
       })
       .strict()
       .nullable(),
@@ -196,6 +204,7 @@ const contract = z
     premise: mediumText,
     genreSubtype: shortText.optional(),
     fanqieCategoryKey: shortText.optional(),
+    lengthShape: shortText.optional(),
     secondaryGenres,
     genreElements,
     customGenreDirection,
@@ -211,6 +220,10 @@ const contract = z
     worldRules: z.array(shortText).max(50).optional(),
     majorForces: z.array(shortText).max(50).optional(),
     timelineAnchors: z.array(shortText).max(50).optional(),
+    genreSpecificSections: z
+      .array(z.object({ label: shortText, items: z.array(shortText).max(20) }).strict())
+      .max(2)
+      .optional(),
     readerPromise: mediumText,
     coreEmotion: mediumText,
     ending: mediumText,

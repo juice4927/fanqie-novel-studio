@@ -4,6 +4,27 @@ import type { BookConceptInput, BookConceptSkeleton, Genre, IncubationCandidate,
 export const INCUBATION_STEPS = ["定位", "证据", "候选", "体检", "骨架", "开书包"] as const;
 export type IncubationStep = (typeof INCUBATION_STEPS)[number];
 
+/** 开书路径：作者带多少信息进来，决定候选数量与实际步骤。 */
+export const INCUBATION_PATHS = ["探索", "定向", "直达"] as const;
+export type IncubationPath = (typeof INCUBATION_PATHS)[number];
+
+export const PATH_CANDIDATE_COUNTS: Record<IncubationPath, number> = { 探索: 3, 定向: 2, 直达: 1 };
+
+const PATH_STEPS: Record<IncubationPath, readonly IncubationStep[]> = {
+  探索: INCUBATION_STEPS,
+  定向: ["定位", "证据", "候选", "体检", "骨架"],
+  直达: ["定位", "骨架", "体检"],
+};
+
+/** 步骤条只显示这条路径实际会走的步骤；旧草稿没有 path 时退回完整步骤。 */
+export function stepsForPath(path?: IncubationPath): readonly IncubationStep[] {
+  return path ? PATH_STEPS[path] : INCUBATION_STEPS;
+}
+
+export function candidateCountForPath(path: IncubationPath) {
+  return PATH_CANDIDATE_COUNTS[path];
+}
+
 export const INCUBATION_STATUSES = ["孵化中", "已立项", "已放弃"] as const;
 export type IncubationStatus = (typeof INCUBATION_STATUSES)[number];
 
@@ -43,6 +64,8 @@ export interface IncubationDraft {
   id: string;
   status: IncubationStatus;
   step: IncubationStep;
+  /** 旧草稿缺省视为探索路径。 */
+  path?: IncubationPath;
   positioning: IncubationPositioning;
   evidence: IncubationEvidenceRefs;
   seed: string;
@@ -71,6 +94,7 @@ export function positioningToConceptInput(
   positioning: IncubationPositioning,
   seed: string,
   evidence: { insightIds?: string[]; notes?: string[] } = {},
+  candidateCount = PATH_CANDIDATE_COUNTS.探索,
 ): BookConceptInput {
   return {
     genre: positioning.genre,
@@ -83,6 +107,7 @@ export function positioningToConceptInput(
     toneTags: positioning.toneTags,
     evidenceInsightIds: evidence.insightIds ?? [],
     evidenceNotes: evidence.notes ?? [],
+    candidateCount,
     readerPersona: positioning.readerPersona,
     readerPromise: positioning.readerPromise,
     commercialBoundary: positioning.commercialBoundary,
