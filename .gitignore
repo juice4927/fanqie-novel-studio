@@ -2,6 +2,7 @@ node_modules/
 node_modules.partial-*/
 dist/
 dist-electron/
+dist-quality/
 release/
 release-*/
 test-results/

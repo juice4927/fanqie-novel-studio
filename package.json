@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:quality": "vitest run tests/prompt-evaluation.test.ts tests/quality-benchmark.test.ts tests/genre-quality.test.ts tests/context-diagnostics.test.ts tests/story-constraints.test.ts tests/paragraph-diff.test.ts",
     "test:scale": "vitest run --config vitest.scale.config.ts",
+    "quality:compare": "node --experimental-strip-types --no-warnings scripts/compare-quality.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:electron": "playwright test --config playwright.electron.config.ts",
