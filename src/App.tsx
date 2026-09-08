@@ -1,4 +1,15 @@
-import { BookCopy, BookOpen, Database, LayoutDashboard, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import {
+  BookCopy,
+  BookOpen,
+  Database,
+  Download,
+  LayoutDashboard,
+  Plus,
+  Search,
+  Settings,
+  Trash2,
+  X,
+} from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { NewProjectModal } from "./components/NewProjectModal";
 import { Button, Field, Input, Modal } from "./components/UI";
@@ -11,7 +22,7 @@ const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ de
 const ProjectPage = lazy(() => import("./pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
 
 import { describeError } from "./lib/error-message";
-import type { DashboardData, ProjectSummary } from "./shared/types";
+import type { DashboardData, ProjectSummary, UpdateStatus } from "./shared/types";
 
 type AppPage = "dashboard" | "research" | "project" | "settings";
 
@@ -37,6 +48,8 @@ function Workbench() {
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
 
   const reload = useCallback(async () => {
     const [nextDashboard, nextProjects, settings] = await Promise.all([
@@ -56,6 +69,20 @@ function Workbench() {
     const timer = window.setTimeout(() => setToast(null), 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    let active = true;
+    void api
+      .getUpdateStatus()
+      .then((status) => {
+        if (active) setUpdate(status);
+      })
+      .catch(() => undefined);
+    const unsubscribe = api.onUpdateStatus((status) => setUpdate(status));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [api]);
   const notify = (message: string, tone: "success" | "error" = "success") => setToast({ message, tone });
   const openProject = (id: string) => {
     if (page === "project" && selectedProjectId === id) return;
@@ -227,6 +254,40 @@ function Workbench() {
             </div>
           </div>
         </Modal>
+      )}
+      {update?.phase === "downloaded" && (
+        <div className="update-banner" role="status">
+          <Download size={16} />
+          <span>
+            新版本 {update.availableVersion ?? ""} 已就绪
+            {update.backupPasswordRequired ? "；需在系统设置中提供备份密码后才能安装" : ""}
+          </span>
+          <div className="update-banner-actions">
+            <Button variant="secondary" onClick={() => setUpdate(null)}>
+              稍后
+            </Button>
+            {update.backupPasswordRequired ? (
+              <Button onClick={() => navigate("settings")}>去设置</Button>
+            ) : (
+              <Button
+                icon={<Download size={15} />}
+                disabled={updateBusy}
+                onClick={async () => {
+                  setUpdateBusy(true);
+                  try {
+                    await api.installUpdate();
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  } finally {
+                    setUpdateBusy(false);
+                  }
+                }}
+              >
+                重启安装
+              </Button>
+            )}
+          </div>
+        </div>
       )}
       {toast && (
         <div

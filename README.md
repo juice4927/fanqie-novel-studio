@@ -162,7 +162,8 @@ npm run dist:win         # 生成 Windows NSIS 安装包
 - 打开项目时 SQLite 只返回章节标题、状态、字数等元数据，不向界面传输整本正文；写作台选中章节后才按 ID 读取该章正文。章节列表使用虚拟窗口，首次增量加载 200 章；全文检索每页 50 条，并在滚动到底部后继续加载。
 - AI 审计默认保留 90 天且最多 5000 条；健康任务保留 24 小时且最多 100 条完成记录。
 - 桌面日志为 JSON Lines，写盘前脱敏密钥、Bearer、URL 凭据和 Windows 用户目录。系统设置可导出不含正文和数据库的诊断 ZIP。
-- 自动更新只在打包应用中启用。安装前必须成功创建加密的 `pre-update-<version>.novelbak` 数据快照；安装器失败时保留当前版本。数据恢复仍需通过“校验并恢复副本”人工确认，避免自动覆盖唯一工作区。
+- 自动更新只在打包应用中启用：启动 15 秒后自动检查（可在“系统设置 → 软件更新”关闭），此后每 6 小时复查一次；发现新版本后在后台下载，就绪时只在主界面提示，**不会自动重启**。点击“立即重启并安装”后先创建加密的 `pre-update-<version>.novelbak` 数据快照，再退出并安装；未保存自动备份密码时可输入一次性密码，正在生成正文时会拒绝安装。也可开启“退出时自动安装”。安装器失败时保留当前版本。数据恢复仍需通过“校验并恢复副本”人工确认，避免自动覆盖唯一工作区。
+- 更新源固定为项目的 GitHub Releases，只请求 `latest.yml`，不上传正文、账本或凭据；设置 `NOVEL_STUDIO_DISABLE_AUTO_UPDATE=1` 可完全禁用更新检查。
 
 Windows 发布流水线需要配置 `WINDOWS_CERTIFICATE_BASE64`、`WINDOWS_CERTIFICATE_PASSWORD` 和 `WINDOWS_PUBLISHER_NAME` 三个 GitHub Secrets。标签 `v*` 触发测试、构建、签名、GitHub Release 和 `latest.yml` 更新通道发布。
 
