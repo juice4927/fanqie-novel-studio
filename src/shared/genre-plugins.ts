@@ -1,3 +1,4 @@
+import { GENRE_OVERRIDES, type GenreOverride } from "./genre-overrides";
 import type { Genre, LedgerKind } from "./types";
 
 export const GENRE_STAGES = ["开篇", "追读", "扩张", "中期", "高潮", "收束"] as const;
@@ -54,7 +55,9 @@ export interface GenrePluginDefinition {
 
 const stages = (rules: Record<GenreStage, GenreStageRule>) => rules;
 
-export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
+export type BaseGenre = "都市脑洞" | "玄幻/仙侠" | "历史/架空" | "现言甜宠" | "古言宅斗" | "年代重生";
+
+const BASE_GENRE_PLUGINS: Record<BaseGenre, GenrePluginDefinition> = {
   都市脑洞: {
     id: "urban-imagination.v2",
     genre: "都市脑洞",
@@ -872,3 +875,23 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     ],
   },
 };
+
+function applyOverride(override: GenreOverride): GenrePluginDefinition {
+  const base = BASE_GENRE_PLUGINS[override.extends];
+  const { extends: _extends, stages: overrideStages, ...rest } = override;
+  return {
+    ...base,
+    ...rest,
+    genre: override.genre,
+    stages: overrideStages ?? base.stages,
+  };
+}
+
+/**
+ * 全部主题材解析结果：六个基础题材 + 七个继承式题材。
+ * 新增题材只写差异字段，`stages` 缺省继承父题材。
+ */
+export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
+  ...BASE_GENRE_PLUGINS,
+  ...Object.fromEntries(GENRE_OVERRIDES.map((override) => [override.genre, applyOverride(override)])),
+} as Record<Genre, GenrePluginDefinition>;

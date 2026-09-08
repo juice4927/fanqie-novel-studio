@@ -1,4 +1,5 @@
 import { normalizeAestheticProfile } from "./aesthetic-profile";
+import { normalizeWordsPerChapter } from "./creation-options";
 import type { CreateProjectInput, ProjectPatch, ProjectSummary, StoryContract } from "./types";
 
 interface PrepareProjectCreationOptions {
@@ -41,6 +42,7 @@ export function prepareProjectCreation(
   const title = normalizeTitle(input.title);
   const updateCadence = normalizeCadence(input.updateCadence);
   const safeStockLine = input.safeStockLine ?? 10;
+  const wordsPerChapter = normalizeWordsPerChapter(input.wordsPerChapter);
   assertProjectNumbers(input.targetWords, safeStockLine);
   return {
     summary: {
@@ -49,6 +51,7 @@ export function prepareProjectCreation(
       genre: input.genre,
       status: "候选立项",
       targetWords: input.targetWords,
+      wordsPerChapter,
       currentWords: 0,
       chapterCount: 0,
       stockChapters: 0,
@@ -94,12 +97,15 @@ export function prepareProjectCreation(
 export function prepareProjectUpdate(current: ProjectSummary, patch: ProjectPatch, updatedAt: string): ProjectSummary {
   const targetWords = patch.targetWords ?? current.targetWords;
   const safeStockLine = patch.safeStockLine ?? current.safeStockLine;
+  const wordsPerChapter =
+    patch.wordsPerChapter === undefined ? current.wordsPerChapter : normalizeWordsPerChapter(patch.wordsPerChapter);
   assertProjectNumbers(targetWords, safeStockLine);
   return {
     ...current,
     title: patch.title === undefined ? current.title : normalizeTitle(patch.title, current.title),
     status: patch.status ?? current.status,
     targetWords,
+    wordsPerChapter,
     updateCadence:
       patch.updateCadence === undefined
         ? current.updateCadence

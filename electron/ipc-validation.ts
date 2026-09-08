@@ -49,7 +49,21 @@ const createProject = z
 const bookConceptInput = z
   .object({
     genre,
+    fanqieCategoryKey: shortText.optional(),
+    subGenreIds: z.array(id).max(2).optional(),
+    openingArchetype: shortText.optional(),
+    lengthShape: shortText.optional(),
+    narrativePerson: shortText.optional(),
+    protagonistRoles: z.array(shortText).max(2).optional(),
+    toneTags: z.array(shortText).max(2).optional(),
+    evidenceInsightIds: z.array(id).max(50).optional(),
+    evidenceNotes: z.array(shortText).max(20).optional(),
+    readerPersona: mediumText.optional(),
+    readerPromise: mediumText.optional(),
+    commercialBoundary: z.string().max(2000).optional(),
     targetWords: z.number().int().min(10_000).max(20_000_000),
+    wordsPerChapter: z.number().int().min(1800).max(4000).optional(),
+    safeStockLine: z.number().int().min(0).max(1000).optional(),
     updateCadence: z.string().trim().min(1).max(100),
     seed: z.string().max(5000),
     secondaryGenres,
@@ -57,6 +71,8 @@ const bookConceptInput = z
     customGenreDirection,
   })
   .strict();
+
+const expansionAxis = z.enum(["资源", "关系", "地图", "规则", "身份", "技艺", "势力"]);
 
 const bookConcept = z
   .object({
@@ -78,6 +94,100 @@ const bookConcept = z
     audience: mediumText,
     commercialHook: mediumText,
     longFormEngine: mediumText,
+    fanqieCategoryKey: shortText,
+    subGenreIds: z.array(id).max(2),
+    titleOptions: z
+      .array(
+        z.object({
+          title: z.string().trim().min(1).max(100),
+          rationale: mediumText,
+          tags: z.array(shortText).max(8),
+        }),
+      )
+      .min(1)
+      .max(6),
+    openingDesign: z.object({
+      chapter1Hook: mediumText,
+      firstThreeChaptersPromise: mediumText,
+      firstPayoffChapter: z.number().int().min(1).max(60),
+      retentionAnchors: z.array(shortText).max(8),
+    }),
+    escalationLadder: z
+      .array(
+        z.object({
+          stage: shortText,
+          conflict: mediumText,
+          expansionAxis,
+          payoff: shortText,
+          cost: shortText,
+        }),
+      )
+      .min(1)
+      .max(8),
+    sustainability: z.object({ fatiguePoint: mediumText, shiftPlan: mediumText }),
+    differentiation: z.object({
+      against: z.array(mediumText).max(8),
+      originalityRisk: z.enum(["低", "中", "高"]),
+      riskNotes: mediumText,
+    }),
+    suggestedTags: z.array(shortText).max(12),
+  })
+  .strict();
+
+const incubationPositioning = z
+  .object({
+    genre,
+    fanqieCategoryKey: shortText,
+    subGenreIds: z.array(id).max(2),
+    openingArchetype: shortText,
+    lengthShape: shortText,
+    narrativePerson: shortText,
+    protagonistRoles: z.array(shortText).max(2),
+    toneTags: z.array(shortText).max(2),
+    secondaryGenres: z.array(z.enum(NARRATIVE_GENRES)).max(3),
+    genreElements: z.array(shortText).max(8),
+    customGenreDirection: z.string().max(2000),
+    targetWords: z.number().int().min(10_000).max(20_000_000),
+    wordsPerChapter: z.number().int().min(1800).max(4000),
+    updateCadence: z.string().trim().min(1).max(100),
+    safeStockLine: z.number().int().min(0).max(1000),
+    readerPersona: mediumText,
+    readerPromise: mediumText,
+    commercialBoundary: z.string().max(2000),
+  })
+  .strict();
+
+const incubationDraft = z
+  .object({
+    id,
+    status: z.enum(["孵化中", "已立项", "已放弃"]),
+    step: z.enum(["定位", "证据", "候选", "体检", "骨架", "开书包"]),
+    positioning: incubationPositioning,
+    evidence: z
+      .object({
+        insightIds: z.array(id).max(50),
+        marketOpportunityKeys: z.array(shortText).max(50),
+        categoryTags: z.array(shortText).max(100),
+        skipped: z.boolean(),
+      })
+      .strict(),
+    seed: z.string().max(5000),
+    candidates: z.array(bookConcept).max(6),
+    selectedCandidateId: id.nullable(),
+    skeleton: z
+      .object({
+        protagonistArc: mediumText,
+        keyRelationships: z.array(shortText).max(50),
+        worldRules: z.array(shortText).max(50),
+        majorForces: z.array(shortText).max(50),
+        timelineAnchors: z.array(shortText).max(50),
+      })
+      .strict()
+      .nullable(),
+    review: z.object({ acknowledged: z.array(shortText).max(50) }).strict(),
+    createdProjectId: id.nullable(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
   })
   .strict();
 
@@ -450,6 +560,14 @@ const schemas = {
   createProject: z.tuple([createProject]),
   generateBookConcepts: z.tuple([bookConceptInput]),
   createProjectFromConcept: z.tuple([bookConceptInput, bookConcept]),
+  listIncubations: noArgs,
+  listProjectSignatures: noArgs,
+  getIncubation: z.tuple([id]),
+  saveIncubation: z.tuple([incubationDraft]),
+  deleteIncubation: z.tuple([id]),
+  promoteIncubation: z.tuple([id]),
+  getCategoryTags: z.tuple([shortText]),
+  generateLaunchPack: z.tuple([id, z.object({ withStructure: z.boolean(), withFirstChapters: z.boolean() }).strict()]),
   deleteProject: z.tuple([id, z.string().max(100)]),
   getProject: idOnly,
   getChapter: projectEntity,

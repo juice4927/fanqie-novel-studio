@@ -191,5 +191,51 @@ export const QUALITY_BENCHMARK = {
       },
       baselineOutput: { issues: [] },
     },
+    {
+      fixture: {
+        id: "apocalypse-rule-violation",
+        title: "灾变规则被违反（新增题材基线）",
+        genre: "科幻末世",
+        stage: "追读",
+        chapter: "周野在辐射区待了整整两天，没有补充抑制剂，也没有出现任何异变。",
+        contextEvidence: ["灾变规则：暴露超过六小时必然出现异变，必须靠抑制剂压制。"],
+        expectedIssues: [
+          { id: "rule-broken", category: "设定一致性", severity: "硬性", matchAny: ["六小时", "异变", "抑制剂"] },
+        ],
+      },
+      baselineOutput: {
+        issues: [
+          {
+            severity: "硬性",
+            category: "设定一致性",
+            message: "暴露超过六小时却未出现异变，违反已建立的灾变规则",
+            evidence: "在辐射区待了整整两天，没有补充抑制剂，也没有出现任何异变",
+          },
+        ],
+      },
+    },
+    {
+      fixture: {
+        id: "deduction-leap",
+        title: "推理跳步（新增题材基线）",
+        genre: "悬疑推理",
+        stage: "扩张",
+        chapter: "程夏只看了一眼鞋印，就断定凶手是住在三楼的护士。",
+        contextEvidence: ["现场鞋印只有尺码信息，尚未比对人选；护士尚未进入嫌疑名单。"],
+        expectedIssues: [
+          { id: "evidence-leap", category: "知识边界", severity: "硬性", matchAny: ["鞋印", "尚未", "断定"] },
+        ],
+      },
+      baselineOutput: {
+        issues: [
+          {
+            severity: "硬性",
+            category: "知识边界",
+            message: "仅凭鞋印尺码直接断定凶手，缺少可复核的证据链",
+            evidence: "只看了一眼鞋印，就断定凶手是住在三楼的护士",
+          },
+        ],
+      },
+    },
   ] satisfies QualityBenchmarkCase[],
 } as const;

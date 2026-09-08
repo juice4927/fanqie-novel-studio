@@ -1,55 +1,14 @@
 import { Play, Trash2 } from "lucide-react";
 import { Badge, Button, Field, Input, Modal, Select, Textarea } from "../components/UI";
 import { formatDate } from "../lib/format";
+import { FANQIE_CATEGORIES, type FanqieRankKind } from "../shared/fanqie-taxonomy";
 import type { RankingCaptureSchedule } from "../shared/types";
 import styles from "./ResearchPage.module.css";
 
-export const FANQIE_CATEGORIES = {
-  男频: [
-    ["1141", "西方奇幻"],
-    ["1140", "东方仙侠"],
-    ["8", "科幻末世"],
-    ["261", "都市日常"],
-    ["124", "都市修真"],
-    ["1014", "都市高武"],
-    ["273", "历史古代"],
-    ["27", "战神赘婿"],
-    ["263", "都市种田"],
-    ["258", "传统玄幻"],
-    ["272", "历史脑洞"],
-    ["539", "悬疑脑洞"],
-    ["262", "都市脑洞"],
-    ["257", "玄幻脑洞"],
-    ["751", "悬疑灵异"],
-    ["504", "抗战谍战"],
-    ["746", "游戏体育"],
-    ["718", "动漫衍生"],
-    ["1016", "男频衍生"],
-  ],
-  女频: [
-    ["1139", "古风世情"],
-    ["8", "科幻末世"],
-    ["746", "游戏体育"],
-    ["1015", "女频衍生"],
-    ["248", "玄幻言情"],
-    ["23", "种田"],
-    ["79", "年代"],
-    ["267", "现言脑洞"],
-    ["246", "宫斗宅斗"],
-    ["539", "悬疑脑洞"],
-    ["253", "古言脑洞"],
-    ["24", "快穿"],
-    ["749", "青春甜宠"],
-    ["745", "星光璀璨"],
-    ["747", "女频悬疑"],
-    ["750", "职场婚恋"],
-    ["748", "豪门总裁"],
-    ["1017", "民国言情"],
-  ],
-} as const;
+export { FANQIE_CATEGORIES };
 
 export type FanqieGender = keyof typeof FANQIE_CATEGORIES;
-export type FanqieRankKind = "阅读榜" | "新书榜";
+export type { FanqieRankKind };
 
 interface RankingImportModalProps {
   open: boolean;

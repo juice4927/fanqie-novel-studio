@@ -5,6 +5,7 @@ import type { GenerationDecision } from "../shared/generation-quality";
 import type {
   AiSettings,
   Chapter,
+  IncubationDraft,
   InsightPack,
   NovelRevisionInput,
   NovelRevisionProposal,
@@ -23,6 +24,7 @@ export interface DemoState {
   settings: AiSettings;
   directorNotes: Record<string, string[]>;
   genDecisions: Record<string, GenerationDecision[]>;
+  incubations: IncubationDraft[];
 }
 
 export const key = "fanqie-novel-studio.demo.v1";
@@ -164,6 +166,7 @@ function seedProject(): ProjectDetail {
       genre: "都市脑洞",
       status: "连载准备",
       targetWords: 3000000,
+      wordsPerChapter: 2500,
       currentWords: 125,
       chapterCount: 2,
       stockChapters: 1,
@@ -364,5 +367,6 @@ export function seed(): DemoState {
     },
     directorNotes: {},
     genDecisions: {},
+    incubations: [],
   };
 }

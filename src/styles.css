@@ -1387,6 +1387,225 @@ p {
   display: grid;
   gap: 16px;
 }
+.positioning-group {
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  padding: 10px 14px 14px;
+  display: grid;
+  gap: 12px;
+}
+.positioning-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-strong);
+  list-style: none;
+}
+.positioning-group > summary::-webkit-details-marker {
+  display: none;
+}
+.positioning-group[open] > summary svg {
+  transform: rotate(90deg);
+}
+.genre-option-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-height: 148px;
+  overflow-y: auto;
+}
+.check-row small {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: 4px;
+}
+.choice-list.compact {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.launch-pack {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.launch-pack p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.draft-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+.nav-count {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent-soft, rgba(99, 102, 241, 0.16));
+  color: var(--text-strong);
+}
+.incubation-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.incubation-drafts {
+  display: grid;
+  gap: 8px;
+}
+.incubation-drafts > button {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+}
+.incubation-drafts > button.selected {
+  border-color: var(--accent);
+  background: var(--surface-soft);
+}
+.incubation-drafts small {
+  color: var(--text-muted);
+}
+.incubation-detail {
+  display: grid;
+  gap: 14px;
+}
+.step-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.step-bar li {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  color: var(--text-muted);
+}
+.step-bar li.current {
+  border-color: var(--accent);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.incubation-evidence {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.compare-table {
+  display: grid;
+  gap: 0;
+  overflow-x: auto;
+}
+.compare-row {
+  display: grid;
+  grid-template-columns: 96px repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  align-items: start;
+}
+.compare-row > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.compare-row p {
+  margin: 0;
+  font-size: 13px;
+}
+.compare-row.differs {
+  background: var(--surface-soft);
+}
+.compare-row.head {
+  border-top: none;
+  align-items: center;
+}
+.compare-row.head > button {
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  font-weight: 600;
+}
+.compare-row.head > button.selected {
+  border-color: var(--accent);
+}
+@media (max-width: 900px) {
+  .incubation-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .compare-row {
+    grid-template-columns: 80px repeat(3, minmax(140px, 1fr));
+  }
+}
+.finding-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  padding: 12px 14px;
+}
+.finding-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.finding-summary span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.finding-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.finding-row p {
+  margin: 2px 0 0;
+}
+.finding-row small {
+  color: var(--text-muted);
+}
+.finding-row.cleared {
+  opacity: 0.55;
+}
+.finding-level {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  padding: 2px 0;
+  border-radius: 3px;
+  background: var(--surface-soft);
+}
+.finding-row.block .finding-level {
+  color: #b42318;
+  background: #fee4e2;
+}
+.finding-row.warning .finding-level {
+  color: #b54708;
+  background: #fef0c7;
+}
+.finding-row.hint .finding-level {
+  color: var(--text-muted);
+}
 .genre-composer {
   display: grid;
   gap: 13px;

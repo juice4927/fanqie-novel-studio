@@ -41,6 +41,7 @@ export function ProjectDashboard({
   const [selectedInsights, setSelectedInsights] = useState(project.insightIds);
   const [concepts, setConcepts] = useState<ConceptCandidate[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [launchBusy, setLaunchBusy] = useState(false);
   const [quality, setQuality] = useState<GenerationQuality | null>(null);
   useEffect(() => {
     let active = true;
@@ -58,9 +59,11 @@ export function ProjectDashboard({
   const approvedPlans = project.plans.filter((plan) => plan.status === "已批准");
   const milestones = [
     {
-      label: "关联市场洞察",
-      done: project.insightIds.length > 0,
-      action: () => setShowInsights(true),
+      label: "复核创作契约",
+      done: Boolean(
+        project.contract.premise.trim() && project.contract.readerPromise.trim() && project.contract.ending.trim(),
+      ),
+      action: () => onNavigate("故事圣经"),
     },
     {
       label: "审批创作契约",
@@ -68,19 +71,21 @@ export function ProjectDashboard({
       action: () => onNavigate("故事圣经"),
     },
     {
-      label: "批准宏观阶段与卷纲",
+      label: "确认全书结构",
       done: approvedPlans.some((plan) => plan.kind === "分卷"),
       action: () => onNavigate("规划台"),
     },
     {
-      label: "建立第一章并质检",
-      done: project.chapters.some((chapter) => ["待定稿", "已定稿", "待发布", "已发布"].includes(chapter.status)),
-      action: () => onNavigate("写作台"),
+      label: "确认前 10 章章纲",
+      done: project.chapters.filter((chapter) => chapter.status === "章纲" || chapter.outline.trim()).length >= 10,
+      action: () => onNavigate("规划台"),
     },
     {
-      label: "安排首个发布日",
-      done: project.schedule.length > 0,
-      action: () => onNavigate("发布日历"),
+      label: "写第一章并质检",
+      done: project.chapters.some(
+        (chapter) => chapter.number === 1 && ["待定稿", "已定稿", "待发布", "已发布"].includes(chapter.status),
+      ),
+      action: () => onNavigate("写作台"),
     },
   ];
   return (
@@ -183,6 +188,35 @@ export function ProjectDashboard({
               </button>
             ))}
           </div>
+          {project.contract.approved && !approvedPlans.some((plan) => plan.kind === "分卷") && (
+            <div className="launch-pack">
+              <p>
+                契约已审批。可以一键生成开书包：4–8 个宏观阶段、3–6 个分卷骨架与前 10
+                章章纲，全部为草稿状态，仍需你逐项确认。
+              </p>
+              <Button
+                icon={launchBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                disabled={launchBusy}
+                onClick={async () => {
+                  setLaunchBusy(true);
+                  try {
+                    const result = await api.generateLaunchPack(project.summary.id, {
+                      withStructure: true,
+                      withFirstChapters: true,
+                    });
+                    await reload();
+                    notify(`已生成 ${result.plans} 个规划草稿和 ${result.chapters} 章章纲，请到规划台逐项确认`);
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  } finally {
+                    setLaunchBusy(false);
+                  }
+                }}
+              >
+                {launchBusy ? "正在生成开书包…" : "生成开书包"}
+              </Button>
+            </div>
+          )}
         </div>
         <div className="section-band compact-band">
           <div className="section-heading">

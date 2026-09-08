@@ -5,7 +5,7 @@ import { resolveGuidanceLevel } from "./guidance-mode";
 import { formatRetrievedGuidance, type GuidanceSignal, retrieveGuidance } from "./guidance-retrieval";
 import type { Genre } from "./types";
 
-export const COMMERCIAL_KNOWLEDGE_VERSION = "cn-web-fiction.2026-09.v7-on-demand";
+export const COMMERCIAL_KNOWLEDGE_VERSION = "cn-web-fiction.2026-09.v8-category-profiles";
 
 export interface CommercialKnowledgeSource {
   title: string;
@@ -118,12 +118,16 @@ export function compileCommercialGuidance(genre: Genre, chapterNumber: number, p
   const phaseRule = plugin.stages[phase];
   const subtype = plugin.subtypes.find((item) => item.name === progress?.subtype);
   const fanqieCategory = getFanqieCategoryProfile(progress?.fanqieCategoryKey);
+  const delta = fanqieCategory?.baselineDelta;
+  const coreFantasies = delta?.coreFantasies ?? plugin.coreFantasies;
+  const conflictEngines = delta?.conflictEngines ?? plugin.conflictEngines;
+  const rewardLadder = delta?.rewardLadder ?? plugin.rewardLadder;
   return [
     `知识库：${COMMERCIAL_KNOWLEDGE_VERSION}`,
     progress?.storyStage
       ? `当前项目阶段：${progress.storyStage.title}（第${chapterNumber}章）`
       : `当前题材节奏参考：${phase}（第${chapterNumber}章；尚无已审批宏观阶段）`,
-    `题材承诺：${plugin.readerPromise}`,
+    `题材承诺：${delta?.readerPromise ?? plugin.readerPromise}`,
     compileGenreComposition(progress),
     subtype
       ? `当前子类型：${subtype.name}｜核心幻想：${subtype.coreFantasy}｜目标读者：${subtype.targetAudience}｜禁忌：${subtype.tabooBoundary}`
@@ -132,7 +136,7 @@ export function compileCommercialGuidance(genre: Genre, chapterNumber: number, p
         : `可选子类型：${plugin.subtypes.map((item) => item.name).join("、")}`,
     fanqieCategory
       ? `番茄分类映射：${fanqieCategory.channel}·${fanqieCategory.name}｜建议子类型：${fanqieCategory.recommendedSubtype}｜核心幻想：${fanqieCategory.coreFantasy}｜目标读者：${fanqieCategory.audience}｜开篇抓手：${fanqieCategory.openingFocus}｜禁忌：${fanqieCategory.taboo}`
-      : "番茄分类映射：尚未选择，先按六套基础题材规则执行",
+      : "番茄分类映射：尚未选择，先按基础题材规则执行",
     ...(fanqieCategory
       ? [
           `分类叙事主轴：${fanqieCategory.narrativeGenres.join(" + ")}`,
@@ -141,12 +145,18 @@ export function compileCommercialGuidance(genre: Genre, chapterNumber: number, p
           `分类回报模式：${fanqieCategory.payoffPattern}`,
           `分类长线扩张：${fanqieCategory.expansionAxis}`,
           `分类疲劳信号：${fanqieCategory.fatigueSignal}`,
+          `分类读者画像：${fanqieCategory.readerAgeBand}｜单章参考：${fanqieCategory.typicalChapterWords[0]}–${fanqieCategory.typicalChapterWords[1]} 字｜首个回报：第 ${fanqieCategory.firstPayoffWindow[0]}–${fanqieCategory.firstPayoffWindow[1]} 章｜回报节奏：${fanqieCategory.payoffCadence}`,
+          `分类首章钩子形态：${fanqieCategory.chapterHookStyle}`,
+          `分类常见标签：${fanqieCategory.tags.join("、")}`,
+          `分类常见开局（主动避开同质化）：${fanqieCategory.commonOpenings.join("；")}`,
+          `分类常见毒点（必须绕开）：${fanqieCategory.clicheTraps.join("；")}`,
+          `分类差异化切口：${fanqieCategory.differentiationAngles.join("；")}`,
           "分类专属质检：",
           ...fanqieCategory.qualityChecks.map((item) => `- ${item}`),
         ]
       : []),
     `目标读者：${plugin.targetAudience.join("；")}`,
-    `基础题材母题（按需选用，不是固定套路）：${plugin.coreFantasies.join("；")}`,
+    `基础题材母题（按需选用，不是固定套路）：${coreFantasies.join("；")}`,
     `正向边界：${plugin.tabooAlternatives.join("；")}`,
     `（禁止的反面：${plugin.tabooBoundaries.join("；")}）`,
     ...(progress?.storyStage
@@ -165,8 +175,8 @@ export function compileCommercialGuidance(genre: Genre, chapterNumber: number, p
     "商业叙事循环：",
     ...CORE_LOOP.map((item) => `- ${item}`),
     "冲突工具箱（本章最多选择一项，不要求全部使用）：",
-    ...plugin.conflictEngines.map((item) => `- ${item}`),
-    `回报工具箱（不要求按固定顺序升级）：${plugin.rewardLadder.join("、")}`,
+    ...conflictEngines.map((item) => `- ${item}`),
+    `回报工具箱（不要求按固定顺序升级）：${rewardLadder.join("、")}`,
     "扩张轴工具箱（每个项目阶段选择一条主轴）：",
     ...plugin.expansionAxes.map((item) => `- ${item}`),
     "重复疲劳识别：",

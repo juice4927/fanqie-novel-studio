@@ -22,7 +22,7 @@ import type {
 export type ContextChapterExcerpt = Pick<Chapter, "number" | "title" | "outline" | "content">;
 
 export interface ContextCompilerInput {
-  summary: Pick<ProjectSummary, "genre" | "currentWords" | "targetWords">;
+  summary: Pick<ProjectSummary, "genre" | "currentWords" | "targetWords"> & { wordsPerChapter?: number };
   contract: StoryContract;
   chapter: Chapter;
   plans: readonly PlanNode[];
@@ -90,7 +90,7 @@ export function compileChapterContext(
   const approvedPlans = input.plans
     .filter((plan) => plan.status === "已批准")
     .sort((left, right) => left.ordinal - right.ordinal);
-  const volume = findCurrentVolume(approvedPlans, chapter.number);
+  const volume = findCurrentVolume(approvedPlans, chapter.number, summary.wordsPerChapter);
   const rollingCandidates = approvedPlans.filter(
     (plan) =>
       ["粗纲", "细纲", "场景卡"].includes(plan.kind) &&

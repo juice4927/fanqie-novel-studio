@@ -12,6 +12,7 @@ import type {
   BookConceptInput,
   Chapter,
   ContextPackage,
+  IncubationCandidate,
   ProjectDetail,
   QualityIssue,
   ResearchBook,
@@ -38,6 +39,23 @@ describe("book concept diversity", () => {
     primaryPayoff: "解决事故并获得职业认可",
     premise: "主角从一次职业事故中发现长期隐患并主动调查。",
     longFormEngine: "案件、关系和职业责任分三轮升级。",
+    openingDesign: {
+      chapter1Hook: `${overrides.openingMechanism ?? "职业事故迫使主角调查"}，主角当天必须做出一次具体选择。`,
+      firstThreeChaptersPromise: "前三章交代规则、代价与第一个明确目标。",
+      firstPayoffChapter: 2,
+      retentionAnchors: ["真相何时浮出", "代价由谁承担"],
+    },
+    escalationLadder: [
+      {
+        stage: "起步",
+        conflict: "资源不足",
+        expansionAxis: "资源" as const,
+        payoff: "完成第一次行动",
+        cost: "失去部分退路",
+      },
+      { stage: "扩张", conflict: "关系阻力", expansionAxis: "关系" as const, payoff: "建立合作", cost: "承担分配矛盾" },
+      { stage: "终局", conflict: "体系对抗", expansionAxis: "规则" as const, payoff: "改变规则", cost: "付出公开代价" },
+    ],
     ...overrides,
   });
 
@@ -229,7 +247,50 @@ describe("selected concept expansion", () => {
       audience: "偏好现实经营与女性成长的读者",
       commercialHook: "低谷接手倒闭资产并逆转经营",
       longFormEngine: "个人止损、团队经营和区域产业三轮扩张",
-    } satisfies BookConceptCandidate;
+      fanqieCategoryKey: "女频:79",
+      subGenreIds: [],
+      titleOptions: [
+        { title: "离婚当天，我接手了倒闭供销社", rationale: "处境反差直接点题", tags: ["年代", "经营"] },
+        { title: "供销社重启计划", rationale: "突出经营主线", tags: ["经营", "女性成长"] },
+        { title: "我在八零年代管账", rationale: "第一人称代入", tags: ["年代", "群像"] },
+      ],
+      openingDesign: {
+        chapter1Hook: "离婚当天主角接手亏损供销社，第一张进货单就暴露出资金缺口，她必须当天决定补窟窿还是关门。",
+        firstThreeChaptersPromise: "前三章交代供销社的经营规则、家庭压力与第一批可以依靠的人。",
+        firstPayoffChapter: 2,
+        retentionAnchors: ["异常进货单背后的旧账", "女工们各自的生计目标"],
+      },
+      escalationLadder: [
+        {
+          stage: "止损",
+          conflict: "现金流断裂",
+          expansionAxis: "资源",
+          payoff: "让供销社活过第一个月",
+          cost: "让出个人积蓄",
+        },
+        {
+          stage: "渠道重建",
+          conflict: "旧渠道被把持",
+          expansionAxis: "关系",
+          payoff: "恢复稳定供货",
+          cost: "承担团队分配矛盾",
+        },
+        {
+          stage: "区域产业",
+          conflict: "外部资本压价",
+          expansionAxis: "势力",
+          payoff: "守住区域供应链",
+          cost: "与旧利益网络冲突",
+        },
+      ],
+      sustainability: { fatiguePoint: "连续两轮只写经营数字", shiftPlan: "切换扩张轴，把回报升级为关系或制度变化" },
+      differentiation: {
+        against: ["主角靠专业动作而非金手指", "反派有完整利益动机", "关系线由行动推进"],
+        originalityRisk: "低",
+        riskNotes: "原创设定，未引用具体作品。",
+      },
+      suggestedTags: ["年代", "经营", "女性成长", "群像"],
+    } satisfies IncubationCandidate;
     await expect(new AiService(database, () => "secret").expandBookConcept(input, concept)).resolves.toEqual(skeleton);
     expect(requests[0]).toContain("离婚当天，我接手了倒闭供销社");
     expect(requests[0]).toContain("不要系统");

@@ -41,6 +41,7 @@ import type {
   ChapterStatus,
   CreateProjectInput,
   ExpectationEntry,
+  IncubationDraft,
   InsightPack,
   LedgerFact,
   MetricSnapshot,
@@ -111,6 +112,7 @@ interface CatalogRow {
   genre: ProjectSummary["genre"];
   status: ProjectSummary["status"];
   target_words: number;
+  words_per_chapter: number | null;
   update_cadence: string;
   safe_stock_line: number;
   created_at: string;
@@ -167,6 +169,7 @@ export class WorkspaceDatabase {
         genre TEXT NOT NULL,
         status TEXT NOT NULL,
         target_words INTEGER NOT NULL,
+        words_per_chapter INTEGER NOT NULL DEFAULT 2500,
         update_cadence TEXT NOT NULL,
         safe_stock_line INTEGER NOT NULL DEFAULT 10,
         created_at TEXT NOT NULL,
@@ -185,6 +188,22 @@ export class WorkspaceDatabase {
         if (!hasColumn(db, "projects", "safe_stock_line"))
           db.exec("ALTER TABLE projects ADD COLUMN safe_stock_line INTEGER NOT NULL DEFAULT 10");
       },
+      (db) => {
+        if (!hasColumn(db, "projects", "words_per_chapter"))
+          db.exec("ALTER TABLE projects ADD COLUMN words_per_chapter INTEGER NOT NULL DEFAULT 2500");
+      },
+      (db) =>
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS incubations (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        step TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        project_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      `),
       (db) => {
         for (const column of [
           "input_tokens INTEGER NOT NULL DEFAULT 0",
@@ -432,8 +451,8 @@ export class WorkspaceDatabase {
     this.catalog
       .prepare(
         `
-      INSERT INTO projects(id, title, genre, status, target_words, update_cadence, safe_stock_line, created_at, updated_at)
-      VALUES(?, ?, ?, '候选立项', ?, ?, ?, ?, ?)
+      INSERT INTO projects(id, title, genre, status, target_words, words_per_chapter, update_cadence, safe_stock_line, created_at, updated_at)
+      VALUES(?, ?, ?, '候选立项', ?, ?, ?, ?, ?, ?)
     `,
       )
       .run(
@@ -441,6 +460,7 @@ export class WorkspaceDatabase {
         prepared.summary.title,
         prepared.summary.genre,
         prepared.summary.targetWords,
+        prepared.summary.wordsPerChapter,
         prepared.summary.updateCadence,
         prepared.summary.safeStockLine,
         timestamp,
@@ -462,11 +482,78 @@ export class WorkspaceDatabase {
     return this.getProjectSummary(created.id);
   }
 
+  listIncubations(): IncubationDraft[] {
+    return (
+      this.catalog.prepare("SELECT payload FROM incubations ORDER BY updated_at DESC, id").all() as Array<{
+        payload: string;
+      }>
+    ).map((row) => parseJson<IncubationDraft>(row.payload));
+  }
+
+  getIncubation(id: string): IncubationDraft {
+    const row = this.catalog.prepare("SELECT payload FROM incubations WHERE id = ?").get(id) as
+      | { payload: string }
+      | undefined;
+    if (!row) throw new Error("立项草稿不存在或已被删除");
+    return parseJson<IncubationDraft>(row.payload);
+  }
+
+  saveIncubation(draft: IncubationDraft): IncubationDraft {
+    this.catalog
+      .prepare(
+        `
+      INSERT OR REPLACE INTO incubations(id, status, step, payload, project_id, created_at, updated_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?)
+    `,
+      )
+      .run(
+        draft.id,
+        draft.status,
+        draft.step,
+        JSON.stringify(draft),
+        draft.createdProjectId,
+        draft.createdAt,
+        draft.updatedAt,
+      );
+    return this.getIncubation(draft.id);
+  }
+
+  deleteIncubation(id: string) {
+    const row = this.catalog.prepare("SELECT id FROM incubations WHERE id = ?").get(id);
+    if (!row) throw new Error("立项草稿不存在或已被删除");
+    this.catalog.prepare("DELETE FROM incubations WHERE id = ?").run(id);
+  }
+
+  markIncubationPromoted(id: string, projectId: string, updatedAt: string): IncubationDraft {
+    const draft = this.getIncubation(id);
+    if (draft.createdProjectId) throw new Error("该立项草稿已经创建过作品");
+    const next: IncubationDraft = {
+      ...draft,
+      status: "已立项",
+      step: "开书包",
+      createdProjectId: projectId,
+      updatedAt,
+    };
+    return this.saveIncubation(next);
+  }
+
   listProjects(): ProjectSummary[] {
     const rows = this.catalog
       .prepare("SELECT * FROM projects WHERE status != '归档' ORDER BY updated_at DESC, id")
       .all() as unknown as CatalogRow[];
     return rows.map((row) => this.hydrateSummary(row));
+  }
+
+  /** 立项体检用的最小契约指纹：只暴露书名、前提与开局机制，不含正文或账本。 */
+  listProjectSignatures(): Array<{ title: string; premise: string; openingMechanism: string }> {
+    return this.listProjects().map((summary) => {
+      const contract = this.getState<StoryContract>(this.projectDb(summary.id), "contract");
+      return {
+        title: summary.title,
+        premise: contract.premise ?? "",
+        openingMechanism: contract.openingMechanism ?? "",
+      };
+    });
   }
 
   deleteProject(id: string, confirmationTitle: string) {
@@ -597,6 +684,7 @@ export class WorkspaceDatabase {
       genre: row.genre,
       status: row.status,
       targetWords: row.target_words,
+      wordsPerChapter: row.words_per_chapter ?? 2500,
       currentWords: Number(chapterStats.current_words),
       chapterCount: Number(chapterStats.chapter_count),
       stockChapters: Number(chapterStats.stock_chapters),
@@ -620,10 +708,19 @@ export class WorkspaceDatabase {
     this.catalog
       .prepare(
         `
-      UPDATE projects SET title = ?, status = ?, target_words = ?, update_cadence = ?, safe_stock_line = ?, updated_at = ? WHERE id = ?
+      UPDATE projects SET title = ?, status = ?, target_words = ?, words_per_chapter = ?, update_cadence = ?, safe_stock_line = ?, updated_at = ? WHERE id = ?
     `,
       )
-      .run(next.title, next.status, next.targetWords, next.updateCadence, next.safeStockLine, updatedAt, id);
+      .run(
+        next.title,
+        next.status,
+        next.targetWords,
+        next.wordsPerChapter,
+        next.updateCadence,
+        next.safeStockLine,
+        updatedAt,
+        id,
+      );
     return this.getProjectSummary(id);
   }
 
@@ -861,9 +958,11 @@ export class WorkspaceDatabase {
       );
       endingExpectationId = savedExpectation.id;
     }
-    const genre = (
-      this.catalog.prepare("SELECT genre FROM projects WHERE id = ?").get(id) as { genre: ProjectSummary["genre"] }
-    ).genre;
+    const projectRow = this.catalog.prepare("SELECT genre, words_per_chapter FROM projects WHERE id = ?").get(id) as
+      | { genre: ProjectSummary["genre"]; words_per_chapter: number | null }
+      | undefined;
+    if (!projectRow) throw new Error("项目不存在");
+    const genre = projectRow.genre;
     const contract = this.getState<StoryContract>(db, "contract");
     const next = prepareChapterSave(chapter, {
       previous,
@@ -878,6 +977,7 @@ export class WorkspaceDatabase {
         plans,
         genre,
         majorStateChanges: contract.majorStateChanges,
+        wordsPerChapter: projectRow.words_per_chapter ?? 2500,
       }),
       updatedAt: now(),
     });
@@ -1910,7 +2010,11 @@ export class WorkspaceDatabase {
   private updateSummaries(projectId: string, chapter: Chapter) {
     const db = this.projectDb(projectId);
     const project = this.getProjectOverview(projectId);
-    const updates = prepareFinalizedChapterSummaries(project, chapter, now());
+    const updates = prepareFinalizedChapterSummaries(
+      { ...project, wordsPerChapter: project.summary.wordsPerChapter },
+      chapter,
+      now(),
+    );
     for (const summary of updates) {
       const previous = this.getRecord<StorySummary>(db, "summaries", summary.id);
       this.saveRecord(db, "summaries", summary.id, summary, previous?.version);

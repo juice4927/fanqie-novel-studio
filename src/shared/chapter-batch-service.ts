@@ -41,7 +41,7 @@ export function buildChapterBatchPreview(
     return blocked("需要从当前章开始预先建立连续五章及其章纲");
   }
 
-  const boundaries = volumeBoundaryChapters(project.plans);
+  const boundaries = volumeBoundaryChapters(project.plans, project.summary.wordsPerChapter);
   const activeHardIssues = new Set(
     project.issues
       .filter((issue) => issue.severity === "硬性" && issue.status === "待处理")

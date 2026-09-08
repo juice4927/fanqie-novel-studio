@@ -78,12 +78,22 @@ describe("per-book isolation and gates", () => {
 
     const database = new WorkspaceDatabase(root);
     databases.push(database);
-    expect(database.listProjects()[0]).toMatchObject({ id: "legacy-project", title: "旧版作品", safeStockLine: 10 });
+    expect(database.listProjects()[0]).toMatchObject({
+      id: "legacy-project",
+      title: "旧版作品",
+      safeStockLine: 10,
+      wordsPerChapter: 2500,
+    });
     const inspection = new DatabaseSync(path.join(root, "catalog.sqlite"));
-    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(7);
+    expect((inspection.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(9);
     expect(
       (inspection.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some(
         (column) => column.name === "safe_stock_line",
+      ),
+    ).toBe(true);
+    expect(
+      (inspection.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some(
+        (column) => column.name === "words_per_chapter",
       ),
     ).toBe(true);
     inspection.close();

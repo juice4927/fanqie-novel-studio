@@ -72,6 +72,8 @@ export const CandidateSchema = z.object({
     .length(3),
 });
 
+export const EXPANSION_AXES = ["资源", "关系", "地图", "规则", "身份", "技艺", "势力"] as const;
+
 export const BookConceptSchema = z.object({
   candidates: z
     .array(
@@ -93,10 +95,53 @@ export const BookConceptSchema = z.object({
         audience: z.string().min(5).max(200),
         commercialHook: z.string().min(8).max(300),
         longFormEngine: z.string().min(10).max(400),
+        fanqieCategoryKey: z.string().min(3).max(40),
+        subGenreIds: z.array(z.string().min(1).max(60)).max(2),
+        titleOptions: z
+          .array(
+            z.object({
+              title: z.string().min(4).max(40),
+              rationale: z.string().min(8).max(200),
+              tags: z.array(z.string().min(1).max(20)).min(1).max(8),
+            }),
+          )
+          .min(3)
+          .max(5),
+        openingDesign: z.object({
+          chapter1Hook: z.string().min(12).max(300),
+          firstThreeChaptersPromise: z.string().min(12).max(300),
+          firstPayoffChapter: z.number().int().min(1).max(30),
+          retentionAnchors: z.array(z.string().min(4).max(80)).min(2).max(6),
+        }),
+        escalationLadder: z
+          .array(
+            z.object({
+              stage: z.string().min(2).max(60),
+              conflict: z.string().min(8).max(200),
+              expansionAxis: z.enum(EXPANSION_AXES),
+              payoff: z.string().min(4).max(120),
+              cost: z.string().min(4).max(120),
+            }),
+          )
+          .min(3)
+          .max(5),
+        sustainability: z.object({
+          fatiguePoint: z.string().min(8).max(200),
+          shiftPlan: z.string().min(8).max(200),
+        }),
+        differentiation: z.object({
+          against: z.array(z.string().min(8).max(200)).min(2).max(5),
+          originalityRisk: z.enum(["低", "中", "高"]),
+          riskNotes: z.string().min(4).max(200),
+        }),
+        suggestedTags: z.array(z.string().min(1).max(20)).min(2).max(10),
       }),
     )
     .length(3),
 });
+
+/** 立项候选使用同一份 schema；保留别名便于调用点表达意图。 */
+export const IncubationCandidateSchema = BookConceptSchema;
 
 const distinctSkeletonList = (minimum: number, maximum: number) =>
   z
@@ -201,6 +246,8 @@ export function conceptDiversityIssues(
       | "primaryPayoff"
       | "premise"
       | "longFormEngine"
+      | "openingDesign"
+      | "escalationLadder"
     >
   >,
   requireDistinctNarrativeAxis = false,
@@ -211,15 +258,17 @@ export function conceptDiversityIssues(
     ["开局机制", (candidate) => candidate.openingMechanism],
     ["成长载体", (candidate) => candidate.growthCarrier],
     ["主要回报", (candidate) => candidate.primaryPayoff],
+    ["首章钩子", (candidate) => candidate.openingDesign.chapter1Hook],
+    ["升级阶梯", (candidate) => candidate.escalationLadder.map((step) => step.expansionAxis).join(">")],
   ];
   const fullyDistinct = dimensions.filter(
     ([, select]) => new Set(candidates.map((candidate) => diversityKey(select(candidate)))).size === candidates.length,
   );
-  if (fullyDistinct.length < 3) {
+  if (fullyDistinct.length < 4) {
     const repeated = dimensions
       .filter(([name]) => !fullyDistinct.some(([distinctName]) => distinctName === name))
       .map(([name]) => name);
-    issues.push(`至少三个核心维度必须完全不同；当前重复：${repeated.join("、")}`);
+    issues.push(`至少四个核心维度必须完全不同；当前重复：${repeated.join("、")}`);
   }
   if (
     requireDistinctNarrativeAxis &&

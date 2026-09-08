@@ -263,6 +263,13 @@ export function qualityCheck(payload: QualityPayload): LocalQualityResult {
     现言甜宠: ["关系", "选择", "边界"],
     古言宅斗: ["信息", "证据", "名分"],
     年代重生: ["时代", "生计", "政策"],
+    科幻末世: ["规则", "资源", "威胁"],
+    悬疑推理: ["线索", "证据", "真相"],
+    游戏竞技: ["训练", "赛制", "团队"],
+    快穿衍生: ["单元", "主线", "自我"],
+    青春校园: ["成长", "关系", "目标"],
+    军事谍战: ["情报", "身份", "组织"],
+    现实职场: ["专业", "权责", "成长"],
   };
   if (chapter.outline && !genreHints[genre].some((hint) => chapter.outline.includes(hint))) {
     add("建议", "题材规则", `章纲未明确体现${genre}常用的“${genreHints[genre].join(" / ")}”检查维度`);

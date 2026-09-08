@@ -68,6 +68,8 @@ interface ChapterBatchModeContext {
   plans: readonly PlanNode[];
   genre: Genre;
   majorStateChanges?: MajorStateChangeRules;
+  /** 项目级单章目标字数，用于卷界判断；缺省按 2500 估算。 */
+  wordsPerChapter?: number;
 }
 
 export function deriveChapterBatchMode(chapter: Chapter, context: ChapterBatchModeContext): Chapter["batchMode"] {
@@ -75,7 +77,9 @@ export function deriveChapterBatchMode(chapter: Chapter, context: ChapterBatchMo
   const hasHardIssue = context.issues.some(
     (issue) => issue.chapterId === chapter.id && issue.severity === "硬性" && issue.status === "待处理",
   );
-  const isVolumeBoundary = volumeBoundaryChapters([...context.plans]).has(chapter.number);
+  const isVolumeBoundary = volumeBoundaryChapters([...context.plans], context.wordsPerChapter ?? 2500).has(
+    chapter.number,
+  );
   return chapter.isKeyChapter ||
     hasFactConflict ||
     hasHardIssue ||

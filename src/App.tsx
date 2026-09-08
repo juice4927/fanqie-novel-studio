@@ -7,6 +7,7 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -19,13 +20,16 @@ import { NavigationGuardProvider, useNavigationGuard } from "./lib/navigation-gu
 import { DashboardPage } from "./pages/DashboardPage";
 
 const ResearchPage = lazy(() => import("./pages/ResearchPage").then((m) => ({ default: m.ResearchPage })));
+const IncubationWorkspace = lazy(() =>
+  import("./pages/IncubationWorkspace").then((m) => ({ default: m.IncubationWorkspace })),
+);
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const ProjectPage = lazy(() => import("./pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
 
 import { describeError } from "./lib/error-message";
-import type { DashboardData, ProjectSummary, UpdateStatus } from "./shared/types";
+import type { DashboardData, IncubationDraft, ProjectSummary, UpdateStatus } from "./shared/types";
 
-type AppPage = "dashboard" | "research" | "project" | "settings";
+type AppPage = "dashboard" | "research" | "incubation" | "project" | "settings";
 
 export default function App() {
   return (
@@ -42,7 +46,8 @@ function Workbench() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [createModal, setCreateModal] = useState(false);
+  const [createModal, setCreateModal] = useState<{ draft: IncubationDraft | null } | null>(null);
+  const [incubations, setIncubations] = useState<IncubationDraft[]>([]);
   const [deleteProject, setDeleteProject] = useState<ProjectSummary | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -53,14 +58,16 @@ function Workbench() {
   const [updateBusy, setUpdateBusy] = useState(false);
 
   const reload = useCallback(async () => {
-    const [nextDashboard, nextProjects, settings] = await Promise.all([
+    const [nextDashboard, nextProjects, settings, nextIncubations] = await Promise.all([
       api.getDashboard(),
       api.listProjects(),
       api.getAiSettings().catch(() => null),
+      api.listIncubations().catch(() => []),
     ]);
     setDashboard(nextDashboard);
     setProjects(nextProjects);
     setHasApiKey(settings?.hasApiKey ?? null);
+    setIncubations(nextIncubations.filter((draft) => draft.status === "孵化中"));
   }, [api]);
   useEffect(() => {
     void reload();
@@ -120,11 +127,25 @@ function Workbench() {
             <BookCopy size={18} />
             市场研究
           </button>
+          <button
+            type="button"
+            className={page === "incubation" ? "active" : ""}
+            onClick={() => navigate("incubation")}
+          >
+            <Sparkles size={18} />
+            立项台
+            {incubations.length > 0 && <span className="nav-count">{incubations.length}</span>}
+          </button>
         </nav>
         <div className="sidebar-projects">
           <div className="sidebar-label">
             <span>作品库</span>
-            <button type="button" aria-label="新建作品" title="新建作品" onClick={() => setCreateModal(true)}>
+            <button
+              type="button"
+              aria-label="新建作品"
+              title="新建作品"
+              onClick={() => setCreateModal({ draft: null })}
+            >
               <Plus size={15} />
             </button>
           </div>
@@ -170,7 +191,9 @@ function Workbench() {
             <DashboardPage
               data={dashboard}
               hasApiKey={hasApiKey}
-              onCreate={() => setCreateModal(true)}
+              incubations={incubations}
+              onCreate={() => setCreateModal({ draft: null })}
+              onResumeIncubation={(draft) => setCreateModal({ draft })}
               onOpenProject={openProject}
               onOpenSettings={() => navigate("settings")}
               onDeleteProject={(project) => {
@@ -180,6 +203,17 @@ function Workbench() {
             />
           )}
           {page === "research" && <ResearchPage api={api} notify={notify} />}
+          {page === "incubation" && (
+            <IncubationWorkspace
+              api={api}
+              drafts={incubations}
+              reload={reload}
+              notify={notify}
+              onEdit={(draft) => setCreateModal({ draft })}
+              onNew={() => setCreateModal({ draft: null })}
+              onOpenProject={openProject}
+            />
+          )}
           {page === "settings" && <SettingsPage api={api} notify={notify} />}
           {page === "project" && selectedProjectId && (
             <ProjectPage
@@ -198,10 +232,11 @@ function Workbench() {
       {createModal && (
         <NewProjectModal
           api={api}
-          onClose={() => setCreateModal(false)}
+          initialDraft={createModal.draft}
+          onClose={() => setCreateModal(null)}
           notify={notify}
           onCreated={async (created) => {
-            setCreateModal(false);
+            setCreateModal(null);
             await reload();
             openProject(created.id);
             notify("作品与创作契约草案已创建，请先在故事圣经中审核");

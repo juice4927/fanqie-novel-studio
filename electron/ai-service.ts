@@ -8,8 +8,9 @@ import {
   resolveStoryStage,
 } from "../src/shared/commercial-knowledge";
 import { renderContextForPrompt } from "../src/shared/context-compiler";
+import { compilePositioningCard } from "../src/shared/creation-options";
 import { AppError, isAppError } from "../src/shared/error-codes";
-import { getFanqieCategoryProfile } from "../src/shared/fanqie-taxonomy";
+import { getFanqieCategoryProfile, listFanqieSubGenres } from "../src/shared/fanqie-taxonomy";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
 import {
@@ -25,7 +26,6 @@ import { PROMPT_VERSION } from "../src/shared/prompt-version";
 import { parseStoryNumber } from "../src/shared/story-constraints";
 import type {
   AestheticProfileSuggestion,
-  BookConceptCandidate,
   BookConceptInput,
   BookConceptSkeleton,
   Chapter,
@@ -33,6 +33,7 @@ import type {
   ChapterQualityReview,
   ConceptCandidate,
   ContextPackage,
+  IncubationCandidate,
   InsightPack,
   LedgerFact,
   MarketOpportunity,
@@ -922,14 +923,24 @@ export class AiService {
     return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
   }
 
-  async generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]> {
+  async generateBookConcepts(input: BookConceptInput, insights: InsightPack[] = []): Promise<IncubationCandidate[]> {
     const plugin = GENRE_PLUGINS[input.genre];
+    const category = getFanqieCategoryProfile(input.fanqieCategoryKey);
+    const subGenreOptions = input.fanqieCategoryKey ? listFanqieSubGenres(input.fanqieCategoryKey) : [];
     const allowDebtAccounting = authorRequestsDebtAccounting(input);
     const defaultMotifBoundary = allowDebtAccounting
       ? "作者已明确选择债务或账目相关内容，可以据此创作，但仍需避免重复套路。"
       : "作者没有选择债务或账目题材。不得把债务、欠款、欠薪、讨债、催收、还债、清账、旧账、账本或清算作为人物困境、开局钩子、能力隐喻、冲突主线或成长载体；请从身份、生存、竞争、关系、规则、探索、技艺、责任或外部危机中选择更贴合题材的压力。";
-    const system = `你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案要在主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机中至少有四项实质不同，避免共享同一套升级换皮结构。genreSubtype 分别概括三条不同路线，用词差异要对应真实差异。书名应清楚传达题材、身份反差或核心看点，并避开已有作品、热榜书名和独特设定。结局要明确主线如何收束，而不是开放式占位语。${defaultMotifBoundary}`;
-    const baseUser = `平台主题材：${input.genre}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。三个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n输出 candidates，严格三项。先在内部为三案分别确定叙事主轴、开局机制、成长载体和主要回报，确认至少三项互不相同后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，每个方案的 secondaryGenres 都必须包含作者所选类型，但三案仍须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、secondaryGenres、genreElements、openingMechanism、growthCarrier、primaryPayoff、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。secondaryGenres 必须使用给定的叙事主轴枚举。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`;
+    const system = `你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案要在主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机中至少有四项实质不同，避免共享同一套升级换皮结构。genreSubtype 分别概括三条不同路线，用词差异要对应真实差异。书名应清楚传达题材、身份反差或核心看点，并避开已有作品、热榜书名和独特设定。结局要明确主线如何收束，而不是开放式占位语。
+每个方案还必须给出：
+- titleOptions：3–5 个书名候选，每个含标题、为什么这样起名、建议标签。
+- openingDesign：首章钩子（谁在什么处境下做了什么选择、立刻产生什么后果）、前三章向读者承诺什么、首个实质回报落在第几章、2–4 个追读锚点。
+- escalationLadder：3–5 级升级阶梯，每级写明阶段、冲突、扩张轴（资源/关系/地图/规则/身份/技艺/势力）、回报与代价。
+- sustainability：最容易疲劳的位置与换挡方案。
+- differentiation：与同类常见套路的三点差异、原创风险、风险说明。
+- suggestedTags：读者会用来搜索这本书的标签。
+首章钩子必须具体到事件与选择，不得使用"命运、宿命、觉醒、神秘力量"这类空泛表述；首个回报章必须落在所选分类的建议窗口内。${defaultMotifBoundary}`;
+    const baseUser = `平台主题材：${input.genre}\n番茄分类：${category ? `${category.channel}·${category.name}` : "未指定"}\n定位卡：${compilePositioningCard(input)}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。三个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n单章目标字数：${input.wordsPerChapter ?? 2500}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, fanqieCategoryKey: input.fanqieCategoryKey, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n${subGenreOptions.length ? `可选二级流派（最多选 2 个，id 必须来自此列表）：${subGenreOptions.map((item) => `${item.id}=${item.name}`).join("、")}` : "二级流派：无"}${insights.length ? `\n脱敏市场洞察（只作读者需求证据，不得复述或模仿任何具体作品）：${JSON.stringify(insights)}` : ""}\n输出 candidates，严格三项。fanqieCategoryKey 必须等于「${input.fanqieCategoryKey ?? ""}」；subGenreIds 只能从上面列表里选，最多两个。先在内部为三案分别确定叙事主轴、开局机制、成长载体和主要回报，确认至少四项互不相同后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，每个方案的 secondaryGenres 都必须包含作者所选类型，但三案仍须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、secondaryGenres、genreElements、openingMechanism、growthCarrier、primaryPayoff、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine，以及 fanqieCategoryKey、subGenreIds、titleOptions、openingDesign、escalationLadder、sustainability、differentiation、suggestedTags。secondaryGenres 必须使用给定的叙事主轴枚举。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`;
     const run = (retryIssues?: string[]) =>
       this.runJson({
         projectId: null,
@@ -950,26 +961,30 @@ export class AiService {
           ? []
           : [`部分方案未保留作者选择的叙事主轴：${genre}`],
       );
-    let issues = [
-      ...conceptDiversityIssues(result.candidates, !input.secondaryGenres?.length),
-      ...selectionIssues(result.candidates),
-      ...conceptDefaultMotifIssues(result.candidates, allowDebtAccounting),
+    const collectIssues = (candidates: GeneratedBookConcept[]) => [
+      ...conceptDiversityIssues(candidates, !input.secondaryGenres?.length),
+      ...selectionIssues(candidates),
+      ...conceptDefaultMotifIssues(candidates, allowDebtAccounting),
     ];
+    let issues = collectIssues(result.candidates);
     if (issues.length) {
       this.log("warn", "book-concepts.diversity-retry", { issues });
       result = await run(issues);
-      issues = [
-        ...conceptDiversityIssues(result.candidates, !input.secondaryGenres?.length),
-        ...selectionIssues(result.candidates),
-        ...conceptDefaultMotifIssues(result.candidates, allowDebtAccounting),
-      ];
+      issues = collectIssues(result.candidates);
       if (issues.length)
         throw new Error(`三套方案未通过立项检查：${issues.join("；")}。请补充更具体的复合类型或自定义方向后重试。`);
     }
-    return result.candidates.map((candidate) => ({ ...candidate, id: randomUUID() }));
+    return result.candidates.map((candidate) => ({
+      ...candidate,
+      id: randomUUID(),
+      fanqieCategoryKey: input.fanqieCategoryKey ?? candidate.fanqieCategoryKey,
+      subGenreIds: (candidate.subGenreIds ?? [])
+        .filter((id) => subGenreOptions.some((item) => item.id === id))
+        .slice(0, 2),
+    }));
   }
 
-  async expandBookConcept(input: BookConceptInput, concept: BookConceptCandidate): Promise<BookConceptSkeleton> {
+  async expandBookConcept(input: BookConceptInput, concept: IncubationCandidate): Promise<BookConceptSkeleton> {
     const defaultMotifBoundary = authorRequestsDebtAccounting(input)
       ? ""
       : "作者没有选择债务或账目题材，不得在扩展时新增欠债、欠款、讨债、清账、旧账、账本或清算等冲突与隐喻。";

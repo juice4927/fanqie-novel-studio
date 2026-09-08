@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { Badge, Button, EmptyState, IconButton, Progress } from "../components/UI";
 import { formatCount, formatDate } from "../lib/format";
-import type { DashboardData, ProjectSummary } from "../shared/types";
+import type { DashboardData, IncubationDraft, ProjectSummary } from "../shared/types";
 
 function riskTone(risk: ProjectSummary["riskLevel"]) {
   return risk === "告警" ? "danger" : risk === "注意" ? "warning" : "success";
@@ -27,14 +27,18 @@ const SETUP_STEPS = [
 export function DashboardPage({
   data,
   hasApiKey,
+  incubations = [],
   onCreate,
+  onResumeIncubation,
   onOpenProject,
   onOpenSettings,
   onDeleteProject,
 }: {
   data: DashboardData;
   hasApiKey?: boolean | null;
+  incubations?: IncubationDraft[];
   onCreate: () => void;
+  onResumeIncubation?: (draft: IncubationDraft) => void;
   onOpenProject: (id: string) => void;
   onOpenSettings?: () => void;
   onDeleteProject: (project: ProjectSummary) => void;
@@ -82,6 +86,35 @@ export function DashboardPage({
           </div>
         </div>
       </section>
+
+      {incubations.length > 0 && (
+        <section className="section-band compact-band">
+          <div className="section-heading">
+            <div>
+              <h2>立项草稿</h2>
+              <p>未完成的从 0 开书草稿会保留在这里，可随时继续。</p>
+            </div>
+          </div>
+          <div className="choice-list">
+            {incubations.map((draft) => (
+              <div key={draft.id} className="draft-row">
+                <span>
+                  <strong>
+                    {draft.candidates.find((item) => item.id === draft.selectedCandidateId)?.title ?? "未命名立项"}
+                  </strong>
+                  <small>
+                    {draft.positioning.fanqieCategoryKey || "未选分类"} · {draft.candidates.length} 套方案 · 步骤{" "}
+                    {draft.step} · 更新 {formatDate(draft.updatedAt, true)}
+                  </small>
+                </span>
+                <Button variant="secondary" onClick={() => onResumeIncubation?.(draft)}>
+                  继续
+                </Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="section-band">
         <div className="section-heading">

@@ -1,3 +1,4 @@
+import { aggregateCategoryTags } from "../shared/category-tags";
 import {
   decideChangeRequest as decideChangeRequestDraft,
   prepareChangeRequest,
@@ -21,7 +22,9 @@ import {
 } from "../shared/dashboard-policy";
 import { prepareExpectationSave } from "../shared/expectation-service";
 import { planFactConflictResolution, prepareFactSave } from "../shared/fact-service";
+import { getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
 import { computeGenerationQuality } from "../shared/generation-quality";
+import { positioningToConceptInput } from "../shared/incubation";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import {
   applyContractRepairs,
@@ -52,6 +55,7 @@ import type {
   ExpectationEntry,
   Genre,
   ImportPreview,
+  IncubationCandidate,
   InsightPack,
   LedgerFact,
   NovelRevisionApplyResult,
@@ -77,6 +81,7 @@ function load(): DemoState {
     state.directorNotes ??= {};
     state.genDecisions ??= {};
     state.planVersions ??= {};
+    state.incubations ??= [];
     for (const project of state.projects) {
       for (const plan of project.plans) {
         state.planVersions[plan.id] ??= plan.status === "已批准" ? 2 : 1;
@@ -211,6 +216,31 @@ function browserConceptSkeleton(concept: BookConceptCandidate): BookConceptSkele
   };
 }
 
+function applyConceptToProject(project: ProjectDetail, input: BookConceptInput, concept: IncubationCandidate) {
+  project.contract = {
+    ...project.contract,
+    premise: concept.premise,
+    genreSubtype: concept.genreSubtype,
+    fanqieCategoryKey: concept.fanqieCategoryKey || input.fanqieCategoryKey || "",
+    secondaryGenres: concept.secondaryGenres,
+    genreElements: concept.genreElements,
+    customGenreDirection: input.customGenreDirection ?? "",
+    audience: concept.audience,
+    commercialHook: concept.commercialHook,
+    openingMechanism: concept.openingMechanism,
+    growthCarrier: concept.growthCarrier,
+    primaryPayoff: concept.primaryPayoff,
+    longFormEngine: concept.longFormEngine,
+    protagonistDesire: concept.protagonistDesire,
+    readerPromise: concept.readerPromise,
+    ...browserConceptSkeleton(concept),
+    coreEmotion: concept.coreEmotion,
+    ending: concept.ending,
+    immutableRules: concept.immutableRules,
+    prohibitedPatterns: concept.prohibitedPatterns,
+  };
+}
+
 const WEB_UPDATE_STATUS: UpdateStatus = {
   phase: "idle",
   currentVersion: "浏览器预览",
@@ -266,7 +296,7 @@ export function createBrowserApi(): AppApi {
     async createProject(input: CreateProjectInput) {
       return createProject(input);
     },
-    async generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]> {
+    async generateBookConcepts(input: BookConceptInput): Promise<IncubationCandidate[]> {
       const ideas = [
         ["她能看见事故留下的断点", "被错误定责的安全调查员，发现每起事故现场都会显露一处可验证的因果断点。"],
         [
@@ -282,6 +312,20 @@ export function createBrowserApi(): AppApi {
           openingMechanism: "事故现场暴露一处反常断点",
           growthCarrier: "职业调查能力与证据网络",
           primaryPayoff: "还原事故真相并夺回职业尊严",
+          categoryKey: "男频:539",
+          openingDesign: {
+            chapter1Hook:
+              "主角在复核旧案时发现一处无法用常规解释的痕迹，她选择违规留存证据，当场失去最后一次复职机会。",
+            firstThreeChaptersPromise: "前三章给出调查规则、主角的职业代价，以及第一条可复核的因果断点。",
+            firstPayoffChapter: 2,
+            retentionAnchors: ["断点为何只在事故现场出现", "谁在系统性地抹掉记录", "主角的职业信用还能撑多久"],
+          },
+          ladder: [
+            ["单点验证", "一处断点无人相信", "技艺", "确认断点真实存在", "失去复职机会"],
+            ["方法成形", "断点与人事网络冲突", "关系", "建立可复核的调查方法", "被同行孤立"],
+            ["体系对抗", "断点指向监管体系", "势力", "公开真相并改写调查规范", "失去部分盟友"],
+          ],
+          suggestedTags: ["悬疑", "探案", "女频成长", "现实", "推理"],
         },
         {
           secondaryGenres: ["经营", "群像"] as const,
@@ -289,6 +333,20 @@ export function createBrowserApi(): AppApi {
           openingMechanism: "接手即将倒闭的供销社",
           growthCarrier: "商品渠道与女性互助团队",
           primaryPayoff: "经营成果改变个人和社区处境",
+          categoryKey: "女频:79",
+          openingDesign: {
+            chapter1Hook:
+              "离婚当天主角接手亏损供销社，第一张进货单就暴露出前任留下的资金缺口，她必须当天决定是补窟窿还是关门。",
+            firstThreeChaptersPromise: "前三章交代供销社的真实经营规则、主角的家庭压力与第一批可以依靠的人。",
+            firstPayoffChapter: 2,
+            retentionAnchors: ["异常进货单背后的旧账", "女工们各自的生计目标", "前夫家的资产争夺"],
+          },
+          ladder: [
+            ["止损", "现金流断裂", "资源", "让供销社活过第一个月", "让出一部分个人积蓄"],
+            ["渠道重建", "旧渠道被人把持", "关系", "恢复稳定供货并组建团队", "承担团队分配矛盾"],
+            ["区域产业", "外部资本压价收购", "势力", "形成区域供应链并守住控制权", "与旧利益网络正面冲突"],
+          ],
+          suggestedTags: ["年代", "经营", "女性成长", "群像", "创业"],
         },
         {
           secondaryGenres: ["冒险", "经营"] as const,
@@ -296,53 +354,198 @@ export function createBrowserApi(): AppApi {
           openingMechanism: "旧承包合同引出荒山争夺",
           growthCarrier: "土地改造技术与产业合作",
           primaryPayoff: "守住土地并建立区域产业",
+          categoryKey: "女频:23",
+          openingDesign: {
+            chapter1Hook:
+              "主角被逼让出工作名额的当天，从旧木箱里翻出一份尚未到期的荒山承包合同，她决定用这份合同换一条活路。",
+            firstThreeChaptersPromise: "前三章给出荒山的真实条件、村民的观望态度，以及主角第一次改造投入的代价。",
+            firstPayoffChapter: 3,
+            retentionAnchors: ["承包合同的法律效力", "村民何时愿意合作", "外部资本什么时候出手"],
+          },
+          ladder: [
+            ["单点改造", "荒山缺水缺路", "资源", "完成第一块可耕土地", "投入全部积蓄"],
+            ["产业成形", "村民观望与分配矛盾", "关系", "形成稳定产业与合作社", "承担分配冲突"],
+            ["区域格局", "外部资本争夺土地", "势力", "守住土地并建立区域品牌", "与地方利益正面博弈"],
+          ],
+          suggestedTags: ["乡村", "种田", "女性成长", "经营", "创业"],
         },
       ];
-      return ideas.map(([title, premise], index) => ({
-        id: id(),
-        title,
-        premise: `${premise} 她必须在事业扩张与亲密关系重建中守住自己的选择。`,
-        genreSubtype: input.genre === "年代重生" ? "年代经营" : "现实成长",
-        secondaryGenres: [...routes[index].secondaryGenres],
-        genreElements: routes[index].genreElements,
-        openingMechanism: routes[index].openingMechanism,
-        growthCarrier: routes[index].growthCarrier,
-        primaryPayoff: routes[index].primaryPayoff,
-        protagonistDesire: "夺回人生选择权，并建立不依附任何人的事业与关系。",
-        readerPromise: "持续提供止损反击、能力变现、关系升温与阶段性事业成果。",
-        coreEmotion: index === 1 ? "治愈与重建" : "憋屈后的清醒反击",
-        ending: "主角解决最初的不公，建立可持续事业，并以平等关系完成情感选择。",
-        immutableRules: ["主角依靠行动和能力解决问题", "每次升级都带来新的责任与代价"],
-        prohibitedPatterns: ["反派无理由降智", "用连续误会拖延关系"],
-        audience: "偏好女性成长、现实经营与稳定情绪回报的番茄女频读者",
-        commercialHook: "低谷止损开局，身份反差和事业成果形成连续可见回报。",
-        longFormEngine: "个人止损、团队经营、区域产业三轮扩张，关系与现实阻力在每轮同步升级。",
-      }));
+      return ideas.map(([title, premise], index) => {
+        const route = routes[index];
+        return {
+          id: id(),
+          title,
+          premise: `${premise} 她必须在事业扩张与亲密关系重建中守住自己的选择。`,
+          genreSubtype: input.genre === "年代重生" ? "年代经营" : "现实成长",
+          secondaryGenres: [...route.secondaryGenres],
+          genreElements: route.genreElements,
+          openingMechanism: route.openingMechanism,
+          growthCarrier: route.growthCarrier,
+          primaryPayoff: route.primaryPayoff,
+          protagonistDesire: "夺回人生选择权，并建立不依附任何人的事业与关系。",
+          readerPromise: "持续提供止损反击、能力变现、关系升温与阶段性事业成果。",
+          coreEmotion: index === 1 ? "治愈与重建" : "憋屈后的清醒反击",
+          ending: "主角解决最初的不公，建立可持续事业，并以平等关系完成情感选择。",
+          immutableRules: ["主角依靠行动和能力解决问题", "每次升级都带来新的责任与代价"],
+          prohibitedPatterns: ["反派无理由降智", "用连续误会拖延关系"],
+          audience: "偏好女性成长、现实经营与稳定情绪回报的番茄女频读者",
+          commercialHook: "低谷止损开局，身份反差和事业成果形成连续可见回报。",
+          longFormEngine: "个人止损、团队经营、区域产业三轮扩张，关系与现实阻力在每轮同步升级。",
+          fanqieCategoryKey: input.fanqieCategoryKey ?? route.categoryKey,
+          subGenreIds: [],
+          titleOptions: [
+            { title, rationale: "用主角的处境反差直接点题，便于在书架一眼识别", tags: route.suggestedTags.slice(0, 3) },
+            {
+              title: `${title}之后`,
+              rationale: "强调长期经营与后续成长，适合长线连载",
+              tags: route.suggestedTags.slice(0, 2),
+            },
+            {
+              title: `我在${route.genreElements[0]}重新开始`,
+              rationale: "第一人称代入感强，突出重启感",
+              tags: route.suggestedTags.slice(1, 4),
+            },
+          ],
+          openingDesign: route.openingDesign,
+          escalationLadder: route.ladder.map(([stage, conflict, expansionAxis, payoff, cost]) => ({
+            stage,
+            conflict,
+            expansionAxis,
+            payoff,
+            cost,
+          })),
+          sustainability: {
+            fatiguePoint: "连续两轮只重复同类经营或调查成果",
+            shiftPlan: "切换扩张轴，把回报从个人收益升级为关系或制度变化",
+          },
+          differentiation: {
+            against: ["主角不靠金手指，靠可复核的专业动作", "反派有完整利益动机", "关系线由行动推进而非误会"],
+            originalityRisk: "低" as const,
+            riskNotes: "方案为原创设定，未引用具体作品。",
+          },
+          suggestedTags: route.suggestedTags,
+        };
+      });
     },
-    async createProjectFromConcept(input: BookConceptInput, concept: BookConceptCandidate) {
+    async createProjectFromConcept(input: BookConceptInput, concept: IncubationCandidate) {
       const created = createProject({ ...input, title: concept.title });
       const project = getProject(state, created.id);
-      project.contract = {
-        ...project.contract,
-        premise: concept.premise,
-        genreSubtype: concept.genreSubtype,
-        secondaryGenres: concept.secondaryGenres,
-        genreElements: concept.genreElements,
-        customGenreDirection: input.customGenreDirection ?? "",
-        audience: concept.audience,
-        commercialHook: concept.commercialHook,
-        openingMechanism: concept.openingMechanism,
-        growthCarrier: concept.growthCarrier,
-        primaryPayoff: concept.primaryPayoff,
-        longFormEngine: concept.longFormEngine,
-        protagonistDesire: concept.protagonistDesire,
-        readerPromise: concept.readerPromise,
-        ...browserConceptSkeleton(concept),
-        coreEmotion: concept.coreEmotion,
-        ending: concept.ending,
-        immutableRules: concept.immutableRules,
-        prohibitedPatterns: concept.prohibitedPatterns,
-      };
+      applyConceptToProject(project, input, concept);
+      persist();
+      return summary(project);
+    },
+    async getCategoryTags(categoryKey) {
+      const profile = getFanqieCategoryProfile(categoryKey);
+      if (!profile) return [];
+      return aggregateCategoryTags(state.rankings, profile.name);
+    },
+    async generateLaunchPack(projectId, options) {
+      const project = getProject(state, projectId);
+      if (!project.contract.approved) throw new Error("必须先审批创作契约，才能生成开书包");
+      const stamp = now();
+      let plans = 0;
+      let chapters = 0;
+      if (options.withStructure) {
+        const stages = ["开局立足", "扩张成形", "真相与抉择"];
+        stages.forEach((title, index) => {
+          project.plans.push({
+            id: id(),
+            kind: "宏观阶段",
+            title,
+            ordinal: index + 1,
+            goal: `完成${title}阶段的核心目标`,
+            conflict: "旧规则无法处理更高层对手",
+            outcome: "主线状态发生不可逆变化",
+            targetWords: Math.round(project.summary.targetWords / stages.length),
+            status: "草稿",
+            parentId: null,
+          });
+        });
+        const volumes = ["第一卷 立足", "第二卷 扩张", "第三卷 收束"];
+        volumes.forEach((title, index) => {
+          project.plans.push({
+            id: id(),
+            kind: "分卷",
+            title,
+            ordinal: index + 1,
+            goal: `推进${title}的主线目标`,
+            conflict: "资源、关系与对手同时升级",
+            outcome: "阶段目标兑现并留下新问题",
+            targetWords: Math.round(project.summary.targetWords / volumes.length),
+            status: "草稿",
+            parentId: null,
+          });
+        });
+        plans = stages.length + volumes.length;
+      }
+      if (options.withFirstChapters) {
+        for (let number = 1; number <= 10; number += 1) {
+          project.chapters.push({
+            id: id(),
+            number,
+            title: `第${number}章 待定`,
+            outline: `功能：行动；目标：推进本章任务；张力：外部阻力与自身代价；结果：留下新问题。`,
+            content: "",
+            wordCount: 0,
+            status: "章纲",
+            batchMode: number <= 2 ? "逐章" : "五章批次",
+            isKeyChapter: number <= 2,
+            targetWords: project.summary.wordsPerChapter,
+            chapterPromise: "本章给读者一个明确的进展",
+            expectedPayoff: "下一章兑现本章埋下的期待",
+            crisis: "主角的选择会带来新的代价",
+            endingExpectation: "章末留下一个必须回答的问题",
+            expectationTargetChapter: number + 3,
+            revision: 0,
+            updatedAt: stamp,
+          });
+          chapters += 1;
+        }
+      }
+      persist();
+      return { plans, chapters };
+    },
+    async listIncubations() {
+      return structuredClone(state.incubations);
+    },
+    async listProjectSignatures() {
+      return state.projects.map((project) => ({
+        title: project.summary.title,
+        premise: project.contract.premise ?? "",
+        openingMechanism: project.contract.openingMechanism ?? "",
+      }));
+    },
+    async getIncubation(draftId) {
+      const draft = state.incubations.find((item) => item.id === draftId);
+      if (!draft) throw new Error("立项草稿不存在或已被删除");
+      return structuredClone(draft);
+    },
+    async saveIncubation(draft) {
+      const index = state.incubations.findIndex((item) => item.id === draft.id);
+      if (index >= 0) state.incubations[index] = structuredClone(draft);
+      else state.incubations.unshift(structuredClone(draft));
+      persist();
+      return structuredClone(draft);
+    },
+    async deleteIncubation(draftId) {
+      if (!state.incubations.some((item) => item.id === draftId)) throw new Error("立项草稿不存在或已被删除");
+      state.incubations = state.incubations.filter((item) => item.id !== draftId);
+      persist();
+    },
+    async promoteIncubation(draftId) {
+      const draft = state.incubations.find((item) => item.id === draftId);
+      if (!draft) throw new Error("立项草稿不存在或已被删除");
+      if (draft.createdProjectId) throw new Error("该立项草稿已经创建过作品");
+      const concept = draft.candidates.find((item) => item.id === draft.selectedCandidateId);
+      if (!concept) throw new Error("请先在立项草稿里选定一套方案");
+      const input = positioningToConceptInput(draft.positioning, draft.seed);
+      const created = createProject({ ...input, title: concept.title });
+      const project = getProject(state, created.id);
+      applyConceptToProject(project, input, concept);
+      draft.status = "已立项";
+      draft.step = "开书包";
+      draft.createdProjectId = created.id;
+      draft.updatedAt = now();
       persist();
       return summary(project);
     },
@@ -603,6 +806,7 @@ export function createBrowserApi(): AppApi {
           plans: project.plans,
           genre: project.summary.genre,
           majorStateChanges: project.contract.majorStateChanges,
+          wordsPerChapter: project.summary.wordsPerChapter,
         }),
         updatedAt,
       });
@@ -645,6 +849,7 @@ export function createBrowserApi(): AppApi {
           plans: project.plans,
           genre: project.summary.genre,
           majorStateChanges: project.contract.majorStateChanges,
+          wordsPerChapter: project.summary.wordsPerChapter,
         }),
         updatedAt,
       });
@@ -854,6 +1059,7 @@ export function createBrowserApi(): AppApi {
               plans: project.plans,
               genre: project.summary.genre,
               majorStateChanges: project.contract.majorStateChanges,
+              wordsPerChapter: project.summary.wordsPerChapter,
             }),
             updatedAt,
           },

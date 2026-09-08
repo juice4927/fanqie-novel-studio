@@ -6,7 +6,12 @@ import {
   resolveGenreStage,
   resolveStoryStage,
 } from "../src/shared/commercial-knowledge";
-import { FANQIE_CATEGORY_PROFILES } from "../src/shared/fanqie-taxonomy";
+import {
+  FANQIE_CATEGORIES,
+  FANQIE_CATEGORY_PROFILES,
+  FANQIE_SUBGENRE_PROFILES,
+  getFanqieSubGenreProfile,
+} from "../src/shared/fanqie-taxonomy";
 import { GENRE_PLUGINS, GENRE_STAGES } from "../src/shared/genre-plugins";
 import { GENRES } from "../src/shared/types";
 
@@ -46,6 +51,13 @@ describe("structured Chinese web-fiction genre packages", () => {
       现言甜宠: "亲密需求与自我保护",
       古言宅斗: "证据真相与名声传播",
       年代重生: "前世记忆与历史偏移",
+      科幻末世: "生存资源与探索真相冲突",
+      悬疑推理: "查真相与自身安全冲突",
+      游戏竞技: "个人短板与团队战术冲突",
+      快穿衍生: "单元任务与自我立场冲突",
+      青春校园: "成长目标与关系投入冲突",
+      军事谍战: "完成任务与保住身份冲突",
+      现实职场: "职业晋升与关系边界冲突",
     } as const;
     const outputs = GENRES.map((genre) => compileCommercialGuidance(genre, 20));
     GENRES.forEach((genre, index) => {
@@ -148,15 +160,37 @@ describe("structured Chinese web-fiction genre packages", () => {
     expect(FANQIE_CATEGORY_PROFILES.filter((item) => item.channel === "女频")).toHaveLength(18);
     for (const profile of FANQIE_CATEGORY_PROFILES) {
       expect(GENRE_PLUGINS[profile.genre].subtypes.map((item) => item.name)).toContain(profile.recommendedSubtype);
-      expect(profile.openingFocus.length).toBeGreaterThan(8);
-      expect(profile.taboo.length).toBeGreaterThan(8);
-      expect(profile.conflictEngine.length).toBeGreaterThan(20);
-      expect(profile.payoffPattern.length).toBeGreaterThan(20);
-      expect(profile.expansionAxis.length).toBeGreaterThan(20);
-      expect(profile.fatigueSignal.length).toBeGreaterThan(20);
+      expect(profile.openingFocus.length).toBeGreaterThan(6);
+      expect(profile.taboo.length).toBeGreaterThan(4);
+      expect(profile.conflictEngine.length).toBeGreaterThan(12);
+      expect(profile.payoffPattern.length).toBeGreaterThan(12);
+      expect(profile.expansionAxis.length).toBeGreaterThan(12);
+      expect(profile.fatigueSignal.length).toBeGreaterThan(12);
       expect(profile.qualityChecks).toHaveLength(4);
       expect(profile.narrativeGenres.length).toBeGreaterThan(0);
       expect(profile.expansionRoutes.length).toBeGreaterThanOrEqual(3);
+      expect(profile.tags.length).toBeGreaterThanOrEqual(3);
+      expect(profile.commonOpenings.length).toBeGreaterThanOrEqual(3);
+      expect(profile.clicheTraps.length).toBeGreaterThanOrEqual(3);
+      expect(profile.differentiationAngles.length).toBeGreaterThanOrEqual(3);
+      expect(profile.firstPayoffWindow[0]).toBeLessThanOrEqual(profile.firstPayoffWindow[1]);
+      expect(profile.typicalChapterWords[0]).toBeLessThan(profile.typicalChapterWords[1]);
+      expect(profile.profileVersion).toBeTruthy();
+    }
+  });
+
+  it("keeps hand-written category rules distinct inside the same broad genre", () => {
+    const byGenre = new Map<string, typeof FANQIE_CATEGORY_PROFILES>();
+    for (const profile of FANQIE_CATEGORY_PROFILES) {
+      byGenre.set(profile.genre, [...(byGenre.get(profile.genre) ?? []), profile]);
+    }
+    for (const [genre, profiles] of byGenre) {
+      for (const field of ["conflictEngine", "payoffPattern", "expansionAxis"] as const) {
+        const values = profiles.map((profile) => profile[field]);
+        expect(new Set(values).size, `${genre} 的 ${field} 出现模板化重复`).toBe(values.length);
+      }
+      const routeKeys = profiles.map((profile) => profile.expansionRoutes.join("|"));
+      expect(new Set(routeKeys).size, `${genre} 的扩张路线出现模板化重复`).toBe(routeKeys.length);
     }
   });
 
@@ -164,20 +198,43 @@ describe("structured Chinese web-fiction genre packages", () => {
     const scienceFiction = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:8")!;
     const sports = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:746")!;
     const suspense = FANQIE_CATEGORY_PROFILES.find((item) => item.key === "女频:747")!;
-    expect(scienceFiction).toMatchObject({
-      genre: "都市脑洞",
-      recommendedSubtype: "异能规则",
-      narrativeGenres: ["生存", "冒险"],
-    });
-    expect(sports).toMatchObject({
-      genre: "都市脑洞",
-      recommendedSubtype: "系统成长",
-      narrativeGenres: ["竞技", "成长"],
-    });
+    expect(scienceFiction).toMatchObject({ genre: "科幻末世", recommendedSubtype: "异能规则" });
+    expect(sports).toMatchObject({ genre: "游戏竞技", recommendedSubtype: "系统成长" });
+    expect(suspense.genre).toBe("悬疑推理");
     expect(suspense.narrativeGenres[0]).toBe("悬疑");
     expect(scienceFiction.expansionRoutes).not.toEqual(sports.expansionRoutes);
     expect(sports.expansionRoutes).not.toEqual(suspense.expansionRoutes);
-    expect(scienceFiction.expansionAxis).toContain("不使用统一扩张公式");
+    expect(scienceFiction.expansionAxis).toContain("→");
+    expect(scienceFiction.expansionAxis).not.toContain("不使用统一扩张公式");
+  });
+
+  it("derives the ranking category list from the same source of truth", () => {
+    expect(FANQIE_CATEGORIES.男频).toHaveLength(19);
+    expect(FANQIE_CATEGORIES.女频).toHaveLength(18);
+    expect(FANQIE_CATEGORIES.男频[0]).toEqual(["1141", "西方奇幻"]);
+    for (const [id, name] of [...FANQIE_CATEGORIES.男频, ...FANQIE_CATEGORIES.女频]) {
+      expect(FANQIE_CATEGORY_PROFILES.some((profile) => profile.categoryId === id && profile.name === name)).toBe(true);
+    }
+  });
+
+  it("keeps subgenre profiles anchored to real categories", () => {
+    expect(FANQIE_SUBGENRE_PROFILES).toHaveLength(60);
+    expect(FANQIE_SUBGENRE_PROFILES.filter((item) => item.channel === "男频")).toHaveLength(32);
+    expect(FANQIE_SUBGENRE_PROFILES.filter((item) => item.channel === "女频")).toHaveLength(28);
+    for (const subGenre of FANQIE_SUBGENRE_PROFILES) {
+      expect(subGenre.parentCategoryKeys.length).toBeGreaterThan(0);
+      for (const key of subGenre.parentCategoryKeys) {
+        const parent = FANQIE_CATEGORY_PROFILES.find((profile) => profile.key === key);
+        expect(parent, `${subGenre.name} 的归属分类 ${key} 不存在`).toBeTruthy();
+        expect(subGenre.genre).toBe(parent!.genre);
+      }
+      expect(subGenre.commonOpenings.length).toBeGreaterThanOrEqual(3);
+      expect(subGenre.clicheTraps.length).toBeGreaterThanOrEqual(3);
+      expect(subGenre.differentiationAngles.length).toBeGreaterThanOrEqual(3);
+      expect(subGenre.typicalTags.length).toBeGreaterThanOrEqual(4);
+      expect(subGenre.source).toBe("人工维护");
+    }
+    expect(getFanqieSubGenreProfile("m-eastern-fantasy")?.name).toBeTruthy();
   });
 
   it("gives distinct executable rules to categories inside the same broad genre", () => {

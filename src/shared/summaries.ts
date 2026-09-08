@@ -75,6 +75,8 @@ interface FinalizedChapterSummaryProject {
   chapters: readonly Chapter[];
   plans: readonly PlanNode[];
   summaries: readonly StorySummary[];
+  /** 项目级单章目标字数，用于卷章数估算；缺省按 2500 估算。 */
+  wordsPerChapter?: number;
 }
 
 export function prepareFinalizedChapterSummaries(
@@ -142,7 +144,7 @@ export function prepareFinalizedChapterSummaries(
     .sort((left, right) => left.ordinal - right.ordinal);
   let cursor = 1;
   for (const volume of volumes) {
-    const estimatedChapters = Math.max(1, Math.ceil(volume.targetWords / 2500));
+    const estimatedChapters = Math.max(1, Math.ceil(volume.targetWords / (project.wordsPerChapter ?? 2500)));
     const end = cursor + estimatedChapters - 1;
     if (chapter.number >= cursor && chapter.number <= end) {
       const items = [...summaries.values()].filter(

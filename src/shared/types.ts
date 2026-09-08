@@ -7,11 +7,29 @@ import type {
   ModelRole,
   TaskModelOverride,
 } from "./ai/types";
+import type { CategoryTagStat } from "./category-tags";
 import type { GenerationQuality } from "./generation-quality";
 import type { GenreComposition, NarrativeGenre } from "./genre-composition";
+import type { IncubationDraft } from "./incubation";
 import type { CHAPTER_STATUSES, PROJECT_STATUSES } from "./status-constants";
 
-export const GENRES = ["都市脑洞", "玄幻/仙侠", "历史/架空", "现言甜宠", "古言宅斗", "年代重生"] as const;
+export type { IncubationDraft };
+
+export const GENRES = [
+  "都市脑洞",
+  "玄幻/仙侠",
+  "历史/架空",
+  "现言甜宠",
+  "古言宅斗",
+  "年代重生",
+  "科幻末世",
+  "悬疑推理",
+  "游戏竞技",
+  "快穿衍生",
+  "青春校园",
+  "军事谍战",
+  "现实职场",
+] as const;
 
 export type Genre = (typeof GENRES)[number];
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
@@ -43,6 +61,8 @@ export interface ProjectSummary {
   genre: Genre;
   status: ProjectStatus;
   targetWords: number;
+  /** 单章目标字数，用于卷章数估算与写作字数区间；旧项目缺省 2500。 */
+  wordsPerChapter: number;
   currentWords: number;
   chapterCount: number;
   stockChapters: number;
@@ -539,7 +559,23 @@ export interface ConceptCandidate {
 
 export interface BookConceptInput extends GenreComposition {
   genre: Genre;
+  fanqieCategoryKey?: string;
+  subGenreIds?: string[];
+  openingArchetype?: string;
+  lengthShape?: string;
+  narrativePerson?: string;
+  protagonistRoles?: string[];
+  toneTags?: string[];
+  /** 只允许脱敏洞察包 id，不接收研究原文。 */
+  evidenceInsightIds?: string[];
+  /** 已脱敏的市场机会摘要（榜单统计派生），只作需求证据。 */
+  evidenceNotes?: string[];
+  readerPersona?: string;
+  readerPromise?: string;
+  commercialBoundary?: string;
   targetWords: number;
+  wordsPerChapter?: number;
+  safeStockLine?: number;
   updateCadence: string;
   seed: string;
 }
@@ -567,6 +603,50 @@ export interface BookConceptCandidate {
   longFormEngine: string;
 }
 
+export interface BookTitleOption {
+  title: string;
+  rationale: string;
+  tags: string[];
+}
+
+export interface BookOpeningDesign {
+  chapter1Hook: string;
+  firstThreeChaptersPromise: string;
+  firstPayoffChapter: number;
+  retentionAnchors: string[];
+}
+
+export interface BookEscalationStep {
+  stage: string;
+  conflict: string;
+  expansionAxis: string;
+  payoff: string;
+  cost: string;
+}
+
+export interface BookSustainability {
+  fatiguePoint: string;
+  shiftPlan: string;
+}
+
+export interface BookDifferentiation {
+  against: string[];
+  originalityRisk: "低" | "中" | "高";
+  riskNotes: string;
+}
+
+/** 立项候选：在完整开书方案上补充书名候选、开局设计、升级阶梯与差异化说明。 */
+export interface IncubationCandidate extends BookConceptCandidate {
+  fanqieCategoryKey: string;
+  subGenreIds: string[];
+  titleOptions: BookTitleOption[];
+  openingDesign: BookOpeningDesign;
+  escalationLadder: BookEscalationStep[];
+  sustainability: BookSustainability;
+  differentiation: BookDifferentiation;
+  suggestedTags: string[];
+}
+
 export interface BookConceptSkeleton {
   protagonistArc: string;
   keyRelationships: string[];
@@ -579,6 +659,7 @@ export interface CreateProjectInput extends GenreComposition {
   title: string;
   genre: Genre;
   targetWords: number;
+  wordsPerChapter?: number;
   updateCadence: string;
   safeStockLine?: number;
 }
@@ -587,6 +668,7 @@ export interface ProjectPatch {
   title?: string;
   status?: ProjectStatus;
   targetWords?: number;
+  wordsPerChapter?: number;
   updateCadence?: string;
   safeStockLine?: number;
 }
@@ -928,12 +1010,30 @@ export interface UpdateSettingsInput {
   autoInstallOnQuit: boolean;
 }
 
+export interface LaunchPackOptions {
+  withStructure: boolean;
+  withFirstChapters: boolean;
+}
+
+export interface LaunchPackResult {
+  plans: number;
+  chapters: number;
+}
+
 export interface AppApi {
   getDashboard(): Promise<DashboardData>;
   listProjects(): Promise<ProjectSummary[]>;
   createProject(input: CreateProjectInput): Promise<ProjectSummary>;
-  generateBookConcepts(input: BookConceptInput): Promise<BookConceptCandidate[]>;
-  createProjectFromConcept(input: BookConceptInput, concept: BookConceptCandidate): Promise<ProjectSummary>;
+  generateBookConcepts(input: BookConceptInput): Promise<IncubationCandidate[]>;
+  createProjectFromConcept(input: BookConceptInput, concept: IncubationCandidate): Promise<ProjectSummary>;
+  listIncubations(): Promise<IncubationDraft[]>;
+  listProjectSignatures(): Promise<Array<{ title: string; premise: string; openingMechanism: string }>>;
+  getIncubation(id: string): Promise<IncubationDraft>;
+  saveIncubation(draft: IncubationDraft): Promise<IncubationDraft>;
+  deleteIncubation(id: string): Promise<void>;
+  promoteIncubation(id: string): Promise<ProjectSummary>;
+  getCategoryTags(categoryKey: string): Promise<CategoryTagStat[]>;
+  generateLaunchPack(id: string, options: LaunchPackOptions): Promise<LaunchPackResult>;
   deleteProject(id: string, confirmationTitle: string): Promise<string>;
   getProject(id: string): Promise<ProjectDetail>;
   getChapter(id: string, chapterId: string): Promise<Chapter>;

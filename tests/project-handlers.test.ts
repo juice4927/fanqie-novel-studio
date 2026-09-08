@@ -79,6 +79,7 @@ function createDependencies(activeProjectId = "") {
     createProject: vi.fn(() => project),
     createProjectFromConcept: vi.fn(() => project),
     decideChangeRequest: vi.fn(),
+    deleteIncubation: vi.fn(),
     deleteProject: vi.fn(() => "已删除"),
     getChapter: vi.fn(),
     getDirectorNotes: vi.fn(() => []),
@@ -88,10 +89,16 @@ function createDependencies(activeProjectId = "") {
       activeAlerts: [],
       pendingIssues: 0,
     })),
+    getIncubation: vi.fn(),
+    getInsights: vi.fn(() => []),
     getProject: vi.fn(() => ({ summary: project, contract: {}, metrics: [] })),
     getProjectOverview: vi.fn(),
+    listIncubations: vi.fn(() => []),
+    listProjectSignatures: vi.fn(() => []),
     listProjects: vi.fn(() => [project]),
+    listRankings: vi.fn(() => []),
     listRevisions: vi.fn(),
+    markIncubationPromoted: vi.fn(),
     recordGenerationDecision: vi.fn(),
     resolveIssue: vi.fn(),
     restoreRevision: vi.fn(),
@@ -102,6 +109,7 @@ function createDependencies(activeProjectId = "") {
     saveDirectorNotes: vi.fn((_id: string, notes: string[]) => notes),
     saveFact: vi.fn(),
     resolveFactConflict: vi.fn(),
+    saveIncubation: vi.fn((draft) => draft),
     saveMetrics: vi.fn(),
     savePlan: vi.fn(),
     saveReviewExperiment: vi.fn(),
@@ -112,6 +120,7 @@ function createDependencies(activeProjectId = "") {
   const ai = {
     expandBookConcept: vi.fn(async () => skeleton),
     generateBookConcepts: vi.fn(),
+    generatePlanning: vi.fn(async () => ({ startChapter: 1, chapters: [], plans: [] })),
     suggestAestheticProfile: vi.fn(),
   };
   const currentDate = new Date(2026, 6, 31, 0, 30);
@@ -137,17 +146,24 @@ describe("project handlers", () => {
       "createProject",
       "createProjectFromConcept",
       "decideChangeRequest",
+      "deleteIncubation",
       "deleteProject",
       "generateBookConcepts",
+      "generateLaunchPack",
+      "getCategoryTags",
       "getChapter",
       "getDashboard",
       "getDirectorNotes",
       "getGenerationQuality",
+      "getIncubation",
       "getProject",
       "getReviewSuggestions",
       "importMetricsCsv",
+      "listIncubations",
+      "listProjectSignatures",
       "listProjects",
       "listRevisions",
+      "promoteIncubation",
       "recordGenerationDecision",
       "resolveFactConflict",
       "resolveIssue",
@@ -158,6 +174,7 @@ describe("project handlers", () => {
       "saveDirectorNotes",
       "saveExpectation",
       "saveFact",
+      "saveIncubation",
       "savePlan",
       "saveReviewExperiment",
       "saveSchedule",
@@ -260,6 +277,56 @@ describe("project handlers", () => {
         keyRelationships: skeleton.keyRelationships,
       }),
     );
+  });
+
+  it("passes selected desensitized insights into concept generation", async () => {
+    const { dependencies, handlers, database, ai } = createDependencies();
+    registerProjectHandlers(dependencies);
+    const insight = { id: "insight-1", name: "读者需求" };
+    database.getInsights = vi.fn(() => [insight]);
+
+    await handlers.get("generateBookConcepts")!({ ...conceptInput, evidenceInsightIds: ["insight-1"] });
+
+    expect(database.getInsights).toHaveBeenCalledWith(["insight-1"]);
+    expect(ai.generateBookConcepts).toHaveBeenCalledWith(
+      expect.objectContaining({ evidenceInsightIds: ["insight-1"] }),
+      [insight],
+    );
+  });
+
+  it("generates the launch pack only after the contract is approved", async () => {
+    const { dependencies, handlers, database, ai } = createDependencies();
+    registerProjectHandlers(dependencies);
+    const approved = { summary: project, contract: { approved: true }, metrics: [] };
+    database.getProjectOverview = vi.fn(() => approved);
+    const structure = {
+      startChapter: 1,
+      chapters: [],
+      plans: [{ id: "plan-1", kind: "分卷" as const }],
+    };
+    const chapters = {
+      startChapter: 1,
+      plans: [{ id: "plan-2", kind: "粗纲" as const }],
+      chapters: [{ id: "chapter-1", number: 1 }],
+    };
+    ai.generatePlanning = vi
+      .fn()
+      .mockResolvedValueOnce(structure)
+      .mockResolvedValueOnce(chapters) as unknown as typeof ai.generatePlanning;
+
+    const result = await handlers.get("generateLaunchPack")!(project.id, {
+      withStructure: true,
+      withFirstChapters: true,
+    });
+
+    expect(result).toEqual({ plans: 2, chapters: 1 });
+    expect(database.savePlan).toHaveBeenCalledTimes(2);
+    expect(database.saveChapter).toHaveBeenCalledWith(project.id, chapters.chapters[0], "autosave");
+
+    database.getProjectOverview = vi.fn(() => ({ summary: project, contract: { approved: false }, metrics: [] }));
+    await expect(
+      handlers.get("generateLaunchPack")!(project.id, { withStructure: true, withFirstChapters: false }),
+    ).rejects.toThrow("必须先审批创作契约");
   });
 
   it("keeps overview reads lightweight and overlays aesthetic candidates", () => {

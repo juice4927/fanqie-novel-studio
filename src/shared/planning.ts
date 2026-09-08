@@ -22,12 +22,12 @@ export function approvedVolumeRanges(plans: PlanNode[], wordsPerChapter = 2500):
     });
 }
 
-export function findCurrentVolume(plans: PlanNode[], chapterNumber: number) {
-  return approvedVolumeRanges(plans).find(
+export function findCurrentVolume(plans: PlanNode[], chapterNumber: number, wordsPerChapter = 2500) {
+  return approvedVolumeRanges(plans, wordsPerChapter).find(
     (range) => chapterNumber >= range.fromChapter && chapterNumber <= range.toChapter,
   )?.plan;
 }
 
-export function volumeBoundaryChapters(plans: PlanNode[]) {
-  return new Set(approvedVolumeRanges(plans).flatMap((range) => [range.fromChapter, range.toChapter]));
+export function volumeBoundaryChapters(plans: PlanNode[], wordsPerChapter = 2500) {
+  return new Set(approvedVolumeRanges(plans, wordsPerChapter).flatMap((range) => [range.fromChapter, range.toChapter]));
 }

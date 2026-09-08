@@ -1,5 +1,9 @@
+import { aggregateCategoryTags } from "../../src/shared/category-tags";
 import { assembleDashboard, localDayEndExclusive } from "../../src/shared/dashboard-policy";
+import { getFanqieCategoryProfile } from "../../src/shared/fanqie-taxonomy";
+import { positioningToConceptInput } from "../../src/shared/incubation";
 import { analyzeMetrics, parseMetricsCsv } from "../../src/shared/metrics";
+import type { BookConceptInput, BookConceptSkeleton, IncubationCandidate, StoryContract } from "../../src/shared/types";
 import type { AiService } from "../ai-service";
 import type { WorkspaceDatabase } from "../database";
 import type { RegisterHandler } from "./types";
@@ -11,12 +15,19 @@ type ProjectDatabase = Pick<
   | "approvePlan"
   | "createProject"
   | "createProjectFromConcept"
-  | "decideChangeRequest"
+  | "deleteIncubation"
   | "deleteProject"
+  | "getIncubation"
   | "getChapter"
   | "getDashboardActivity"
+  | "getInsights"
   | "getProject"
   | "getProjectOverview"
+  | "listIncubations"
+  | "listProjectSignatures"
+  | "listRankings"
+  | "markIncubationPromoted"
+  | "saveIncubation"
   | "saveMetrics"
   | "saveReviewExperiment"
   | "listProjects"
@@ -37,9 +48,45 @@ type ProjectDatabase = Pick<
   | "saveSchedule"
   | "searchProject"
   | "updateProject"
+  | "decideChangeRequest"
 >;
 
-type ProjectAi = Pick<AiService, "expandBookConcept" | "generateBookConcepts" | "suggestAestheticProfile">;
+type ProjectAi = Pick<
+  AiService,
+  "expandBookConcept" | "generateBookConcepts" | "generatePlanning" | "suggestAestheticProfile"
+>;
+
+function contractDraftFromConcept(
+  input: BookConceptInput,
+  concept: IncubationCandidate,
+  skeleton: BookConceptSkeleton,
+): Omit<StoryContract, "version" | "approved" | "updatedAt"> {
+  return {
+    premise: concept.premise,
+    genreSubtype: concept.genreSubtype,
+    fanqieCategoryKey: concept.fanqieCategoryKey || input.fanqieCategoryKey || "",
+    secondaryGenres: concept.secondaryGenres,
+    genreElements: concept.genreElements,
+    customGenreDirection: input.customGenreDirection ?? "",
+    audience: concept.audience,
+    commercialHook: concept.commercialHook,
+    openingMechanism: concept.openingMechanism,
+    growthCarrier: concept.growthCarrier,
+    primaryPayoff: concept.primaryPayoff,
+    longFormEngine: concept.longFormEngine,
+    protagonistDesire: concept.protagonistDesire,
+    protagonistArc: skeleton.protagonistArc,
+    keyRelationships: skeleton.keyRelationships,
+    worldRules: skeleton.worldRules,
+    majorForces: skeleton.majorForces,
+    timelineAnchors: skeleton.timelineAnchors,
+    readerPromise: concept.readerPromise,
+    coreEmotion: concept.coreEmotion,
+    ending: concept.ending,
+    immutableRules: concept.immutableRules,
+    prohibitedPatterns: concept.prohibitedPatterns,
+  };
+}
 
 export interface ProjectHandlerDependencies {
   register: RegisterHandler;
@@ -61,7 +108,12 @@ export function registerProjectHandlers({
   );
   register("listProjects", () => database.listProjects());
   register("createProject", (input) => database.createProject(input));
-  register("generateBookConcepts", (input) => ai.generateBookConcepts(input));
+  register("generateBookConcepts", (input) =>
+    ai.generateBookConcepts(
+      input,
+      input.evidenceInsightIds?.length ? database.getInsights(input.evidenceInsightIds) : [],
+    ),
+  );
   register("createProjectFromConcept", async (input, concept) => {
     const skeleton = await ai.expandBookConcept(input, concept);
     return database.createProjectFromConcept(
@@ -69,34 +121,63 @@ export function registerProjectHandlers({
         title: concept.title,
         genre: input.genre,
         targetWords: input.targetWords,
+        wordsPerChapter: input.wordsPerChapter,
+        safeStockLine: input.safeStockLine,
         updateCadence: input.updateCadence,
       },
-      {
-        premise: concept.premise,
-        genreSubtype: concept.genreSubtype,
-        fanqieCategoryKey: "",
-        secondaryGenres: concept.secondaryGenres,
-        genreElements: concept.genreElements,
-        customGenreDirection: input.customGenreDirection ?? "",
-        audience: concept.audience,
-        commercialHook: concept.commercialHook,
-        openingMechanism: concept.openingMechanism,
-        growthCarrier: concept.growthCarrier,
-        primaryPayoff: concept.primaryPayoff,
-        longFormEngine: concept.longFormEngine,
-        protagonistDesire: concept.protagonistDesire,
-        protagonistArc: skeleton.protagonistArc,
-        keyRelationships: skeleton.keyRelationships,
-        worldRules: skeleton.worldRules,
-        majorForces: skeleton.majorForces,
-        timelineAnchors: skeleton.timelineAnchors,
-        readerPromise: concept.readerPromise,
-        coreEmotion: concept.coreEmotion,
-        ending: concept.ending,
-        immutableRules: concept.immutableRules,
-        prohibitedPatterns: concept.prohibitedPatterns,
-      },
+      contractDraftFromConcept(input, concept, skeleton),
     );
+  });
+  register("getCategoryTags", (categoryKey) => {
+    const profile = getFanqieCategoryProfile(categoryKey);
+    if (!profile) return [];
+    return aggregateCategoryTags(database.listRankings(), profile.name);
+  });
+  register("generateLaunchPack", async (projectId, options) => {
+    const project = database.getProjectOverview(projectId);
+    if (!project.contract.approved) throw new Error("必须先审批创作契约，才能生成开书包");
+    let plans = 0;
+    let chapters = 0;
+    if (options.withStructure) {
+      const structure = await ai.generatePlanning(project, { mode: "全书结构" });
+      for (const plan of structure.plans) database.savePlan(projectId, plan);
+      plans += structure.plans.length;
+    }
+    if (options.withFirstChapters) {
+      const refreshed = database.getProjectOverview(projectId);
+      const result = await ai.generatePlanning(refreshed, { mode: "后续章纲", fromChapter: 1, chapterCount: 10 });
+      for (const plan of result.plans) database.savePlan(projectId, plan);
+      for (const chapter of result.chapters) database.saveChapter(projectId, chapter, "autosave");
+      plans += result.plans.length;
+      chapters += result.chapters.length;
+    }
+    return { plans, chapters };
+  });
+  register("listIncubations", () => database.listIncubations());
+  register("listProjectSignatures", () => database.listProjectSignatures());
+  register("getIncubation", (draftId) => database.getIncubation(draftId));
+  register("saveIncubation", (draft) => database.saveIncubation(draft));
+  register("deleteIncubation", (draftId) => database.deleteIncubation(draftId));
+  register("promoteIncubation", async (draftId) => {
+    const draft = database.getIncubation(draftId);
+    if (draft.createdProjectId) throw new Error("该立项草稿已经创建过作品");
+    const concept = draft.candidates.find((item) => item.id === draft.selectedCandidateId);
+    if (!concept) throw new Error("请先在立项草稿里选定一套方案");
+    const input = positioningToConceptInput(draft.positioning, draft.seed);
+    const skeleton = await ai.expandBookConcept(input, concept);
+    const project = database.createProjectFromConcept(
+      {
+        title: concept.title,
+        genre: input.genre,
+        targetWords: input.targetWords,
+        wordsPerChapter: input.wordsPerChapter,
+        safeStockLine: input.safeStockLine,
+        updateCadence: input.updateCadence,
+      },
+      contractDraftFromConcept(input, concept, skeleton),
+    );
+    database.markIncubationPromoted(draftId, project.id, currentDate().toISOString());
+    return project;
   });
   register("deleteProject", (id, confirmationTitle) => {
     if (isGenerationActive(id)) {
