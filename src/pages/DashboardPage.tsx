@@ -132,7 +132,7 @@ export function DashboardPage({
           <EmptyState
             icon={<BookOpen />}
             title="还没有作品"
-            description="先建立第一本书，工作台会为它创建独立数据库和内容目录。"
+            description="三步开始：① 新建作品并填写题材与目标字数；② 到“故事圣经”完成并审批创作契约；③ 到“写作台”生成或手写正文，质检通过后定稿。每本书都会创建独立数据库和内容目录。"
             action={
               <Button onClick={onCreate} icon={<Plus size={17} />}>
                 新建作品
