@@ -1,4 +1,4 @@
-# AI 连接层重构方案（2026-09-08 · 修订 6 · 已实施）
+# AI 连接层重构方案（2026-09-08 · 修订 7 · 已实施）
 
 > 目标：把“每次请求现场试错”的单体连接方式，换成成熟框架通用的**声明式能力 + 协议适配器 + 中间件管道**三层结构；同时把“AI 来源”从一条全局配置升级为**可自由增删、按角色路由、切换不打断在途任务的来源清单**。
 > 约束不变：所有出站流量仍走 `electron/netguard.ts`；密钥只进 Windows Credential Manager；`src/shared/` 保持纯净；不引入重型依赖；人工门禁与审计语义不动。
@@ -11,16 +11,16 @@
 
 ## 实施状态（2026-09-08）
 
-验收基线：`npx tsc --noEmit` ✅、`npm run lint` ✅、`npm test` 533 通过 / 1 跳过、`npm run test:quality` 16 通过、`npm run build` ✅、`npm run test:e2e` 20 通过。
+验收基线：`npx tsc --noEmit` ✅、`npm run lint` ✅、`npm test` 540 通过 / 1 跳过、`npm run test:quality` 16 通过、`npm run build` ✅、`npm run test:e2e` 20 通过。
 
 | 阶段 | 状态 | 落地内容 |
 |---|---|---|
 | P0 纯搬移 | ✅ | `src/shared/ai/{types,errors,provider-url,auth,stream-json,catalog,provider-presets}.ts`；三家协议的解析器移入 `electron/ai/drivers/*`；`ai-provider.ts` 收薄为兼容门面 |
 | P1 传输与驱动 | ✅ | `electron/ai/transport.ts`（`ProviderHttpError` + 唯一出站口）；三个驱动实现 `ModelDriver.generate/stream`；`apiSurface` 进入设置与 DB；协商结果落库 `model_capabilities` |
-| P2 预算与流式 | ⚠️ 部分 | 网络重试（3 次）与结构修复（2 次）已独立计数；流式字段名可配置（`streamField`）。**未做**：数组元素等嵌套路径的流式提取，仍只支持顶层字符串字段 |
+| P2 预算与流式 | ✅ | 网络重试（3 次）与结构修复（2 次）已独立计数；`JsonPathStreamExtractor` 支持顶层字段与数组元素路径（`chapters[].content`），流式字段名可配置 |
 | P3a 数据与凭据 | ✅ | `ai_profiles` / `ai_role_routes` / `model_capabilities` 三表 + 迁移；`AiProfileRepository`；按来源凭据（`CredEnumerate` 前缀列举 + 内存缓存 + 旧密钥迁移）；11 个 IPC |
 | P3b UI | ✅ | 设置页「模型来源」管理（12 个预设、编辑、测试连接、刷新模型、设为默认、停用、删除、导入导出）+ 角色路由；侧栏快速切换默认来源；浏览器预览桩同步 |
-| P4 路由与覆盖 | ⚠️ 部分 | 五角色路由 + 单次覆盖（**仅正文生成链路**：`generateChapterDraft → coordinator → runJson.override`）+ `/models` 刷新 + 导入导出。其余任务入口的 override 参数未接 |
+| P4 路由与覆盖 | ✅ | 五角色路由 + 单次覆盖（6 个任务入口的 IPC 全部接通；写作台的正文生成/批次/质检提供「本次使用」选择器，其余页面沿用默认路由）+ `/models` 刷新 + 导入导出 |
 | §5.7 本地端点 | ✅ | `assertLocalEndpointUrl` + `fetchLocalEndpointResponse` 直连通道 + 驱动 `localEndpoint` 透传；只接受字面量回环/私网 IP、不解析域名、禁止重定向 |
 | §5.10 全局代理 | ✅ | 按 `OUTBOUND_PROXY_PLAN.md` 全部落地：HTTP/HTTPS/SOCKS5、凭据入凭据管理器、目的地预解析、设置页分区；SSE 多行/裸 CR 解析一并修复 |
 
