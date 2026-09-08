@@ -9,7 +9,7 @@ export {
   providerError,
 } from "../src/shared/ai/errors";
 export { normalizeProviderUrl } from "../src/shared/ai/provider-url";
-export { JsonStringFieldExtractor } from "../src/shared/ai/stream-json";
+export { JsonPathStreamExtractor, JsonStringFieldExtractor } from "../src/shared/ai/stream-json";
 export { parseAnthropicOutput, readAnthropicStream } from "./ai/drivers/anthropic-messages";
 export { readChatCompletionStream } from "./ai/drivers/openai-chat";
 export {

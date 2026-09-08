@@ -481,6 +481,7 @@ const schemas = {
         chapterCount: z.union([z.literal(10), z.literal(30)]).optional(),
       })
       .strict(),
+    taskModelOverride.optional(),
   ]),
   reviewPlanning: z.tuple([
     id,
@@ -561,8 +562,8 @@ const schemas = {
   ]),
   listRevisions: z.tuple([id, z.enum(["state", "plans", "chapters", "facts", "changes"]), id]),
   restoreRevision: projectEntity,
-  runQualityCheck: projectEntity,
-  extractChapterFacts: projectEntity,
+  runQualityCheck: z.tuple([id, id, taskModelOverride.optional()]),
+  extractChapterFacts: z.tuple([id, id, taskModelOverride.optional()]),
   saveFact: z.tuple([id, fact]),
   resolveFactConflict: z.tuple([id, id, z.enum(["keep", "ignore"])]),
   getDirectorNotes: idOnly,
@@ -617,9 +618,9 @@ const schemas = {
   generateConcepts: idOnly,
   generateChapterDraft: z.tuple([id, id, id.optional(), taskModelOverride.optional()]),
   previewChapterBatch: projectEntity,
-  generateChapterBatch: projectEntity,
+  generateChapterBatch: z.tuple([id, id, taskModelOverride.optional()]),
   getAiSettings: noArgs,
-  testAiConnection: noArgs,
+  testAiConnection: z.tuple([taskModelOverride.optional()]),
   saveAiSettings: z.tuple([
     z
       .object({

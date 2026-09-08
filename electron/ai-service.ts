@@ -88,7 +88,7 @@ import {
   stripCodeFence,
 } from "./ai-definitions";
 import {
-  JsonStringFieldExtractor,
+  JsonPathStreamExtractor,
   normalizeProviderUrl,
   providerError,
   rejectsJsonMode,
@@ -324,7 +324,7 @@ export class AiService {
         let attemptFirstContentAt: string | null = null;
         options.onAttempt?.(httpAttempt);
         const contentExtractor = options.onDelta
-          ? new JsonStringFieldExtractor(options.streamField ?? "content", (delta) =>
+          ? new JsonPathStreamExtractor(options.streamField ?? "content", (delta) =>
               options.onDelta?.(delta, httpAttempt),
             )
           : null;
@@ -970,6 +970,7 @@ export class AiService {
     project: ProjectDetail,
     input: PlanningGenerationInput,
     onChapterBatch?: (batch: PlanningGenerationResult) => void | Promise<void>,
+    override?: TaskModelOverride,
   ): Promise<PlanningGenerationResult> {
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
     const startChapter = input.fromChapter ?? Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1));
@@ -978,6 +979,7 @@ export class AiService {
       const result = await this.runJson({
         projectId: project.summary.id,
         taskType: "generate-story-structure",
+        override,
         inputSummary: `${project.summary.title} 自适应阶段与分卷`,
         system:
           "你是中国商业网文总编。根据已审批契约规划作品自己的宏观阶段和分卷，只细化结构，不写正文。阶段数量与功能由核心矛盾、叙事主轴和长篇发动机决定，每个阶段用本书自己的事件命名和驱动；阶段切换绑定不可逆的状态变化，终局兑现契约。",
@@ -1033,6 +1035,7 @@ export class AiService {
       const result = await this.runJson({
         projectId: project.summary.id,
         taskType: "generate-chapter-plans",
+        override,
         inputSummary: `${project.summary.title} 第${batchStart}-${batchStart + batchCount - 1}章章纲`,
         system:
           "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。先判断每章承担行动、调查、关系、经营、训练、生存、群像、氛围、过渡、揭秘或高潮中的哪种主要功能，再决定节奏。章节要承接上一章的状态与悬念；关系、调查、氛围和过渡章可以通过认知、情绪、证据、关系或气氛积累推进，推进方式贴合本章功能。相邻章节在功能、场景数量和回报形态上保持变化。",
@@ -1381,8 +1384,9 @@ export class AiService {
     context: ContextPackage,
     retryContext?: string,
     onStream?: (event: ChapterDraftStreamEvent) => void,
+    override?: TaskModelOverride,
   ): Promise<Chapter> {
-    return this.startDraftChapter(projectId, chapter, context, { retryContext, onStream }).completion;
+    return this.startDraftChapter(projectId, chapter, context, { retryContext, onStream, override }).completion;
   }
 
   startDraftChapter(
@@ -1473,10 +1477,15 @@ export class AiService {
     return { ...chapter, title: result.title, content: result.content, status: "待质检", updatedAt: now() };
   }
 
-  async extractChapterFacts(project: ProjectDetail, chapter: Chapter): Promise<LedgerFact[]> {
+  async extractChapterFacts(
+    project: ProjectDetail,
+    chapter: Chapter,
+    override?: TaskModelOverride,
+  ): Promise<LedgerFact[]> {
     const result = await this.runJson({
       projectId: project.summary.id,
       taskType: "extract-chapter-facts",
+      override,
       inputSummary: `第${chapter.number}章状态候选`,
       system:
         "你是长篇小说状态记录员。只提取本章正文明确发生且会影响后续连续性的持久状态变化。不得推测心理、补全设定或把临时动作当成长期事实；无可靠变化时返回空数组。",
@@ -1544,11 +1553,13 @@ export class AiService {
     project: ProjectDetail,
     chapter: Chapter,
     context: ContextPackage,
+    override?: TaskModelOverride,
   ): Promise<ChapterQualityReview> {
     const fanqieCategory = getFanqieCategoryProfile(project.contract?.fanqieCategoryKey);
     const result = await this.runJson({
       projectId: project.summary.id,
       taskType: "quality-review",
+      override,
       inputSummary: `第${chapter.number}章语义质检`,
       system: [
         "你是这本书的审校伙伴。目标不是挑出尽可能多的问题，而是找出真正会伤害阅读体验或破坏连续性的地方。",
@@ -1661,12 +1672,13 @@ export class AiService {
   }
 
   /** 用一次最小结构化请求验证端点、协议与密钥；任务会记录在 AI 任务中心，失败不抛出。 */
-  async testConnection(): Promise<{ ok: boolean; message: string }> {
+  async testConnection(override?: TaskModelOverride): Promise<{ ok: boolean; message: string }> {
     const settings = this.database.getAiSettings();
     try {
       await this.runJson({
         projectId: null,
         taskType: "connection-test",
+        override,
         inputSummary: "模型连接测试",
         system: "你是连接测试助手，只返回 JSON，不使用 Markdown。",
         user: '请只返回 {"ok": true}。',

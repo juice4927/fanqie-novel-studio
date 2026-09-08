@@ -935,7 +935,11 @@ export interface AppApi {
   approveContract(id: string): Promise<StoryContract>;
   savePlan(id: string, plan: PlanNode): Promise<PlanNode>;
   approvePlan(id: string, planId: string): Promise<void>;
-  generatePlanningDraft(id: string, input: PlanningGenerationInput): Promise<PlanningGenerationResult>;
+  generatePlanningDraft(
+    id: string,
+    input: PlanningGenerationInput,
+    override?: TaskModelOverride,
+  ): Promise<PlanningGenerationResult>;
   reviewPlanning(id: string, input: PlanningReviewInput): Promise<PlanningReviewResult>;
   applyPlanningRepairs(id: string, input: PlanningRepairInput): Promise<PlanningRepairResult>;
   analyzeNovelRevision(id: string, input: NovelRevisionInput): Promise<NovelRevisionProposal>;
@@ -952,9 +956,9 @@ export interface AppApi {
   searchProject(id: string, query: string, offset?: number, limit?: number): Promise<SearchHit[]>;
   listRevisions(id: string, collection: RevisionRecord["collection"], entityId: string): Promise<RevisionRecord[]>;
   restoreRevision(id: string, revisionId: string): Promise<void>;
-  runQualityCheck(id: string, chapterId: string): Promise<ChapterQualityReview>;
+  runQualityCheck(id: string, chapterId: string, override?: TaskModelOverride): Promise<ChapterQualityReview>;
   reviseChapterFromQuality(id: string, chapterId: string): Promise<Chapter>;
-  extractChapterFacts(id: string, chapterId: string): Promise<LedgerFact[]>;
+  extractChapterFacts(id: string, chapterId: string, override?: TaskModelOverride): Promise<LedgerFact[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
   resolveFactConflict(id: string, factId: string, resolution: "keep" | "ignore"): Promise<LedgerFact>;
   getDirectorNotes(projectId: string): Promise<string[]>;
@@ -999,9 +1003,9 @@ export interface AppApi {
     override?: TaskModelOverride,
   ): Promise<Chapter>;
   previewChapterBatch(id: string, chapterId: string): Promise<BatchGenerationPreview>;
-  generateChapterBatch(id: string, chapterId: string): Promise<Chapter[]>;
+  generateChapterBatch(id: string, chapterId: string, override?: TaskModelOverride): Promise<Chapter[]>;
   getAiSettings(): Promise<AiSettings>;
-  testAiConnection(): Promise<{ ok: boolean; message: string }>;
+  testAiConnection(override?: TaskModelOverride): Promise<{ ok: boolean; message: string }>;
   saveAiSettings(settings: Omit<AiSettings, "hasApiKey">, apiKey?: string): Promise<AiSettings>;
   listAiProfiles(): Promise<AiProfileView[]>;
   saveAiProfile(profile: AiProfileView, apiKey?: string): Promise<AiProfileView>;

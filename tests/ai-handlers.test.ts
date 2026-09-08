@@ -362,6 +362,22 @@ describe("AI handlers", () => {
     });
   });
 
+  it("passes a single-use override through to the task services", async () => {
+    const { dependencies, handlers, database, ai, saveApiKey } = createDependencies();
+    database.getProject.mockReturnValue(qualityProject);
+    ai.reviewChapter.mockResolvedValue({ issues: [], observations: [] });
+    await saveApiKey("secret");
+    registerAiHandlers(dependencies);
+
+    await handlers.get("testAiConnection")!({ profileId: "profile-cheap" });
+    expect(ai.testConnection).toHaveBeenCalledWith({ profileId: "profile-cheap" });
+
+    await handlers.get("runQualityCheck")!("project-1", qualityChapter.id, { profileId: "profile-cheap" });
+    expect(ai.reviewChapter).toHaveBeenCalledWith(expect.anything(), qualityChapter, expect.anything(), {
+      profileId: "profile-cheap",
+    });
+  });
+
   it("merges local quality results with semantic fallback and advances drafts", async () => {
     const { dependencies, handlers, database, ai, saveApiKey, runLocalQualityCheck } = createDependencies();
     database.getProject.mockReturnValue(qualityProject);
@@ -442,7 +458,7 @@ describe("AI handlers", () => {
     expect(handlers.get("previewChapterBatch")!("project-1", chapter.id)).toBe(batchPreview);
     expect(previewChapterBatch).toHaveBeenCalledWith(planningProject, { ...settings, hasApiKey: false }, chapter.id);
     await expect(handlers.get("generateChapterBatch")!("project-1", chapter.id)).resolves.toEqual([chapter]);
-    expect(generateChapterBatch).toHaveBeenCalledWith("project-1", chapter.id);
+    expect(generateChapterBatch).toHaveBeenCalledWith("project-1", chapter.id, undefined);
   });
 
   it("returns chapter transitions immediately and queues finalized fact extraction", async () => {
@@ -558,7 +574,11 @@ describe("AI handlers", () => {
       chapter.number,
       40,
     );
-    expect(ai.extractChapterFacts).toHaveBeenCalledWith({ ...projectOverview, facts: [existingFact] }, contentChapter);
+    expect(ai.extractChapterFacts).toHaveBeenCalledWith(
+      { ...projectOverview, facts: [existingFact] },
+      contentChapter,
+      undefined,
+    );
     expect(database.saveFact).toHaveBeenCalledTimes(1);
     expect(database.saveFact).toHaveBeenCalledWith("project-1", newFact);
     expect(database.getProject).not.toHaveBeenCalled();

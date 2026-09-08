@@ -96,6 +96,7 @@ export function WritingPage({
   const [busy, setBusy] = useState(false);
   const [overrideProfileId, setOverrideProfileId] = useState("");
   const [overrideProfiles, setOverrideProfiles] = useState<AiProfileView[]>([]);
+  const taskOverride = overrideProfileId ? { profileId: overrideProfileId } : undefined;
   useEffect(() => {
     if (typeof api.listAiProfiles !== "function") return;
     void api
@@ -586,7 +587,7 @@ export function WritingPage({
     setBusy(true);
     try {
       const saved = await saveLatestForAction();
-      const review = await api.runQualityCheck(project.summary.id, saved.id);
+      const review = await api.runQualityCheck(project.summary.id, saved.id, taskOverride);
       const issues = review.issues;
       // 只有“草稿/待质检”才推进到待定稿；重复质检不应因状态机报错。
       const canAdvance = saved.status === "草稿" || saved.status === "待质检";
@@ -913,7 +914,7 @@ export function WritingPage({
                     draftRef.current = streamedDraft;
                     setDraft(streamedDraft);
                   },
-                  overrideProfileId ? { profileId: overrideProfileId } : undefined,
+                  taskOverride,
                 );
                 draftRef.current = result;
                 lastSavedSignature.current = chapterDraftSignature(result);
@@ -1833,7 +1834,7 @@ export function WritingPage({
                 onClick={async () => {
                   setBusy(true);
                   try {
-                    const result = await api.generateChapterBatch(project.summary.id, draft.id);
+                    const result = await api.generateChapterBatch(project.summary.id, draft.id, taskOverride);
                     const prior = new Map<string, string>();
                     for (const chapter of project.chapters)
                       if (chapter.number >= draft.number && chapter.number < draft.number + result.length)
@@ -1853,7 +1854,7 @@ export function WritingPage({
                     void Promise.all(
                       result.map(async (chapter) => {
                         try {
-                          const review = await api.runQualityCheck(project.summary.id, chapter.id);
+                          const review = await api.runQualityCheck(project.summary.id, chapter.id, taskOverride);
                           return { id: chapter.id, issues: review.issues, observations: review.observations };
                         } catch {
                           return { id: chapter.id, issues: [] as QualityIssue[], observations: [] as string[] };

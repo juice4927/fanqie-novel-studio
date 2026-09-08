@@ -53,7 +53,7 @@ export interface ChapterGenerationCoordinator {
     onStream?: (event: ChapterDraftStreamEvent) => void,
     override?: TaskModelOverride,
   ): Promise<Chapter>;
-  generateBatch(projectId: string, chapterId: string): Promise<Chapter[]>;
+  generateBatch(projectId: string, chapterId: string, override?: TaskModelOverride): Promise<Chapter[]>;
 }
 
 export function createChapterGenerationCoordinator({
@@ -133,7 +133,7 @@ export function createChapterGenerationCoordinator({
   const generateOne: ChapterGenerationCoordinator["generateOne"] = (projectId, chapterId, onStream, override) =>
     startOne(projectId, chapterId, onStream, "use", override).completion;
 
-  const generateBatch: ChapterGenerationCoordinator["generateBatch"] = async (projectId, chapterId) => {
+  const generateBatch: ChapterGenerationCoordinator["generateBatch"] = async (projectId, chapterId, override) => {
     if (isActive(projectId)) throw new Error("该作品已有正文生成任务正在运行");
     const preview = previewBatch(database.getProject(projectId), database.getAiSettings(), chapterId);
     if (!preview.canRun) throw new Error(preview.blockingReason ?? "当前不能执行五章批次");
@@ -157,6 +157,8 @@ export function createChapterGenerationCoordinator({
           chapter,
           compileContext(project, chapter, facts),
           serializeChapterAiRetryContext("batch", projectId, chapter),
+          undefined,
+          override,
         );
         generated.push(database.saveGeneratedChapter(projectId, draft, generationGuard));
       }

@@ -76,7 +76,7 @@ export interface AiHandlerDependencies {
     settings: ReturnType<WorkspaceDatabase["getAiSettings"]>,
     chapterId: string,
   ) => BatchGenerationPreview;
-  generateChapterBatch: (projectId: string, chapterId: string) => Promise<Chapter[]>;
+  generateChapterBatch: (projectId: string, chapterId: string, override?: TaskModelOverride) => Promise<Chapter[]>;
   runLocalQualityCheck: (input: {
     projectId: string;
     chapter: Chapter;
@@ -122,7 +122,7 @@ export function registerAiHandlers({
   startChapterRetry,
   logRetryFailure,
 }: AiHandlerDependencies): void {
-  register("runQualityCheck", async (id, chapterId) => {
+  register("runQualityCheck", async (id, chapterId, override) => {
     const project = database.getProject(id);
     const chapter = project.chapters.find((item) => item.id === chapterId);
     if (!chapter) throw new Error("章节不存在");
@@ -183,7 +183,12 @@ export function registerAiHandlers({
     let observations = [...local.observations];
     if (getApiKey()) {
       try {
-        const review = await ai.reviewChapter({ ...project, facts }, chapter, compileContext(project, chapter, facts));
+        const review = await ai.reviewChapter(
+          { ...project, facts },
+          chapter,
+          compileContext(project, chapter, facts),
+          override,
+        );
         semanticIssues = review.issues;
         observations = [...observations, ...review.observations];
       } catch (error) {
@@ -258,7 +263,7 @@ export function registerAiHandlers({
   register("previewChapterBatch", (id, chapterId) =>
     previewChapterBatch(database.getProject(id), database.getAiSettings(), chapterId),
   );
-  register("generateChapterBatch", (id, chapterId) => generateChapterBatch(id, chapterId));
+  register("generateChapterBatch", (id, chapterId, override) => generateChapterBatch(id, chapterId, override));
   register("transitionChapter", (id, chapterId, status) => {
     const saved = database.transitionChapter(id, chapterId, status);
     if (status !== "已定稿") {
@@ -289,7 +294,7 @@ export function registerAiHandlers({
       database.searchRelevantFacts(id, `${chapter.title} ${chapter.outline}`, chapter.number),
     );
   });
-  register("extractChapterFacts", async (id, chapterId) => {
+  register("extractChapterFacts", async (id, chapterId, override) => {
     const project = database.getProjectOverview(id);
     const chapter = database.getChapter(id, chapterId);
     if (!chapter.content.trim()) throw new Error("章节还没有正文");
@@ -299,7 +304,7 @@ export function registerAiHandlers({
       chapter.number,
       40,
     );
-    const candidates = await ai.extractChapterFacts({ ...project, facts: relevantFacts }, chapter);
+    const candidates = await ai.extractChapterFacts({ ...project, facts: relevantFacts }, chapter, override);
     const existing = new Set(
       project.facts.map(
         (fact) => `${fact.evidenceChapter}|${fact.kind}|${fact.subject}|${fact.predicate}|${fact.value}`,
@@ -326,7 +331,7 @@ export function registerAiHandlers({
       .slice(0, 5);
     return ai.generateConcepts(project, database.getInsights(project.insightIds), opportunities);
   });
-  register("generatePlanningDraft", async (id, input) => {
+  register("generatePlanningDraft", async (id, input, override) => {
     const project = database.getProject(id);
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
     if (input.mode === "全书结构" && project.plans.some((plan) => plan.kind === "宏观阶段" || plan.kind === "分卷")) {
@@ -343,14 +348,21 @@ export function registerAiHandlers({
     const savedPlans: PlanningGenerationResult["plans"] = [];
     const savedChapters: PlanningGenerationResult["chapters"] = [];
     try {
-      const generated = await ai.generatePlanning(project, { ...input, fromChapter }, (batch) => {
-        const latest = database.getProject(id);
-        if (batch.chapters.some((chapter) => latest.chapters.some((existing) => existing.number === chapter.number))) {
-          throw new Error("生成期间章节范围发生变化，本批结果未保存，请重新生成");
-        }
-        savedPlans.push(...batch.plans.map((plan) => database.savePlan(id, plan)));
-        savedChapters.push(...batch.chapters.map((chapter) => database.saveChapter(id, chapter)));
-      });
+      const generated = await ai.generatePlanning(
+        project,
+        { ...input, fromChapter },
+        (batch) => {
+          const latest = database.getProject(id);
+          if (
+            batch.chapters.some((chapter) => latest.chapters.some((existing) => existing.number === chapter.number))
+          ) {
+            throw new Error("生成期间章节范围发生变化，本批结果未保存，请重新生成");
+          }
+          savedPlans.push(...batch.plans.map((plan) => database.savePlan(id, plan)));
+          savedChapters.push(...batch.chapters.map((chapter) => database.saveChapter(id, chapter)));
+        },
+        override,
+      );
       if (!generated.chapters.length) {
         savedPlans.push(...generated.plans.map((plan) => database.savePlan(id, plan)));
       }
@@ -415,7 +427,7 @@ export function registerAiHandlers({
     ...database.getAiSettings(),
     hasApiKey: Boolean(getApiKey()),
   }));
-  register("testAiConnection", () => ai.testConnection());
+  register("testAiConnection", (override) => ai.testConnection(override));
   register("saveAiSettings", async (settings, apiKey) => {
     const previousSettings = database.getAiSettings();
     const previousOrigin = new URL(previousSettings.baseUrl).origin;
