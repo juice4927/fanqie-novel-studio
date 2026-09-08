@@ -1,6 +1,7 @@
 import { Check, LoaderCircle, Plus, SearchCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, Field, IconButton, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { formatCount } from "../lib/format";
 import { issueTone } from "../shared/issue-tone";
 import type {
@@ -149,7 +150,7 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
                             await reload();
                             notify("规划节点已批准");
                           } catch (error) {
-                            notify(error instanceof Error ? error.message : String(error), "error");
+                            notify(describeError(error), "error");
                           }
                         }}
                       >
@@ -511,7 +512,7 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
                   try {
                     setPlanningReview(await api.reviewPlanning(project.summary.id, reviewInput));
                   } catch (error) {
-                    notify(error instanceof Error ? error.message : String(error), "error");
+                    notify(describeError(error), "error");
                   } finally {
                     setReviewBusy(false);
                   }
@@ -545,7 +546,7 @@ export function PlanningPage({ project, api, reload, notify }: CommonProjectProp
                         `已应用 ${result.appliedPlanIds.length} 个规划节点和 ${result.appliedChapterIds.length} 个章纲修复，请复核后审批`,
                       );
                     } catch (error) {
-                      notify(error instanceof Error ? error.message : String(error), "error");
+                      notify(describeError(error), "error");
                     } finally {
                       setReviewBusy(false);
                     }

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge, Button, EmptyState, Field, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { formatDate } from "../lib/format";
 import { issueTone } from "../shared/issue-tone";
 import type { AppApi, ChangeRequest, Chapter, ProjectDetail, QualityIssue } from "../shared/types";
@@ -134,7 +135,7 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
       await reload();
       setReviewChapterId(chapter.id);
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     } finally {
       setChapterAction(null);
     }
@@ -145,7 +146,7 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
       await reload();
       notify(status === "已解决" ? "问题已标记解决" : "问题已忽略");
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     }
   };
   return (

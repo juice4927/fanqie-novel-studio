@@ -1,6 +1,7 @@
 import { BookMarked, CalendarDays, FileOutput, Plus, Send } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal, Select } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { formatDate } from "../lib/format";
 import type { AppApi, ProjectDetail, ScheduleItem } from "../shared/types";
 
@@ -21,7 +22,7 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
       const result = await api.exportProject(project.summary.id, format);
       if (result) notify(`发布包已导出：${result}`);
     } catch (error) {
-      notify(String(error), "error");
+      notify(describeError(error), "error");
     }
   };
   return (
@@ -113,7 +114,7 @@ export function PublishingPage({ project, api, reload, notify }: CommonProjectPr
                         await reload();
                         notify("已记录人工发布");
                       } catch (error) {
-                        notify(String(error), "error");
+                        notify(describeError(error), "error");
                       }
                     }}
                   >

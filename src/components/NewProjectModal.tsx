@@ -1,5 +1,6 @@
 import { Check, LoaderCircle, Sparkles } from "lucide-react";
 import { useState } from "react";
+import { describeError } from "../lib/error-message";
 import { GENRE_ELEMENT_GROUPS, NARRATIVE_GENRES, type NarrativeGenre } from "../shared/genre-composition";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import type { AppApi, BookConceptCandidate, BookConceptInput, Genre, ProjectSummary } from "../shared/types";
@@ -52,7 +53,7 @@ export function NewProjectModal({
       setConcepts(next);
       setSelectedId(next[0]?.id ?? null);
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     } finally {
       setBusy(false);
     }
@@ -76,7 +77,7 @@ export function NewProjectModal({
             });
       await onCreated(project);
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
       setBusy(false);
     }
   };

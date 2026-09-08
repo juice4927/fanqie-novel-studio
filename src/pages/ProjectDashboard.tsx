@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge, Button, Modal } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { formatCount } from "../lib/format";
 import { type GenerationQuality, reviewTierLabel } from "../shared/generation-quality";
 import type { GenrePluginDefinition } from "../shared/genre-plugins";
@@ -257,7 +258,7 @@ export function ProjectDashboard({
                 try {
                   setConcepts(await api.generateConcepts(project.summary.id));
                 } catch (error) {
-                  notify(error instanceof Error ? error.message : String(error), "error");
+                  notify(describeError(error), "error");
                 } finally {
                   setGenerating(false);
                 }

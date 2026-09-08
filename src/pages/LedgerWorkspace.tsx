@@ -1,6 +1,7 @@
 import { BrainCircuit, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, EmptyState, Field, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import type { AppApi, ExpectationEntry, LedgerFact, LedgerKind, ProjectDetail } from "../shared/types";
 
@@ -110,7 +111,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                 await reload();
                 notify(facts.length ? `已提取 ${facts.length} 条待确认状态` : "本章没有新的持久状态");
               } catch (error) {
-                notify(String(error), "error");
+                notify(describeError(error), "error");
               }
             }}
           >
@@ -166,7 +167,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                           await reload();
                           notify(replaced ? "新状态已生效，旧状态已结束" : "候选事实已确认");
                         } catch (error) {
-                          notify(String(error), "error");
+                          notify(describeError(error), "error");
                         }
                       }}
                     >
@@ -181,7 +182,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                           await reload();
                           notify("候选已忽略");
                         } catch (error) {
-                          notify(String(error), "error");
+                          notify(describeError(error), "error");
                         }
                       }}
                     >
@@ -476,7 +477,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                     setExpectationModal(false);
                     notify("期待账本已更新");
                   } catch (error) {
-                    notify(String(error), "error");
+                    notify(describeError(error), "error");
                   }
                 }}
               >

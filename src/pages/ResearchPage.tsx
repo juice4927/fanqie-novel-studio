@@ -1,6 +1,7 @@
 import { ClipboardPaste, Clock3, FileInput, Link2, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button, Segmented } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { FANQIE_CATEGORY_PROFILES } from "../shared/fanqie-taxonomy";
 import type {
   AiSettings,
@@ -104,7 +105,7 @@ export function ResearchPage({
       const result = await api.previewResearchFile();
       if (result) setPreview(result);
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -118,7 +119,7 @@ export function ResearchPage({
       await reload();
       notify("样本已导入研究隔离区");
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -130,7 +131,7 @@ export function ResearchPage({
       setTab("脱敏洞察");
       notify("拆书完成，已生成脱敏洞察包");
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     } finally {
       setBusyBook(null);
     }
@@ -167,7 +168,7 @@ export function ResearchPage({
       notify(`已读取《${book.title}》公开前 ${book.chapterCount} 章`);
       await requestDeconstruct(book);
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     } finally {
       setReadingPublicSample(false);
     }
@@ -181,7 +182,7 @@ export function ResearchPage({
       await reload();
       notify("榜单快照已保存");
     } catch (error) {
-      notify(String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -197,7 +198,7 @@ export function ResearchPage({
         snapshot.status !== "失败" ? "success" : "error",
       );
     } catch (error) {
-      notify(String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -212,7 +213,7 @@ export function ResearchPage({
       await reload();
       notify("定时采榜任务已保存");
     } catch (error) {
-      notify(String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -227,7 +228,7 @@ export function ResearchPage({
       });
       await reload();
     } catch (error) {
-      notify(String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -237,7 +238,7 @@ export function ResearchPage({
       await reload();
       notify("榜单任务已运行");
     } catch (error) {
-      notify(String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -246,7 +247,7 @@ export function ResearchPage({
       await api.deleteRankingSchedule(schedule.id);
       await reload();
     } catch (error) {
-      notify(String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 

@@ -1,6 +1,7 @@
 import { Check, LoaderCircle, LockKeyhole, Save, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge, Button, Field, Input, Select, Textarea } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
 import { FANQIE_CATEGORY_PROFILES, getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
 import { GENRE_ELEMENT_GROUPS, NARRATIVE_GENRES } from "../shared/genre-composition";
@@ -71,7 +72,7 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
       await reload();
       notify(saved.version === previousVersion ? "创作契约内容未变" : `创作契约已保存为 v${saved.version}`);
     } catch (error) {
-      notify(String(error), "error");
+      notify(describeError(error), "error");
     }
   };
   const optimizeAesthetic = async () => {
@@ -82,7 +83,7 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
       setAestheticSuggestion(suggestion);
       notify("审美优化提案已生成，请审阅后采用");
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     } finally {
       setOptimizingAesthetic(false);
     }
@@ -116,7 +117,7 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
                 await reload();
                 notify("创作契约已锁定审批");
               } catch (error) {
-                notify(error instanceof Error ? error.message : String(error), "error");
+                notify(describeError(error), "error");
               }
             }}
           >

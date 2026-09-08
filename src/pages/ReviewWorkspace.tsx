@@ -1,6 +1,7 @@
 import { CalendarDays, FileOutput, SearchCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, EmptyState, Field, Input, Modal, Select, Textarea } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { formatCount, formatDate } from "../lib/format";
 import { summarizeMetrics } from "../shared/metrics";
 import type { AppApi, ProjectDetail, ReviewExperiment, ReviewSuggestion } from "../shared/types";
@@ -246,7 +247,7 @@ export function ReviewPage({ project, api, reload, notify }: ReviewPageProps) {
                     setCsv("");
                     notify(`已导入 ${count} 条指标`);
                   } catch (error) {
-                    notify(String(error), "error");
+                    notify(describeError(error), "error");
                   }
                 }}
               >
@@ -410,7 +411,7 @@ export function ReviewPage({ project, api, reload, notify }: ReviewPageProps) {
                     setExperimentModal(false);
                     notify("运营实验已保存");
                   } catch (error) {
-                    notify(error instanceof Error ? error.message : String(error), "error");
+                    notify(describeError(error), "error");
                   }
                 }}
               >
