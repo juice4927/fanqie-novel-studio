@@ -889,6 +889,7 @@ export interface AppApi {
   reviseChapterFromQuality(id: string, chapterId: string): Promise<Chapter>;
   extractChapterFacts(id: string, chapterId: string): Promise<LedgerFact[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
+  resolveFactConflict(id: string, factId: string, resolution: "keep" | "ignore"): Promise<LedgerFact>;
   getDirectorNotes(projectId: string): Promise<string[]>;
   saveDirectorNotes(projectId: string, notes: string[]): Promise<string[]>;
   recordGenerationDecision(projectId: string, chapterId: string, action: "adopted" | "reverted"): Promise<void>;

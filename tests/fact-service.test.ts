@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { prepareFactSave } from "../src/shared/fact-service";
+import { planFactConflictResolution, prepareFactSave } from "../src/shared/fact-service";
 import type { LedgerFact } from "../src/shared/types";
 
 const timestamp = "2026-07-31T00:00:00.000Z";
@@ -127,5 +127,44 @@ describe("fact save rules", () => {
       updatedAt: timestamp,
     });
     expect(replacement.fact.confidence).toBe("已确认");
+  });
+});
+
+describe("fact conflict resolution", () => {
+  it("keeps the chosen value and closes an earlier open value by chapter", () => {
+    const older = fact({ id: "older", value: "北京", validFromChapter: 1 });
+    const target = fact({ id: "target", value: "上海", validFromChapter: 8, confidence: "有冲突" });
+
+    const plan = planFactConflictResolution([older, target], target.id, "keep", timestamp);
+
+    expect(plan.fact).toEqual({ ...target, confidence: "已确认", updatedAt: timestamp });
+    expect(plan.superseded).toEqual([{ ...older, validToChapter: 7, updatedAt: timestamp }]);
+  });
+
+  it("ignores a later open value that cannot be closed backwards", () => {
+    const target = fact({ id: "target", value: "上海", validFromChapter: 2, confidence: "有冲突" });
+    const newer = fact({ id: "newer", value: "广州", validFromChapter: 8 });
+
+    const plan = planFactConflictResolution([target, newer], target.id, "keep", timestamp);
+
+    expect(plan.fact.confidence).toBe("已确认");
+    expect(plan.superseded).toEqual([{ ...newer, confidence: "已忽略", updatedAt: timestamp }]);
+  });
+
+  it("ignores the chosen fact without touching other values", () => {
+    const target = fact({ id: "target", value: "上海", confidence: "有冲突" });
+    const other = fact({ id: "other", value: "广州" });
+
+    const plan = planFactConflictResolution([target, other], target.id, "ignore", timestamp);
+
+    expect(plan.fact).toEqual({ ...target, confidence: "已忽略", updatedAt: timestamp });
+    expect(plan.superseded).toEqual([]);
+  });
+
+  it("rejects facts that are not in conflict", () => {
+    expect(() => planFactConflictResolution([fact()], "fact-current", "keep", timestamp)).toThrow(
+      "只有“有冲突”的事实需要裁决",
+    );
+    expect(() => planFactConflictResolution([], "missing", "keep", timestamp)).toThrow("事实不存在");
   });
 });

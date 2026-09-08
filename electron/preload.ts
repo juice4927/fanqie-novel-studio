@@ -41,6 +41,7 @@ const api: AppApi = {
   reviseChapterFromQuality: (id, chapterId) => invoke("reviseChapterFromQuality", id, chapterId),
   extractChapterFacts: (id, chapterId) => invoke("extractChapterFacts", id, chapterId),
   saveFact: (id, fact) => invoke("saveFact", id, fact),
+  resolveFactConflict: (id, factId, resolution) => invoke("resolveFactConflict", id, factId, resolution),
   getDirectorNotes: (id) => invoke("getDirectorNotes", id),
   saveDirectorNotes: (id, notes) => invoke("saveDirectorNotes", id, notes),
   recordGenerationDecision: (id, chapterId, action) => invoke("recordGenerationDecision", id, chapterId, action),

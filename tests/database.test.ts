@@ -844,6 +844,44 @@ describe("per-book isolation and gates", () => {
     );
   });
 
+  it("resolves a fact conflict and clears the generation blocker", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "冲突裁决",
+      genre: "历史/架空",
+      targetWords: 3000000,
+      updateCadence: "每日1章",
+    });
+    const base: Omit<LedgerFact, "id" | "updatedAt"> = {
+      kind: "地点",
+      subject: "北仓",
+      predicate: "控制方",
+      value: "巡检司",
+      validFromChapter: 1,
+      validToChapter: null,
+      evidenceChapter: 1,
+      confidence: "已确认",
+      knowledgeScope: "公开",
+    };
+    const original = database.saveFact(project.id, { ...base, id: "", updatedAt: now() });
+    const conflict = database.saveFact(project.id, {
+      ...base,
+      id: "",
+      value: "盐运司",
+      validFromChapter: 2,
+      evidenceChapter: 2,
+      updatedAt: now(),
+    });
+    expect(conflict.confidence).toBe("有冲突");
+
+    const resolved = database.resolveFactConflict(project.id, conflict.id, "keep");
+    const facts = database.getProject(project.id).facts;
+
+    expect(resolved.confidence).toBe("已确认");
+    expect(facts.find((fact) => fact.id === original.id)).toMatchObject({ validToChapter: 1 });
+    expect(facts.some((fact) => fact.confidence === "有冲突")).toBe(false);
+  });
+
   it("rebuilds fact vectors when the embedding provider changes", () => {
     const database = createDatabase();
     const project = database.createProject({

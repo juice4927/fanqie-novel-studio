@@ -21,6 +21,7 @@ type ProjectDatabase = Pick<
   | "saveReviewExperiment"
   | "listProjects"
   | "listRevisions"
+  | "resolveFactConflict"
   | "resolveIssue"
   | "restoreRevision"
   | "saveChangeRequest"
@@ -111,6 +112,7 @@ export function registerProjectHandlers({
   register("listRevisions", (id, collection, entityId) => database.listRevisions(id, collection, entityId));
   register("restoreRevision", (id, revisionId) => database.restoreRevision(id, revisionId));
   register("saveFact", (id, fact) => database.saveFact(id, fact));
+  register("resolveFactConflict", (id, factId, resolution) => database.resolveFactConflict(id, factId, resolution));
   register("getDirectorNotes", (id) => database.getDirectorNotes(id));
   register("saveDirectorNotes", (id, notes) => database.saveDirectorNotes(id, notes));
   register("recordGenerationDecision", (id, chapterId, action) =>

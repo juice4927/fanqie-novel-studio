@@ -57,3 +57,45 @@ export function prepareFactSave(
       : undefined;
   return { fact: next, replacement };
 }
+
+export type FactConflictResolution = "keep" | "ignore";
+
+export interface FactConflictResolutionPlan {
+  fact: LedgerFact;
+  superseded: readonly LedgerFact[];
+}
+
+/**
+ * 人工裁决一条“有冲突”的事实：保留当前值（更早的开放值按章关闭，更晚的开放值忽略），
+ * 或直接忽略该条。冲突不裁决会一直阻断正文生成，因此必须存在界面出口。
+ */
+export function planFactConflictResolution(
+  facts: readonly LedgerFact[],
+  factId: string,
+  resolution: FactConflictResolution,
+  updatedAt: string,
+): FactConflictResolutionPlan {
+  const target = facts.find((fact) => fact.id === factId);
+  if (!target) throw new Error("事实不存在");
+  if (target.confidence !== "有冲突") throw new Error("只有“有冲突”的事实需要裁决");
+  if (resolution === "ignore") {
+    return { fact: { ...target, confidence: "已忽略", updatedAt }, superseded: [] };
+  }
+  const superseded = facts
+    .filter(
+      (fact) =>
+        fact.id !== target.id &&
+        fact.confidence !== "已忽略" &&
+        fact.subject === target.subject &&
+        fact.predicate === target.predicate &&
+        fact.validToChapter === null &&
+        fact.value !== target.value,
+    )
+    .map(
+      (fact): LedgerFact =>
+        fact.validFromChapter < target.validFromChapter
+          ? { ...fact, validToChapter: target.validFromChapter - 1, updatedAt }
+          : { ...fact, confidence: "已忽略", updatedAt },
+    );
+  return { fact: { ...target, confidence: "已确认", updatedAt }, superseded };
+}

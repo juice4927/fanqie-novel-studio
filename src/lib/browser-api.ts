@@ -20,7 +20,7 @@ import {
   visibleProjectSummaries,
 } from "../shared/dashboard-policy";
 import { prepareExpectationSave } from "../shared/expectation-service";
-import { prepareFactSave } from "../shared/fact-service";
+import { planFactConflictResolution, prepareFactSave } from "../shared/fact-service";
 import { computeGenerationQuality } from "../shared/generation-quality";
 import { analyzeMetrics, parseMetricsCsv } from "../shared/metrics";
 import {
@@ -754,6 +754,20 @@ export function createBrowserApi(): AppApi {
       project.summary.updatedAt = updatedAt;
       persist();
       return next;
+    },
+    async resolveFactConflict(projectId, factId, resolution) {
+      const project = getProject(state, projectId);
+      const updatedAt = now();
+      const plan = planFactConflictResolution(project.facts, factId, resolution, updatedAt);
+      for (const superseded of plan.superseded) {
+        const index = project.facts.findIndex((item) => item.id === superseded.id);
+        if (index >= 0) project.facts[index] = superseded;
+      }
+      const factIndex = project.facts.findIndex((item) => item.id === plan.fact.id);
+      if (factIndex >= 0) project.facts[factIndex] = plan.fact;
+      project.summary.updatedAt = updatedAt;
+      persist();
+      return plan.fact;
     },
     async resolveIssue(projectId, issueId, status) {
       const project = getProject(state, projectId);

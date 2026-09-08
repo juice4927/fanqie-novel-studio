@@ -528,6 +528,7 @@ const schemas = {
   runQualityCheck: projectEntity,
   extractChapterFacts: projectEntity,
   saveFact: z.tuple([id, fact]),
+  resolveFactConflict: z.tuple([id, id, z.enum(["keep", "ignore"])]),
   getDirectorNotes: idOnly,
   saveDirectorNotes: z.tuple([id, z.array(z.string().trim().max(300)).max(50)]),
   recordGenerationDecision: z.tuple([id, id, z.enum(["adopted", "reverted"])]),

@@ -63,4 +63,51 @@ describe("browser fact workflow", () => {
 
     expect(historical.confidence).toBe("已确认");
   });
+
+  it("resolves a conflict by keeping the chosen value and closing the older one", async () => {
+    const api = createBrowserApi();
+    const [summary] = await api.listProjects();
+    const project = await api.getProject(summary.id);
+    const current = project.facts[0];
+
+    const conflicting = await api.saveFact(summary.id, {
+      ...current,
+      id: "",
+      value: "另一处地点",
+      validFromChapter: 2,
+      evidenceChapter: 2,
+      replacesFactId: undefined,
+    });
+    expect(conflicting.confidence).toBe("有冲突");
+
+    const resolvedAt = "2026-08-04T01:00:00.000Z";
+    vi.setSystemTime(resolvedAt);
+    const resolved = await api.resolveFactConflict(summary.id, conflicting.id, "keep");
+    const afterResolve = await api.getProject(summary.id);
+
+    expect(resolved).toMatchObject({ confidence: "已确认", updatedAt: resolvedAt });
+    expect(afterResolve.facts.find((fact) => fact.id === current.id)).toMatchObject({
+      validToChapter: 1,
+      updatedAt: resolvedAt,
+    });
+  });
+
+  it("ignores a conflicting fact on request", async () => {
+    const api = createBrowserApi();
+    const [summary] = await api.listProjects();
+    const project = await api.getProject(summary.id);
+    const current = project.facts[0];
+
+    const conflicting = await api.saveFact(summary.id, {
+      ...current,
+      id: "",
+      value: "另一处地点",
+      validFromChapter: 2,
+      evidenceChapter: 2,
+      replacesFactId: undefined,
+    });
+
+    const ignored = await api.resolveFactConflict(summary.id, conflicting.id, "ignore");
+    expect(ignored.confidence).toBe("已忽略");
+  });
 });

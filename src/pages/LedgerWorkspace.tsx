@@ -59,6 +59,7 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
     (fact) => fact.confidence !== "已忽略" && (filter === "全部" || fact.kind === filter),
   );
   const pendingFacts = project.facts.filter((fact) => fact.confidence === "待确认");
+  const conflictCount = project.facts.filter((fact) => fact.confidence === "有冲突").length;
   const currentChapter = Math.max(0, ...project.chapters.map((chapter) => chapter.number));
   const openExpectations = project.expectations.filter(
     (item) => item.status === "待兑现" || item.status === "部分兑现",
@@ -88,6 +89,15 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
       updatedAt: new Date().toISOString(),
     });
     setModal(true);
+  };
+  const resolveConflict = async (fact: LedgerFact, resolution: "keep" | "ignore") => {
+    try {
+      await api.resolveFactConflict(project.summary.id, fact.id, resolution);
+      await reload();
+      notify(resolution === "keep" ? "已采用该值，同属性的其它开放值已关闭或忽略" : "该冲突事实已忽略");
+    } catch (error) {
+      notify(describeError(error), "error");
+    }
   };
   return (
     <div className="page project-page">
@@ -122,9 +132,12 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
       <div className="toolbar-row ledger-filter">
         <Segmented options={["全部", ...kinds] as const} value={filter} onChange={setFilter} />
         <span>
-          {pendingFacts.length} 项待确认 · {project.facts.filter((fact) => fact.confidence === "有冲突").length} 项冲突
+          {pendingFacts.length} 项待确认 · {conflictCount} 项冲突
         </span>
       </div>
+      {conflictCount > 0 && (
+        <p className="muted-line">冲突事实会阻断 AI 生成。请在下方事实表中对“有冲突”的记录选择“采用此值”或“忽略”。</p>
+      )}
       {pendingFacts.length ? (
         <section className="section-band pending-facts-panel">
           <div className="section-heading">
@@ -313,6 +326,16 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
                   >
                     {fact.confidence}
                   </Badge>
+                  {fact.confidence === "有冲突" && (
+                    <span className="inline-actions">
+                      <Button variant="secondary" onClick={() => void resolveConflict(fact, "keep")}>
+                        采用此值
+                      </Button>
+                      <Button variant="ghost" onClick={() => void resolveConflict(fact, "ignore")}>
+                        忽略
+                      </Button>
+                    </span>
+                  )}
                 </span>
               </div>
             ))}
@@ -601,13 +624,17 @@ export function LedgerPage({ project, api, reload, notify }: CommonProjectProps)
               <Button
                 disabled={!draft.subject || !draft.predicate || !draft.value}
                 onClick={async () => {
-                  const saved = await api.saveFact(project.summary.id, draft);
-                  await reload();
-                  setModal(false);
-                  notify(
-                    saved.confidence === "有冲突" ? "事实已保存，但检测到冲突" : "事实已保存",
-                    saved.confidence === "有冲突" ? "error" : "success",
-                  );
+                  try {
+                    const saved = await api.saveFact(project.summary.id, draft);
+                    await reload();
+                    setModal(false);
+                    notify(
+                      saved.confidence === "有冲突" ? "事实已保存，但检测到冲突，请在事实表中裁决" : "事实已保存",
+                      saved.confidence === "有冲突" ? "error" : "success",
+                    );
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  }
                 }}
               >
                 保存事实

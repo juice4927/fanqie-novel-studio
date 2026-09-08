@@ -21,7 +21,7 @@ import {
   deriveProjectRisk,
 } from "../src/shared/dashboard-policy";
 import { prepareExpectationSave } from "../src/shared/expectation-service";
-import { prepareFactSave } from "../src/shared/fact-service";
+import { planFactConflictResolution, prepareFactSave } from "../src/shared/fact-service";
 import { computeGenerationQuality, type GenerationDecision } from "../src/shared/generation-quality";
 import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
 import { prepareProjectCreation, prepareProjectUpdate } from "../src/shared/project-service";
@@ -905,6 +905,31 @@ export class WorkspaceDatabase {
       db.exec("COMMIT");
       this.touchProject(id);
       return next;
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
+      throw error;
+    }
+  }
+
+  resolveFactConflict(id: string, factId: string, resolution: "keep" | "ignore") {
+    const db = this.projectDb(id);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const facts = this.listRecords<LedgerFact>(db, "facts");
+      const plan = planFactConflictResolution(facts, factId, resolution, now());
+      for (const superseded of plan.superseded) {
+        this.saveRecord(db, "facts", superseded.id, superseded);
+        this.saveEmbedding(db, "facts", superseded.id, factEmbeddingText(superseded));
+      }
+      this.saveRecord(db, "facts", plan.fact.id, plan.fact);
+      this.saveEmbedding(db, "facts", plan.fact.id, factEmbeddingText(plan.fact));
+      db.exec("COMMIT");
+      this.touchProject(id);
+      return plan.fact;
     } catch (error) {
       try {
         db.exec("ROLLBACK");
