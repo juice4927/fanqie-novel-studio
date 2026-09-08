@@ -13,18 +13,27 @@ export class SearchRepository {
       const escaped = normalized.replace(/[\\%_]/g, "\\$&");
       const hits = db
         .prepare(`
-        SELECT c.id, c.title, COALESCE(b.content, '') AS content
+        SELECT c.id, c.title,
+          CASE
+            WHEN instr(COALESCE(b.content, ''), ?) > 0
+              THEN substr(b.content, max(1, instr(b.content, ?) - 20), length(?) + 40)
+            ELSE c.title
+          END AS excerpt
         FROM chapters c
         LEFT JOIN chapter_contents b ON b.chapter_id = c.id
         WHERE c.title LIKE ? ESCAPE '\\' OR b.content LIKE ? ESCAPE '\\'
         ORDER BY c.number
         LIMIT ? OFFSET ?
       `)
-        .all(`%${escaped}%`, `%${escaped}%`, limit, offset) as Array<{ id: string; title: string; content: string }>;
+        .all(normalized, normalized, normalized, `%${escaped}%`, `%${escaped}%`, limit, offset) as Array<{
+        id: string;
+        title: string;
+        excerpt: string;
+      }>;
       return hits.flatMap((hit) => {
         const chapter = byId.get(hit.id);
         if (!chapter) return [];
-        const source = hit.content.includes(normalized) ? hit.content : hit.title;
+        const source = hit.excerpt || hit.title;
         const index = source.indexOf(normalized);
         const from = Math.max(0, index - 20);
         const to = Math.min(source.length, index + normalized.length + 20);

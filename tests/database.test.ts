@@ -312,6 +312,23 @@ describe("per-book isolation and gates", () => {
     expect(database.searchProject(project.id, "健康检查")).toHaveLength(1);
   });
 
+  it("returns bounded search excerpts without loading full chapter content", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "搜索片段",
+      genre: "都市脑洞",
+      targetWords: 1000000,
+      updateCadence: "每日1章",
+    });
+    const chapter = database.saveChapter(project.id, {
+      ...createChapter(1, `${"前置内容".repeat(50000)}唯一检索词${"尾部内容".repeat(50000)}`),
+      title: "长正文",
+    });
+    const hit = database.searchProject(project.id, "唯一检索词")[0];
+    expect(hit).toMatchObject({ id: chapter.id, chapterNumber: 1 });
+    expect(hit.excerpt.length).toBeLessThan(100);
+  });
+
   it("reports orphan project directories without deleting them", () => {
     const database = createDatabase();
     const orphan = path.join(database.projectsRoot, "orphan-project");

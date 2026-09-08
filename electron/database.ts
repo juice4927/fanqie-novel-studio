@@ -964,7 +964,8 @@ export class WorkspaceDatabase {
 
   searchProject(id: string, query: string, offset = 0, limit = 50): SearchHit[] {
     const db = this.projectDb(id);
-    return this.search.search(db, query, this.projects.listChapters(db), offset, limit);
+    // Search only needs chapter metadata. Full正文 is loaded lazily by getChapter.
+    return this.search.search(db, query, this.projects.listChapterMetadata(db), offset, limit);
   }
 
   listRevisions(id: string, collection: RevisionRecord["collection"], entityId: string): RevisionRecord[] {
