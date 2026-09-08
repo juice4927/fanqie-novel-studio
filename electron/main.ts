@@ -11,23 +11,34 @@ import {
   sameRevisionSnapshot,
 } from "../src/shared/novel-revision";
 import type { Chapter, ChapterFactsExtractionEvent, NovelRevisionProposal } from "../src/shared/types";
+import { createAiRouteResolver } from "./ai/route-resolver";
 import { AiService } from "./ai-service";
 import { createEncryptedBackup } from "./backup";
 import { type ChapterGenerationCoordinator, createChapterGenerationCoordinator } from "./chapter-generation-service";
 import {
+  deleteAiProfileCredential,
   deleteApiCredential,
+  deleteProxyCredential,
+  listAiProfileCredentialIds,
+  readAiProfileCredential,
   readApiCredential,
   readAutoBackupCredential,
+  readProxyCredential,
+  writeAiProfileCredential,
   writeApiCredential,
+  writeProxyCredential,
 } from "./credential-store";
 import { now, WorkspaceDatabase } from "./database";
 import { registerAiHandlers } from "./handlers/ai-handlers";
+import { type AiProfileCredentials, registerAiProfileHandlers } from "./handlers/ai-profile-handlers";
+import { registerNetworkHandlers } from "./handlers/network-handlers";
 import { registerProjectHandlers } from "./handlers/project-handlers";
 import { type ResearchHandlerRuntime, registerResearchHandlers } from "./handlers/research-handlers";
 import { registerSystemHandlers, type SystemHandlerRuntime } from "./handlers/system-handlers";
 import type { RegisterHandler } from "./handlers/types";
 import { registerUpdateHandlers } from "./handlers/update-handlers";
 import { validateIpcArgs } from "./ipc-validation";
+import { configureOutboundProxy, fetchPublicHttpResponse, setOutboundProxyDnsObserver } from "./netguard";
 import { StructuredLogger } from "./structured-log";
 import { createUpdateService, type UpdateService } from "./update-service";
 import { BackgroundWorker } from "./worker-client";
@@ -37,6 +48,49 @@ let database: WorkspaceDatabase;
 let worker: BackgroundWorker;
 let ai: AiService;
 let apiCredential = "";
+/** 来源密钥内存缓存：路由解析必须同步，启动后预热，保存/删除时增量更新。 */
+const profileCredentials = new Map<string, string>();
+const profileCredentialsBridge: AiProfileCredentials = {
+  read: async (id) => {
+    const cached = profileCredentials.get(id);
+    if (cached !== undefined) return cached;
+    const value = await readAiProfileCredential(id);
+    if (value) profileCredentials.set(id, value);
+    return value;
+  },
+  write: async (id, value) => {
+    await writeAiProfileCredential(id, value);
+    profileCredentials.set(id, value);
+  },
+  remove: async (id) => {
+    await deleteAiProfileCredential(id);
+    profileCredentials.delete(id);
+  },
+  listIds: async () => {
+    const ids = await listAiProfileCredentialIds();
+    for (const id of ids) {
+      if (profileCredentials.has(id)) continue;
+      void readAiProfileCredential(id).then((value) => {
+        if (value) profileCredentials.set(id, value);
+      });
+    }
+    return ids;
+  },
+};
+
+async function prewarmProfileCredentials() {
+  try {
+    for (const id of await listAiProfileCredentialIds()) {
+      if (profileCredentials.has(id)) continue;
+      const value = await readAiProfileCredential(id);
+      if (value) profileCredentials.set(id, value);
+    }
+  } catch (error) {
+    logger.write("warn", "ai.credentials.prewarm_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 let chapterGeneration: ChapterGenerationCoordinator;
 let rankingScheduleTimer: ReturnType<typeof setInterval> | null = null;
 let researchHandlers: ResearchHandlerRuntime;
@@ -59,6 +113,26 @@ else if (!singleInstanceLockDisabled)
 
 function getApiKey() {
   return apiCredential;
+}
+
+/** 旧版单密钥迁移到“默认来源”：只在默认来源还没有密钥时移动一次，失败不阻塞启动。 */
+async function migrateLegacyAiCredential() {
+  try {
+    const migrated = database.listAiProfiles().find((profile) => profile.notes === "由旧版模型设置迁移");
+    if (!migrated) return;
+    const ids = await listAiProfileCredentialIds();
+    if (ids.includes(migrated.id)) return;
+    const legacy = apiCredential || (await readApiCredential());
+    if (!legacy) return;
+    await profileCredentialsBridge.write(migrated.id, legacy);
+    await deleteApiCredential();
+    apiCredential = "";
+    logger.write("info", "ai.credentials.migrated", { profileId: migrated.id });
+  } catch (error) {
+    logger.write("warn", "ai.credentials.migration_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function extractFinalizedChapterFacts(projectId: string, chapter: Chapter): Promise<ChapterFactsExtractionEvent> {
@@ -86,6 +160,54 @@ async function extractFinalizedChapterFacts(projectId: string, chapter: Chapter)
       status: "失败",
       candidateCount: 0,
       message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/** 启动时按已保存设置配置出站代理；配置坏了只回退直连，绝不阻止启动。 */
+async function configureOutboundProxyFromSettings() {
+  try {
+    const settings = database.getProxySettings();
+    if (!settings.enabled || !settings.url) {
+      configureOutboundProxy(null);
+      return;
+    }
+    const password = await readProxyCredential();
+    configureOutboundProxy({
+      url: settings.url,
+      username: settings.username || undefined,
+      password: password || undefined,
+    });
+    logger.write("info", "proxy.configured", { url: new URL(settings.url).origin });
+  } catch (error) {
+    configureOutboundProxy(null);
+    logger.write("error", "proxy.configure.failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/** 经代理对已保存的模型地址发一次不带密钥的 GET：拿到任何状态码即链路通。 */
+async function testOutboundProxy(): Promise<{ ok: boolean; message: string }> {
+  const settings = database.getProxySettings();
+  if (!settings.enabled || !settings.url) return { ok: false, message: "请先启用并保存代理设置" };
+  const target = database.getAiSettings().baseUrl;
+  const startedAt = Date.now();
+  try {
+    const response = await fetchPublicHttpResponse(
+      target,
+      { method: "GET", signal: AbortSignal.timeout(15_000) },
+      { allowCrossOriginRedirect: true },
+    );
+    await response.body?.cancel();
+    return {
+      ok: true,
+      message: `代理连通：${new URL(target).origin} 返回 HTTP ${response.status}（${Date.now() - startedAt} ms）`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `代理连接失败：${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
@@ -232,6 +354,28 @@ function registerHandlers() {
     },
     startChapterRetry: (projectId, chapterId) => chapterGeneration.startOne(projectId, chapterId, undefined, "bypass"),
     logRetryFailure: (details) => logger.write("error", "ai.retry.failed", { ...details }),
+  });
+  registerAiProfileHandlers({
+    register: handle,
+    database,
+    credentials: {
+      read: profileCredentialsBridge.read,
+      write: profileCredentialsBridge.write,
+      remove: profileCredentialsBridge.remove,
+      listIds: profileCredentialsBridge.listIds,
+    },
+    log: (level, event, data) => logger.write(level, event, data),
+    now,
+  });
+  registerNetworkHandlers({
+    register: handle,
+    getSettings: () => database.getProxySettings(),
+    saveSettings: (input) => database.saveProxySettings(input),
+    readProxyCredential,
+    writeProxyCredential,
+    deleteProxyCredential,
+    testConnection: () => testOutboundProxy(),
+    log: (level, event, data) => logger.write(level, event, data),
   });
   if (!updateService) throw new Error("更新服务尚未初始化");
   registerUpdateHandlers({ register: handle, update: updateService });
@@ -406,8 +550,41 @@ if (hasSingleInstanceLock)
     database.pruneAiJobHistory();
     logger = new StructuredLogger(path.join(app.getPath("userData"), "logs"));
     logger.write("info", "application.started", { version: app.getVersion(), workspace: workspaceRoot });
+    setOutboundProxyDnsObserver((hostname) => logger.write("warn", "netguard.proxy.dns_unresolved", { hostname }));
+    await migrateLegacyAiCredential();
+    await configureOutboundProxyFromSettings();
+    void prewarmProfileCredentials();
     worker = new BackgroundWorker();
-    ai = new AiService(database, getApiKey, 120_000, 0, (level, event, data) => logger.write(level, event, data));
+    ai = new AiService(
+      database,
+      getApiKey,
+      120_000,
+      0,
+      (level, event, data) => logger.write(level, event, data),
+      createAiRouteResolver({ database, getCredential: (id) => profileCredentials.get(id) ?? "" }),
+      (info) => {
+        try {
+          database.saveModelCapability({
+            profileId: info.profileId,
+            modelId: info.model,
+            apiSurface: info.apiSurface,
+            supportsJsonSchema: info.apiSurface === "openai-responses" ? info.supported : null,
+            supportsJsonMode: info.apiSurface === "anthropic-messages" ? false : info.supported,
+            supportsStreaming: null,
+            supportsStreamUsage: null,
+            supportsReasoning: null,
+            maxOutputTokens: null,
+            contextWindow: null,
+            probedAt: now(),
+            source: "probe",
+          });
+        } catch (error) {
+          logger.write("warn", "ai.capability.persist_failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+    );
     chapterGeneration = createChapterGenerationCoordinator({
       database,
       ai,

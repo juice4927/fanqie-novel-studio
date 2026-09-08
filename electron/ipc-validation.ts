@@ -404,7 +404,41 @@ const insightInput = z
   })
   .strict();
 
+const aiProfile = z
+  .object({
+    id: z.string().trim().max(64),
+    name: z.string().trim().min(1).max(60),
+    apiSurface: z.enum(["auto", "openai-chat", "openai-responses", "anthropic-messages"]),
+    baseUrl: z.string().trim().min(1).max(2000),
+    defaultModel: z.string().max(200),
+    authScheme: z.string().trim().min(1).max(120),
+    extraHeaders: z.record(z.string().max(120), z.string().max(1000)),
+    extraQuery: z.record(z.string().max(120), z.string().max(1000)),
+    localEndpoint: z.boolean(),
+    enabled: z.boolean(),
+    sortOrder: z.number().int().min(-1000).max(1000),
+    notes: z.string().max(500),
+    lastUsedAt: timestamp.nullable(),
+    lastTestAt: timestamp.nullable(),
+    lastTestOk: z.boolean().nullable(),
+    lastError: z.string().max(300).nullable(),
+    hasApiKey: z.boolean().optional(),
+  })
+  .strict();
+
 const noArgs = z.tuple([]);
+const taskModelOverride = z
+  .object({ profileId: id.optional(), model: z.string().trim().min(1).max(200).optional() })
+  .strict();
+
+const proxySettingsInput = z
+  .object({
+    enabled: z.boolean(),
+    url: z.string().max(2000),
+    username: z.string().max(200),
+    password: z.string().max(1000).optional(),
+  })
+  .strict();
 const idOnly = z.tuple([id]);
 const projectEntity = z.tuple([id, id]);
 
@@ -581,7 +615,7 @@ const schemas = {
   listResearchAnalyses: idOnly,
   attachInsights: z.tuple([id, z.array(id).max(1000)]),
   generateConcepts: idOnly,
-  generateChapterDraft: z.tuple([id, id, id.optional()]),
+  generateChapterDraft: z.tuple([id, id, id.optional(), taskModelOverride.optional()]),
   previewChapterBatch: projectEntity,
   generateChapterBatch: projectEntity,
   getAiSettings: noArgs,
@@ -602,6 +636,24 @@ const schemas = {
       .strict(),
     z.string().max(10_000).optional(),
   ]),
+  listAiProfiles: noArgs,
+  saveAiProfile: z.tuple([aiProfile, z.string().max(10_000).optional()]),
+  deleteAiProfile: idOnly,
+  setDefaultAiProfile: idOnly,
+  getDefaultAiProfileId: noArgs,
+  listAiRoleRoutes: noArgs,
+  setAiRoleRoute: z.tuple([
+    z.enum(["draft", "plan", "review", "extract", "utility"]),
+    id.nullable(),
+    z.string().trim().max(200).nullable(),
+  ]),
+  testAiProfile: idOnly,
+  refreshAiProfileModels: idOnly,
+  exportAiProfiles: noArgs,
+  importAiProfiles: z.tuple([z.string().max(2_000_000)]),
+  getProxySettings: noArgs,
+  saveProxySettings: z.tuple([proxySettingsInput]),
+  testProxyConnection: noArgs,
   listAiJobs: z.tuple([id.optional()]),
   cancelAiJob: z.tuple([id]),
   retryAiJob: z.tuple([id]),

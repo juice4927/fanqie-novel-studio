@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { AiProfileQuickSwitch } from "./components/AiProfileQuickSwitch";
 import { NewProjectModal } from "./components/NewProjectModal";
 import { Button, Field, Input, Modal } from "./components/UI";
 import { createBrowserApi } from "./lib/browser-api";
@@ -152,6 +153,7 @@ function Workbench() {
           </div>
         </div>
         <nav className="sidebar-bottom">
+          <AiProfileQuickSwitch api={api} notify={notify} />
           <button type="button" className={page === "settings" ? "active" : ""} onClick={() => navigate("settings")}>
             <Settings size={18} />
             系统设置

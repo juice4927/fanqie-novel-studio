@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import type { TaskModelOverride } from "../src/shared/ai/types";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import { GENRE_STAGES } from "../src/shared/genre-plugins";
 import type { BookConceptInput, ChapterDraftStreamEvent } from "../src/shared/types";
@@ -615,4 +616,6 @@ export interface StartDraftChapterOptions {
   retryContext?: string;
   onStream?: (event: ChapterDraftStreamEvent) => void;
   cachePolicy?: AiCachePolicy;
+  /** 单次覆盖来源/模型，只对本章这次生成生效。 */
+  override?: TaskModelOverride;
 }

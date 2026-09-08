@@ -427,11 +427,16 @@ describe("AI handlers", () => {
     registerAiHandlers(dependencies);
 
     await expect(handlers.get("generateChapterDraft")!("project-1", chapter.id, "stream-1")).resolves.toBe(chapter);
-    expect(generateChapterDraft).toHaveBeenCalledWith("project-1", chapter.id, expect.any(Function));
+    expect(generateChapterDraft).toHaveBeenCalledWith("project-1", chapter.id, expect.any(Function), undefined);
     expect(sendChapterDraftStream).toHaveBeenCalledWith("stream-1", {
       type: "delta",
       attempt: 1,
       delta: "生成片段",
+    });
+
+    await handlers.get("generateChapterDraft")!("project-1", chapter.id, "stream-2", { profileId: "profile-cheap" });
+    expect(generateChapterDraft).toHaveBeenCalledWith("project-1", chapter.id, expect.any(Function), {
+      profileId: "profile-cheap",
     });
 
     expect(handlers.get("previewChapterBatch")!("project-1", chapter.id)).toBe(batchPreview);

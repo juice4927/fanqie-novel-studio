@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { compileAestheticGuidance } from "../src/shared/aesthetic-profile";
+import type { ApiSurface, ModelRole, TaskModelOverride } from "../src/shared/ai/types";
 import {
   compileCommercialGuidance,
   compileDeconstructionFramework,
@@ -46,6 +47,9 @@ import type {
   ResearchAnalysisRecord,
   ResearchBook,
 } from "../src/shared/types";
+import { createDriver, type DriverRequest } from "./ai/drivers";
+import { type ResolvedAiRoute, roleForTask } from "./ai/route-resolver";
+import { ProviderHttpError } from "./ai/transport";
 import type {
   AiCachePolicy,
   GeneratedBookConcept,
@@ -84,18 +88,9 @@ import {
   stripCodeFence,
 } from "./ai-definitions";
 import {
-  aiEndpoint,
-  inferProviderCapabilities,
   JsonStringFieldExtractor,
   normalizeProviderUrl,
-  parseAnthropicOutput,
-  parseProviderUsage,
-  parseResponsesOutput,
-  parseResponsesRefusal,
   providerError,
-  readAnthropicStream,
-  readChatCompletionStream,
-  readResponsesStream,
   rejectsJsonMode,
   rejectsOutputTokenLimit,
   rejectsResponsesApi,
@@ -104,7 +99,6 @@ import {
   usesResponsesApi,
 } from "./ai-provider";
 import { now, type WorkspaceDatabase } from "./database";
-import { fetchPublicHttpResponse } from "./netguard";
 
 export type { AiCachePolicy, ResearchSanitizationContext, StartDraftChapterOptions, StartedAiTask };
 export {
@@ -131,6 +125,15 @@ export class AiService {
       event: string,
       data: Record<string, unknown>,
     ) => void = () => {},
+    /** 来源路由解析；未注入时回落到旧版单一设置。 */
+    private readonly resolveRoute?: (role: ModelRole, override?: TaskModelOverride) => ResolvedAiRoute | null,
+    /** 能力协商结果回写（仅注入时持久化）。 */
+    private readonly onCapabilityLearned?: (info: {
+      profileId: string;
+      model: string;
+      apiSurface: ApiSurface;
+      supported: boolean;
+    }) => void,
   ) {}
 
   cancelJob(id: string) {
@@ -160,18 +163,42 @@ export class AiService {
     onCacheHit?: () => void;
     /** 写作任务的创作自由度档位，用于推导采样温度。 */
     guidanceMode?: string;
+    /** 流式增量提取的顶层字符串字段名，默认 content。 */
+    streamField?: string;
+    /** 任务角色；缺省时按 taskType 推断。 */
+    role?: ModelRole;
+    /** 单次覆盖来源/模型，只对本次请求生效。 */
+    override?: TaskModelOverride;
   }): Promise<T> {
     const settings = this.database.getAiSettings();
-    const apiKey = this.getApiKey();
-    if (!apiKey) throw new Error("尚未配置 AI API 密钥");
-    const protocol = settings.protocol ?? "openai-compatible";
-    const providerBase = normalizeProviderUrl(settings.baseUrl);
-    const provider = protocol === "anthropic-messages" ? `anthropic:${providerBase}` : providerBase;
+    const route = this.resolveRoute?.(options.role ?? roleForTask(options.taskType), options.override) ?? null;
+    const apiKey = route?.apiKey || this.getApiKey();
+    if ((route ? route.requiresKey : true) && !apiKey)
+      throw new Error(
+        route?.profileName
+          ? `来源「${route.profileName}」还没有可用的 API 密钥，请在设置页重新保存一次`
+          : "尚未配置 AI API 密钥",
+      );
+    const model = route?.model || settings.model;
+    const protocol = route
+      ? route.apiSurface === "anthropic-messages"
+        ? "anthropic-messages"
+        : "openai-compatible"
+      : (settings.protocol ?? "openai-compatible");
+    const providerBase = normalizeProviderUrl(route?.baseUrl ?? settings.baseUrl);
+    const provider = route?.profileId
+      ? `profile:${route.profileId}:${providerBase}`
+      : protocol === "anthropic-messages"
+        ? `anthropic:${providerBase}`
+        : providerBase;
     const inputHash = hashInput(`${options.system}\n${options.user}`);
     const cached =
       options.cachePolicy === "bypass"
         ? null
-        : this.database.findAiJob(options.taskType, inputHash, PROMPT_VERSION, provider, settings.model);
+        : (this.database.findAiJob(options.taskType, inputHash, PROMPT_VERSION, provider, model) ??
+          (route?.legacyProviderKey
+            ? this.database.findAiJob(options.taskType, inputHash, PROMPT_VERSION, route.legacyProviderKey, model)
+            : null));
     if (cached) {
       options.onCacheHit?.();
       return options.schema.parse(JSON.parse(cached));
@@ -182,7 +209,7 @@ export class AiService {
       inputHash,
       PROMPT_VERSION,
       provider,
-      settings.model,
+      model,
       options.inputSummary,
       options.retryContext,
     );
@@ -191,8 +218,18 @@ export class AiService {
     let lastError = "模型输出不符合结构要求";
     let repairInstruction = "";
     const useAnthropic = protocol === "anthropic-messages";
-    let useResponses = !useAnthropic && usesResponsesApi(settings.model);
-    let useJsonMode = !useAnthropic && !useResponses && inferProviderCapabilities(settings.baseUrl).jsonMode;
+    // 协议面优先取来源声明；未声明（auto）时按模型名兜底，兼容旧配置。
+    const declaredSurface: ApiSurface = useAnthropic
+      ? "anthropic-messages"
+      : route?.apiSurface && route.apiSurface !== "auto"
+        ? route.apiSurface
+        : settings.apiSurface && settings.apiSurface !== "auto"
+          ? settings.apiSurface
+          : usesResponsesApi(model)
+            ? "openai-responses"
+            : "openai-chat";
+    let useResponses = declaredSurface === "openai-responses";
+    let useJsonMode = !useAnthropic && !useResponses;
     let useStreaming = options.stream ?? false;
     let includeStreamUsage = useStreaming;
     let cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -206,17 +243,11 @@ export class AiService {
       options.timeoutMs ??
       (options.longTask ? this.longTaskTimeoutOverrideMs || configuredLongTimeoutMs : this.requestTimeoutMs);
     const deadline = startedAt + timeoutMs;
-    const responseSchema = useResponses
-      ? (() => {
-          const { $schema: _metaSchema, ...schema } = z.toJSONSchema(options.schema) as Record<string, unknown>;
-          return {
-            type: "json_schema",
-            name: options.taskType.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "structured_response",
-            strict: true,
-            schema,
-          };
-        })()
-      : null;
+    const jsonSchema = (() => {
+      const { $schema: _metaSchema, ...schema } = z.toJSONSchema(options.schema) as Record<string, unknown>;
+      return schema;
+    })();
+    const schemaName = options.taskType.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "structured_response";
     // A saved setting is the author's global preference; task defaults only
     // apply to older workspaces that have no persisted preference.
     const reasoningEffort = settings.reasoningEffort ?? options.reasoningEffort ?? "medium";
@@ -242,11 +273,31 @@ export class AiService {
     });
     const persistLiveTelemetry = () =>
       this.database.updateAiJobTelemetry?.(jobId, { headersAt, firstTokenAt, chunkCount, attemptCount });
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    let attempt = 0;
+    let repairCount = 0;
+    let fallbackGuard = 0;
+    // 网络重试最多 3 次；结构修复最多 2 次且独立计数；兼容性降档不消耗预算，仅用 guard 防失控。
+    while (attempt < 3 && fallbackGuard < 16) {
+      fallbackGuard += 1;
       let attemptStartedAt = Date.now();
       let attemptUsage = { inputTokens: 0, outputTokens: 0 };
       try {
-        const endpoint = aiEndpoint(settings.baseUrl, settings.model, useResponses, protocol);
+        const activeSurface: ApiSurface = useAnthropic
+          ? "anthropic-messages"
+          : useResponses
+            ? "openai-responses"
+            : "openai-chat";
+        const driver = createDriver(activeSurface, {
+          baseUrl: providerBase,
+          apiKey,
+          ...(route?.authHeaders && Object.keys(route.authHeaders).length ? { authHeaders: route.authHeaders } : {}),
+          ...(route?.extraHeaders && Object.keys(route.extraHeaders).length
+            ? { extraHeaders: route.extraHeaders }
+            : {}),
+          ...(route?.extraQuery && Object.keys(route.extraQuery).length ? { extraQuery: route.extraQuery } : {}),
+          ...(route?.localEndpoint ? { localEndpoint: true } : {}),
+        });
+        const endpoint = driver.endpoint;
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0)
           throw new AppError("PROVIDER_TIMEOUT", `模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`);
@@ -273,7 +324,9 @@ export class AiService {
         let attemptFirstContentAt: string | null = null;
         options.onAttempt?.(httpAttempt);
         const contentExtractor = options.onDelta
-          ? new JsonStringFieldExtractor("content", (delta) => options.onDelta?.(delta, httpAttempt))
+          ? new JsonStringFieldExtractor(options.streamField ?? "content", (delta) =>
+              options.onDelta?.(delta, httpAttempt),
+            )
           : null;
         this.log("info", "ai.request.attempt_started", {
           jobId,
@@ -283,185 +336,84 @@ export class AiService {
           streaming: useStreaming,
         });
         try {
-          const response = await fetchPublicHttpResponse(
-            endpoint,
-            {
-              method: "POST",
-              signal: controller.signal,
-              headers: useAnthropic
-                ? { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
-                : { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-              body: JSON.stringify(
-                useAnthropic
-                  ? {
-                      model: settings.model,
-                      max_tokens: requestMaxTokens,
-                      temperature: options.taskType === "draft-chapter" ? draftTemperature() : 0.35,
-                      ...(useStreaming ? { stream: true } : {}),
-                      system: `${options.system}\n只返回合法 JSON，不使用 Markdown。`,
-                      messages: [{ role: "user", content: `${options.user}${repairInstruction}` }],
-                    }
-                  : useResponses
-                    ? {
-                        model: settings.model,
-                        ...(supportsReasoning(settings.model) ? { reasoning: { effort: reasoningEffort } } : {}),
-                        max_output_tokens: requestMaxTokens,
-                        store: false,
-                        ...(useStreaming ? { stream: true } : {}),
-                        instructions: `${options.system}\n只返回合法 JSON，不使用 Markdown。`,
-                        input: `${options.user}${repairInstruction}`,
-                        text: { format: responseSchema },
-                      }
-                    : {
-                        model: settings.model,
-                        max_tokens: requestMaxTokens,
-                        temperature: options.taskType === "draft-chapter" ? draftTemperature() : 0.35,
-                        ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
-                        ...(useStreaming ? { stream: true } : {}),
-                        ...(useStreaming && includeStreamUsage ? { stream_options: { include_usage: true } } : {}),
-                        messages: [
-                          { role: "system", content: `${options.system}\n只返回合法 JSON，不使用 Markdown。` },
-                          { role: "user", content: `${options.user}${repairInstruction}` },
-                        ],
-                      },
-              ),
-            },
-            { allowCrossOriginRedirect: false },
-          );
-          const currentHeadersAt = new Date().toISOString();
-          headersAt ??= currentHeadersAt;
-          persistLiveTelemetry();
-          this.log("info", "ai.request.headers_received", {
-            jobId,
-            taskType: options.taskType,
-            attempt: httpAttempt,
-            status: response.status,
-            headersLatencyMs: Date.now() - attemptStartedAt,
-          });
-          if (!response.ok) {
-            const detail = (await response.text()).slice(0, 300);
-            if (useResponses && rejectsResponsesApi(response.status, detail)) {
-              this.log("warn", "ai.request.compatibility_retry", {
+          const onActivity = () => {
+            chunkCount += 1;
+            attemptChunkCount += 1;
+            resetIdleTimeout();
+          };
+          const onContent = (delta: string) => {
+            if (!attemptFirstContentAt) {
+              attemptFirstContentAt = new Date().toISOString();
+              this.log("info", "ai.request.first_content", {
                 jobId,
                 taskType: options.taskType,
                 attempt: httpAttempt,
-                reason: "Responses API unsupported",
+                ttftMs: Date.now() - attemptStartedAt,
               });
-              useResponses = false;
-              useJsonMode = inferProviderCapabilities(settings.baseUrl).jsonMode;
-              attempt -= 1;
-              continue;
             }
-            if (
-              !useResponses &&
-              includeStreamUsage &&
-              response.status === 400 &&
-              /stream.?options|include.?usage/i.test(detail)
-            ) {
-              this.log("warn", "ai.request.compatibility_retry", {
-                jobId,
-                taskType: options.taskType,
-                attempt: httpAttempt,
-                reason: "stream_options unsupported",
-              });
-              includeStreamUsage = false;
-              attempt -= 1;
-              continue;
+            if (!firstTokenAt) {
+              firstTokenAt = attemptFirstContentAt;
+              persistLiveTelemetry();
             }
-            if (useStreaming && rejectsStreaming(response.status, detail)) {
-              this.log("warn", "ai.request.compatibility_retry", {
-                jobId,
-                taskType: options.taskType,
-                attempt: httpAttempt,
-                reason: "streaming unsupported",
-              });
-              useStreaming = false;
-              includeStreamUsage = false;
-              attempt -= 1;
-              continue;
-            }
-            if (useJsonMode && rejectsJsonMode(response.status, detail)) {
-              this.log("warn", "ai.request.compatibility_retry", {
-                jobId,
-                taskType: options.taskType,
-                attempt: httpAttempt,
-                reason: "JSON mode unsupported",
-              });
-              useJsonMode = false;
-              attempt -= 1;
-              continue;
-            }
-            if (requestMaxTokens > 8192 && rejectsOutputTokenLimit(response.status, detail)) {
-              this.log("warn", "ai.request.compatibility_retry", {
-                jobId,
-                taskType: options.taskType,
-                attempt: httpAttempt,
-                reason: "max output tokens above model limit",
-              });
-              requestMaxTokens = 8192;
-              attempt -= 1;
-              continue;
-            }
-            throw providerError(response.status, detail);
-          }
-          let raw: string;
+            contentExtractor?.push(delta);
+          };
+          const markHeadersReceived = () => {
+            headersAt ??= new Date().toISOString();
+            persistLiveTelemetry();
+            this.log("info", "ai.request.headers_received", {
+              jobId,
+              taskType: options.taskType,
+              attempt: httpAttempt,
+              status: 200,
+              headersLatencyMs: Date.now() - attemptStartedAt,
+            });
+          };
+          const request: DriverRequest = {
+            model,
+            system: options.system,
+            user: `${options.user}${repairInstruction}`,
+            schema: jsonSchema,
+            schemaName,
+            structuredOutput: useAnthropic
+              ? "prompt-only"
+              : useResponses
+                ? "native"
+                : useJsonMode
+                  ? "json-mode"
+                  : "prompt-only",
+            maxOutputTokens: requestMaxTokens,
+            temperature: options.taskType === "draft-chapter" ? draftTemperature() : 0.35,
+            reasoningEffort: useResponses && supportsReasoning(model) ? reasoningEffort : undefined,
+            includeStreamUsage,
+            stream: useStreaming,
+            signal: controller.signal,
+          };
+          let raw = "";
           let anthropicStopReason: string | null = null;
-          if (useStreaming && /text\/event-stream/i.test(response.headers.get("content-type") ?? "")) {
-            const onActivity = () => {
-              chunkCount += 1;
-              attemptChunkCount += 1;
-              resetIdleTimeout();
-            };
-            const onContent = (delta: string) => {
-              if (!attemptFirstContentAt) {
-                attemptFirstContentAt = new Date().toISOString();
-                this.log("info", "ai.request.first_content", {
-                  jobId,
-                  taskType: options.taskType,
-                  attempt: httpAttempt,
-                  ttftMs: Date.now() - attemptStartedAt,
-                });
+          if (useStreaming) {
+            const streamed = await driver.stream(request);
+            markHeadersReceived();
+            try {
+              for await (const part of streamed.parts) {
+                if (part.type === "activity") onActivity();
+                else if (part.type === "text-delta") onContent(part.text);
+                else if (part.type === "refusal") throw new Error(`模型拒绝生成内容：${part.text}`);
+                else if (part.type === "usage") attemptUsage = part.usage;
               }
-              if (!firstTokenAt) {
-                firstTokenAt = attemptFirstContentAt;
-                persistLiveTelemetry();
-              }
-              contentExtractor?.push(delta);
-            };
-            const streamed = useAnthropic
-              ? await readAnthropicStream(response, onActivity, onContent)
-              : useResponses
-                ? await readResponsesStream(response, onActivity, onContent)
-                : await readChatCompletionStream(response, onActivity, onContent);
-            if (useAnthropic && "stopReason" in streamed)
-              anthropicStopReason = typeof streamed.stopReason === "string" ? streamed.stopReason : null;
-            raw = streamed.content;
-            attemptUsage = streamed.usage;
-          } else {
-            const body = (await response.json()) as {
-              output_text?: string;
-              output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
-              content?: Array<{ type?: string; text?: string }>;
-              choices?: Array<{ message?: { content?: string } }>;
-              usage?: {
-                prompt_tokens?: number;
-                completion_tokens?: number;
-                input_tokens?: number;
-                output_tokens?: number;
-              };
-              stop_reason?: string;
-            };
-            attemptUsage = parseProviderUsage(body);
-            if (useAnthropic) anthropicStopReason = body.stop_reason ?? null;
-            raw = useAnthropic
-              ? parseAnthropicOutput(body)
-              : useResponses
-                ? parseResponsesOutput(body)
-                : (body.choices?.[0]?.message?.content ?? "");
-            if (useResponses) {
-              const refusal = parseResponsesRefusal(body);
-              if (refusal) throw new Error(`模型拒绝生成内容：${refusal}`);
+            } catch (error) {
+              await streamed.result.catch(() => {});
+              throw error;
             }
+            const finished = await streamed.result;
+            raw = finished.text;
+            if (finished.usage.inputTokens || finished.usage.outputTokens) attemptUsage = finished.usage;
+            if (useAnthropic && finished.finishReason === "length") anthropicStopReason = "max_tokens";
+          } else {
+            const finished = await driver.generate(request);
+            markHeadersReceived();
+            raw = finished.text;
+            attemptUsage = finished.usage;
+            if (useAnthropic && finished.finishReason === "length") anthropicStopReason = "max_tokens";
           }
           cumulativeUsage = {
             inputTokens: cumulativeUsage.inputTokens + attemptUsage.inputTokens,
@@ -477,6 +429,13 @@ export class AiService {
             this.activeRequests.delete(jobId);
             throw new Error(`AI 任务审计落库失败：${error instanceof Error ? error.message : String(error)}`);
           }
+          if (route?.profileId)
+            this.onCapabilityLearned?.({
+              profileId: route.profileId,
+              model,
+              apiSurface: activeSurface,
+              supported: true,
+            });
           this.log("info", "ai.request.attempt_completed", {
             jobId,
             taskType: options.taskType,
@@ -495,6 +454,74 @@ export class AiService {
           this.cancelledJobs.delete(jobId);
           return parsed;
         } catch (error) {
+          if (error instanceof ProviderHttpError) {
+            const { status, detail } = error;
+            if (useResponses && rejectsResponsesApi(status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", {
+                jobId,
+                taskType: options.taskType,
+                attempt: httpAttempt,
+                reason: "Responses API unsupported",
+              });
+              useResponses = false;
+              useJsonMode = true;
+              if (route?.profileId)
+                this.onCapabilityLearned?.({
+                  profileId: route.profileId,
+                  model,
+                  apiSurface: "openai-responses",
+                  supported: false,
+                });
+              continue;
+            }
+            if (
+              !useResponses &&
+              includeStreamUsage &&
+              status === 400 &&
+              /stream.?options|include.?usage/i.test(detail)
+            ) {
+              this.log("warn", "ai.request.compatibility_retry", {
+                jobId,
+                taskType: options.taskType,
+                attempt: httpAttempt,
+                reason: "stream_options unsupported",
+              });
+              includeStreamUsage = false;
+              continue;
+            }
+            if (useStreaming && rejectsStreaming(status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", {
+                jobId,
+                taskType: options.taskType,
+                attempt: httpAttempt,
+                reason: "streaming unsupported",
+              });
+              useStreaming = false;
+              includeStreamUsage = false;
+              continue;
+            }
+            if (useJsonMode && rejectsJsonMode(status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", {
+                jobId,
+                taskType: options.taskType,
+                attempt: httpAttempt,
+                reason: "JSON mode unsupported",
+              });
+              useJsonMode = false;
+              continue;
+            }
+            if (requestMaxTokens > 8192 && rejectsOutputTokenLimit(status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", {
+                jobId,
+                taskType: options.taskType,
+                attempt: httpAttempt,
+                reason: "max output tokens above model limit",
+              });
+              requestMaxTokens = 8192;
+              continue;
+            }
+            throw providerError(status, detail);
+          }
           if (controller.signal.aborted) {
             if (this.cancelledJobs.has(jobId)) throw new AppError("TASK_CANCELLED", "任务已取消");
             if (timeoutError) throw new Error(timeoutError);
@@ -561,7 +588,8 @@ export class AiService {
           }
           throw new Error(`${lastError}；请降低本章目标字数，或改用输出上限更大的模型。`);
         }
-        if ((lastCode === "PROVIDER_UNAVAILABLE" || lastError.startsWith("模型服务暂时不可用")) && attempt < 2) {
+        const transient = lastCode === "PROVIDER_UNAVAILABLE" || lastError.startsWith("模型服务暂时不可用");
+        if (transient && attempt < 2) {
           try {
             const remainingMs = Math.max(0, deadline - Date.now());
             const delayMs = Math.min(1000 * 2 ** attempt, remainingMs);
@@ -584,8 +612,12 @@ export class AiService {
             }
             throw new Error(lastError);
           }
+          attempt += 1;
+          continue;
         }
-        if (!(lastCode === "PROVIDER_UNAVAILABLE" || lastError.startsWith("模型服务暂时不可用")) && attempt < 2)
+        // 结构修复预算独立于网络重试：校验/解析失败不消耗网络额度。
+        if (!transient && repairCount < 2) {
+          repairCount += 1;
           this.log("warn", "ai.request.retry_scheduled", {
             jobId,
             taskType: options.taskType,
@@ -594,7 +626,10 @@ export class AiService {
             delayMs: 0,
             reason: lastError,
           });
-        repairInstruction = `\n上一次输出校验失败：${lastError}。请修复结构并重新输出完整 JSON。`;
+          repairInstruction = `\n上一次输出校验失败：${lastError}。请修复结构并重新输出完整 JSON。`;
+          continue;
+        }
+        break;
       }
     }
     try {
@@ -1413,6 +1448,7 @@ export class AiService {
         ].join("\n"),
         schema: chapterDraftSchema(800, 6000),
         guidanceMode: context.guidanceMode,
+        override: options.override,
         retryContext: options.retryContext,
         timeoutMs: 300_000,
         stream: true,

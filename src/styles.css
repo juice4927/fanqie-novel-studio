@@ -3910,3 +3910,16 @@ a:focus-visible,
   gap: 8px;
   margin-left: auto;
 }
+
+.quick-switch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 10px 0;
+  color: #97a299;
+}
+.quick-switch .select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+}

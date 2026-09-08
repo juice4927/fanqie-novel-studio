@@ -1,3 +1,4 @@
+import type { TaskModelOverride } from "../../src/shared/ai/types";
 import type {
   BatchGenerationPreview,
   Chapter,
@@ -67,6 +68,7 @@ export interface AiHandlerDependencies {
     projectId: string,
     chapterId: string,
     onStream?: (event: ChapterDraftStreamEvent) => void,
+    override?: TaskModelOverride,
   ) => Promise<Chapter>;
   sendChapterDraftStream: (streamId: string, event: ChapterDraftStreamEvent) => void;
   previewChapterBatch: (
@@ -245,8 +247,13 @@ export function registerAiHandlers({
       markGenerationIdle(id);
     }
   });
-  register("generateChapterDraft", (id, chapterId, streamId) =>
-    generateChapterDraft(id, chapterId, streamId ? (event) => sendChapterDraftStream(streamId, event) : undefined),
+  register("generateChapterDraft", (id, chapterId, streamId, override) =>
+    generateChapterDraft(
+      id,
+      chapterId,
+      streamId ? (event) => sendChapterDraftStream(streamId, event) : undefined,
+      override,
+    ),
   );
   register("previewChapterBatch", (id, chapterId) =>
     previewChapterBatch(database.getProject(id), database.getAiSettings(), chapterId),

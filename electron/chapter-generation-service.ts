@@ -1,3 +1,4 @@
+import type { TaskModelOverride } from "../src/shared/ai/types";
 import { buildChapterBatchPreview } from "../src/shared/chapter-batch-service";
 import { assertNoHardStoryConstraint, evaluateStoryConstraints } from "../src/shared/story-constraints";
 import type {
@@ -44,11 +45,13 @@ export interface ChapterGenerationCoordinator {
     chapterId: string,
     onStream?: (event: ChapterDraftStreamEvent) => void,
     cachePolicy?: AiCachePolicy,
+    override?: TaskModelOverride,
   ): StartedAiTask<Chapter>;
   generateOne(
     projectId: string,
     chapterId: string,
     onStream?: (event: ChapterDraftStreamEvent) => void,
+    override?: TaskModelOverride,
   ): Promise<Chapter>;
   generateBatch(projectId: string, chapterId: string): Promise<Chapter[]>;
 }
@@ -77,7 +80,13 @@ export function createChapterGenerationCoordinator({
       (chapter) => compileContext(project, chapter).estimatedTokens,
     );
 
-  const startOne: ChapterGenerationCoordinator["startOne"] = (projectId, chapterId, onStream, cachePolicy = "use") => {
+  const startOne: ChapterGenerationCoordinator["startOne"] = (
+    projectId,
+    chapterId,
+    onStream,
+    cachePolicy = "use",
+    override,
+  ) => {
     if (isActive(projectId)) throw new Error("该作品已有正文生成任务正在运行");
     const project = database.getProject(projectId);
     if (!project.contract.approved) throw new Error("创作契约审批后才能生成正文");
@@ -97,6 +106,7 @@ export function createChapterGenerationCoordinator({
         retryContext: serializeChapterAiRetryContext("chapter", projectId, chapter),
         onStream,
         cachePolicy,
+        override,
       });
       return {
         ...task,
@@ -120,8 +130,8 @@ export function createChapterGenerationCoordinator({
     }
   };
 
-  const generateOne: ChapterGenerationCoordinator["generateOne"] = (projectId, chapterId, onStream) =>
-    startOne(projectId, chapterId, onStream).completion;
+  const generateOne: ChapterGenerationCoordinator["generateOne"] = (projectId, chapterId, onStream, override) =>
+    startOne(projectId, chapterId, onStream, "use", override).completion;
 
   const generateBatch: ChapterGenerationCoordinator["generateBatch"] = async (projectId, chapterId) => {
     if (isActive(projectId)) throw new Error("该作品已有正文生成任务正在运行");

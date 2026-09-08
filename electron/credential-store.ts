@@ -3,6 +3,9 @@ import { injectFault } from "./fault-injection";
 
 const API_TARGET = "cn.local.fanqie.novelstudio/model-api";
 const AUTO_BACKUP_TARGET = "cn.local.fanqie.novelstudio/auto-backup";
+const PROXY_TARGET = "cn.local.fanqie.novelstudio/outbound-proxy";
+/** 每个 AI 来源一个凭据：前缀 + 来源 id。 */
+const AI_PROFILE_PREFIX = "cn.local.fanqie.novelstudio/ai/";
 
 const script = `
 $ErrorActionPreference = 'Stop'
@@ -40,6 +43,30 @@ public static class NovelStudioCredential {
 
   [DllImport("advapi32.dll", EntryPoint = "CredDeleteW", CharSet = CharSet.Unicode, SetLastError = true)]
   private static extern bool CredDelete(string target, uint type, uint flags);
+
+  [DllImport("advapi32.dll", EntryPoint = "CredEnumerateW", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool CredEnumerate(string filter, uint flags, out uint count, out IntPtr credentials);
+
+  public static string[] Enumerate(string filter) {
+    uint count;
+    IntPtr listPointer;
+    if (!CredEnumerate(filter, 0, out count, out listPointer)) {
+      int error = Marshal.GetLastWin32Error();
+      if (error == 1168) return new string[0];
+      throw new Win32Exception(error);
+    }
+    try {
+      string[] result = new string[count];
+      for (uint index = 0; index < count; index++) {
+        IntPtr itemPointer = Marshal.ReadIntPtr(listPointer, (int)index * IntPtr.Size);
+        CREDENTIAL credential = Marshal.PtrToStructure<CREDENTIAL>(itemPointer);
+        result[index] = credential.TargetName;
+      }
+      return result;
+    } finally {
+      CredFree(listPointer);
+    }
+  }
 
   public static void Write(string target, string secret) {
     byte[] bytes = Encoding.Unicode.GetBytes(secret);
@@ -93,12 +120,14 @@ if ($env:NOVEL_STUDIO_CREDENTIAL_OPERATION -eq 'write') {
 } elseif ($env:NOVEL_STUDIO_CREDENTIAL_OPERATION -eq 'read') {
   $secret = [NovelStudioCredential]::Read($env:NOVEL_STUDIO_CREDENTIAL_TARGET)
   [Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($secret)))
+} elseif ($env:NOVEL_STUDIO_CREDENTIAL_OPERATION -eq 'enumerate') {
+  [Console]::Out.Write(([NovelStudioCredential]::Enumerate($env:NOVEL_STUDIO_CREDENTIAL_PREFIX)) -join [Environment]::NewLine)
 } else {
   [NovelStudioCredential]::Delete($env:NOVEL_STUDIO_CREDENTIAL_TARGET)
 }
 `;
 
-function execute(target: string, operation: "read" | "write" | "delete", value = "") {
+function execute(target: string, operation: "read" | "write" | "delete" | "enumerate", value = "", prefix = "") {
   injectFault("credential-unavailable");
   if (process.platform !== "win32") return Promise.resolve("");
   return new Promise<string>((resolve, reject) => {
@@ -111,6 +140,7 @@ function execute(target: string, operation: "read" | "write" | "delete", value =
           ...process.env,
           NOVEL_STUDIO_CREDENTIAL_OPERATION: operation,
           NOVEL_STUDIO_CREDENTIAL_TARGET: target,
+          NOVEL_STUDIO_CREDENTIAL_PREFIX: prefix,
         },
         stdio: ["pipe", "pipe", "pipe"],
       },
@@ -158,4 +188,54 @@ export async function writeAutoBackupCredential(value: string) {
 
 export async function deleteAutoBackupCredential() {
   await execute(AUTO_BACKUP_TARGET, "delete");
+}
+
+export async function readProxyCredential() {
+  const encoded = await execute(PROXY_TARGET, "read");
+  return encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";
+}
+
+export async function writeProxyCredential(value: string) {
+  if (!value) throw new Error("代理密码不能为空");
+  await execute(PROXY_TARGET, "write", value);
+}
+
+export async function deleteProxyCredential() {
+  await execute(PROXY_TARGET, "delete");
+}
+
+function profileTarget(profileId: string) {
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(profileId)) throw new Error("来源 id 不合法");
+  return `${AI_PROFILE_PREFIX}${profileId}`;
+}
+
+export async function readAiProfileCredential(profileId: string) {
+  const encoded = await execute(profileTarget(profileId), "read");
+  return encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";
+}
+
+export async function writeAiProfileCredential(profileId: string, value: string) {
+  if (!value) throw new Error("API 密钥不能为空");
+  await execute(profileTarget(profileId), "write", value);
+}
+
+export async function deleteAiProfileCredential(profileId: string) {
+  await execute(profileTarget(profileId), "delete");
+}
+
+/** 从 CredEnumerate 的输出里解析出已保存密钥的来源 id（纯函数，便于测试）。 */
+export function parseAiProfileCredentialTargets(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(AI_PROFILE_PREFIX))
+    .map((line) => line.slice(AI_PROFILE_PREFIX.length))
+    .filter(Boolean);
+}
+
+/** 一次列举所有已保存密钥的来源 id，避免逐个 spawn PowerShell。 */
+export async function listAiProfileCredentialIds(): Promise<string[]> {
+  if (process.platform !== "win32") return [];
+  const output = await execute("", "enumerate", "", `${AI_PROFILE_PREFIX}*`);
+  return parseAiProfileCredentialTargets(output);
 }

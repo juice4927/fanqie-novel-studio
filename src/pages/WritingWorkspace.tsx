@@ -26,6 +26,7 @@ import {
 import { describeError } from "../lib/error-message";
 import { formatCount, formatDate } from "../lib/format";
 import { useNavigationGuard } from "../lib/navigation-guard";
+import type { AiProfileView } from "../shared/ai/types";
 import { canAcceptGeneratedDraft, summarizeQualityOverview } from "../shared/generated-review";
 import type { GenerationQuality } from "../shared/generation-quality";
 import { diffParagraphs } from "../shared/paragraph-diff";
@@ -93,6 +94,15 @@ export function WritingPage({
   );
   const [context, setContext] = useState<ContextPackage | null>(null);
   const [busy, setBusy] = useState(false);
+  const [overrideProfileId, setOverrideProfileId] = useState("");
+  const [overrideProfiles, setOverrideProfiles] = useState<AiProfileView[]>([]);
+  useEffect(() => {
+    if (typeof api.listAiProfiles !== "function") return;
+    void api
+      .listAiProfiles()
+      .then((profiles) => setOverrideProfiles(profiles.filter((profile) => profile.enabled)))
+      .catch(() => setOverrideProfiles([]));
+  }, [api]);
   const [chapterLoading, setChapterLoading] = useState(Boolean(selected));
   const [query, setQuery] = useState("");
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
@@ -863,6 +873,21 @@ export function WritingPage({
           >
             预览上下文
           </Button>
+          {overrideProfiles.length > 0 && (
+            <Select
+              aria-label="本次生成使用的来源"
+              value={overrideProfileId}
+              title="仅本次生成生效，不改变角色路由"
+              onChange={(event) => setOverrideProfileId(event.target.value)}
+            >
+              <option value="">按角色路由</option>
+              {overrideProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  本次使用：{profile.name}
+                </option>
+              ))}
+            </Select>
+          )}
           <Button
             variant="secondary"
             disabled={editorBusy}
@@ -874,17 +899,22 @@ export function WritingPage({
               setBusy(true);
               try {
                 beforeGeneration = await saveLatestForAction();
-                const result = await api.generateChapterDraft(project.summary.id, beforeGeneration.id, (event) => {
-                  if (event.type === "attempt-start") {
-                    streamedAttempt = event.attempt;
-                    streamedContent = "";
-                  } else if (event.type === "delta" && event.attempt === streamedAttempt) {
-                    streamedContent += event.delta;
-                  } else return;
-                  const streamedDraft = { ...beforeGeneration, content: streamedContent };
-                  draftRef.current = streamedDraft;
-                  setDraft(streamedDraft);
-                });
+                const result = await api.generateChapterDraft(
+                  project.summary.id,
+                  beforeGeneration.id,
+                  (event) => {
+                    if (event.type === "attempt-start") {
+                      streamedAttempt = event.attempt;
+                      streamedContent = "";
+                    } else if (event.type === "delta" && event.attempt === streamedAttempt) {
+                      streamedContent += event.delta;
+                    } else return;
+                    const streamedDraft = { ...beforeGeneration, content: streamedContent };
+                    draftRef.current = streamedDraft;
+                    setDraft(streamedDraft);
+                  },
+                  overrideProfileId ? { profileId: overrideProfileId } : undefined,
+                );
                 draftRef.current = result;
                 lastSavedSignature.current = chapterDraftSignature(result);
                 clearRecoveredChapter(project.summary.id, result);

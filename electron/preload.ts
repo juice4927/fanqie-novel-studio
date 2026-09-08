@@ -70,7 +70,7 @@ const api: AppApi = {
   listResearchAnalyses: (bookId) => invoke("listResearchAnalyses", bookId),
   attachInsights: (id, insightIds) => invoke("attachInsights", id, insightIds),
   generateConcepts: (id) => invoke("generateConcepts", id),
-  generateChapterDraft: async (id, chapterId, onStream) => {
+  generateChapterDraft: async (id, chapterId, onStream, override) => {
     const streamId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const listener = (
       _event: Electron.IpcRendererEvent,
@@ -80,7 +80,7 @@ const api: AppApi = {
     };
     ipcRenderer.on("studio:chapter-draft-stream", listener);
     try {
-      return await invoke("generateChapterDraft", id, chapterId, streamId);
+      return await invoke("generateChapterDraft", id, chapterId, streamId, override);
     } finally {
       ipcRenderer.removeListener("studio:chapter-draft-stream", listener);
     }
@@ -90,6 +90,20 @@ const api: AppApi = {
   getAiSettings: () => invoke("getAiSettings"),
   testAiConnection: () => invoke("testAiConnection"),
   saveAiSettings: (settings, apiKey) => invoke("saveAiSettings", settings, apiKey),
+  listAiProfiles: () => invoke("listAiProfiles"),
+  saveAiProfile: (profile, apiKey) => invoke("saveAiProfile", profile, apiKey),
+  deleteAiProfile: (id) => invoke("deleteAiProfile", id),
+  setDefaultAiProfile: (id) => invoke("setDefaultAiProfile", id),
+  getDefaultAiProfileId: () => invoke("getDefaultAiProfileId"),
+  listAiRoleRoutes: () => invoke("listAiRoleRoutes"),
+  setAiRoleRoute: (role, profileId, modelId) => invoke("setAiRoleRoute", role, profileId, modelId),
+  testAiProfile: (id) => invoke("testAiProfile", id),
+  refreshAiProfileModels: (id) => invoke("refreshAiProfileModels", id),
+  exportAiProfiles: () => invoke("exportAiProfiles"),
+  importAiProfiles: (json) => invoke("importAiProfiles", json),
+  getProxySettings: () => invoke("getProxySettings"),
+  saveProxySettings: (input) => invoke("saveProxySettings", input),
+  testProxyConnection: () => invoke("testProxyConnection"),
   listAiJobs: (projectId) => invoke("listAiJobs", projectId),
   cancelAiJob: (id) => invoke("cancelAiJob", id),
   retryAiJob: (id) => invoke("retryAiJob", id),

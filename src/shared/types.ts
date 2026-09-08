@@ -1,3 +1,4 @@
+import type { AiProfileView, AiRoleRoute, ApiSurfacePreference, ModelRole, TaskModelOverride } from "./ai/types";
 import type { GenerationQuality } from "./generation-quality";
 import type { GenreComposition, NarrativeGenre } from "./genre-composition";
 import type { CHAPTER_STATUSES, PROJECT_STATUSES } from "./status-constants";
@@ -437,6 +438,8 @@ export type AiReasoningEffort = "low" | "medium" | "high";
 
 export interface AiSettings {
   protocol: AiProtocol;
+  /** 协议面声明；auto 或留空时按模型名兜底（兼容旧配置）。 */
+  apiSurface?: ApiSurfacePreference;
   baseUrl: string;
   model: string;
   embeddingModel: string;
@@ -450,6 +453,22 @@ export interface AiSettings {
 }
 
 export type AiJobStatus = "运行中" | "成功" | "失败" | "已取消" | "已中断";
+
+/** 全局出站代理设置；密码只存 Windows 凭据管理器。 */
+export interface ProxySettings {
+  enabled: boolean;
+  url: string;
+  username: string;
+  hasPassword: boolean;
+}
+
+export interface ProxySettingsInput {
+  enabled: boolean;
+  url: string;
+  username: string;
+  /** 留空表示保持已保存的密码。 */
+  password?: string;
+}
 
 export interface AiJobRecord {
   id: string;
@@ -977,12 +996,27 @@ export interface AppApi {
     id: string,
     chapterId: string,
     onStream?: (event: ChapterDraftStreamEvent) => void,
+    override?: TaskModelOverride,
   ): Promise<Chapter>;
   previewChapterBatch(id: string, chapterId: string): Promise<BatchGenerationPreview>;
   generateChapterBatch(id: string, chapterId: string): Promise<Chapter[]>;
   getAiSettings(): Promise<AiSettings>;
   testAiConnection(): Promise<{ ok: boolean; message: string }>;
   saveAiSettings(settings: Omit<AiSettings, "hasApiKey">, apiKey?: string): Promise<AiSettings>;
+  listAiProfiles(): Promise<AiProfileView[]>;
+  saveAiProfile(profile: AiProfileView, apiKey?: string): Promise<AiProfileView>;
+  deleteAiProfile(id: string): Promise<void>;
+  setDefaultAiProfile(id: string): Promise<void>;
+  getDefaultAiProfileId(): Promise<string | null>;
+  listAiRoleRoutes(): Promise<AiRoleRoute[]>;
+  setAiRoleRoute(role: ModelRole, profileId: string | null, modelId: string | null): Promise<AiRoleRoute>;
+  testAiProfile(id: string): Promise<{ ok: boolean; message: string }>;
+  refreshAiProfileModels(id: string): Promise<string[]>;
+  exportAiProfiles(): Promise<string>;
+  importAiProfiles(json: string): Promise<AiProfileView[]>;
+  getProxySettings(): Promise<ProxySettings>;
+  saveProxySettings(input: ProxySettingsInput): Promise<ProxySettings>;
+  testProxyConnection(): Promise<{ ok: boolean; message: string }>;
   listAiJobs(projectId?: string): Promise<AiJobRecord[]>;
   cancelAiJob(id: string): Promise<boolean>;
   retryAiJob(id: string): Promise<AiJobRecord>;

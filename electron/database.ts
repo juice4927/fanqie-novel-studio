@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { AiProfile, AiRoleRoute, StoredModelCapability } from "../src/shared/ai/types";
 import {
   decideChangeRequest as decideChangeRequestDraft,
   prepareChangeRequest,
@@ -47,6 +48,8 @@ import type {
   ProjectDetail,
   ProjectPatch,
   ProjectSummary,
+  ProxySettings,
+  ProxySettingsInput,
   QualityIssue,
   RankingCaptureSchedule,
   RankingSnapshot,
@@ -65,6 +68,7 @@ import { injectFault } from "./fault-injection";
 import { hasColumn, runMigrations } from "./migration-runner";
 import type { AiJobCompletion } from "./repositories/ai-audit-repository";
 import { AiAuditRepository } from "./repositories/ai-audit-repository";
+import { AiProfileRepository } from "./repositories/ai-profile-repository";
 import { ProjectRepository } from "./repositories/project-repository";
 import { ResearchRepository } from "./repositories/research-repository";
 import { RevisionRepository } from "./repositories/revision-repository";
@@ -123,6 +127,7 @@ export class WorkspaceDatabase {
   private readonly research: DatabaseSync;
   private readonly projectDbs = new Map<string, DatabaseSync>();
   private readonly aiAudit: AiAuditRepository;
+  private readonly aiProfiles: AiProfileRepository;
   private readonly projects: ProjectRepository;
   private readonly researchData: ResearchRepository;
   private readonly revisions = new RevisionRepository();
@@ -148,6 +153,7 @@ export class WorkspaceDatabase {
     this.researchData = new ResearchRepository(this.research);
     this.aiAudit = new AiAuditRepository(this.catalog);
     this.aiAudit.recoverInterrupted();
+    this.aiProfiles = new AiProfileRepository(this.catalog);
     this.initResearch();
   }
 
@@ -211,6 +217,55 @@ export class WorkspaceDatabase {
           "chunk_count INTEGER NOT NULL DEFAULT 0",
           "attempt_count INTEGER NOT NULL DEFAULT 0",
         ]) {
+          const name = column.split(" ")[0];
+          if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
+        }
+      },
+      (db) => {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS ai_profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            api_surface TEXT NOT NULL DEFAULT 'auto',
+            base_url TEXT NOT NULL,
+            default_model TEXT NOT NULL DEFAULT '',
+            auth_scheme TEXT NOT NULL DEFAULT 'bearer',
+            extra_headers TEXT NOT NULL DEFAULT '{}',
+            extra_query TEXT NOT NULL DEFAULT '{}',
+            local_endpoint INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            last_used_at TEXT,
+            last_test_at TEXT,
+            last_test_ok INTEGER,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS ai_role_routes (
+            role TEXT PRIMARY KEY,
+            profile_id TEXT,
+            model_id TEXT,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS model_capabilities (
+            profile_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            api_surface TEXT NOT NULL,
+            supports_json_schema INTEGER,
+            supports_json_mode INTEGER,
+            supports_streaming INTEGER,
+            supports_stream_usage INTEGER,
+            supports_reasoning INTEGER,
+            max_output_tokens INTEGER,
+            context_window INTEGER,
+            probed_at TEXT NOT NULL,
+            source TEXT NOT NULL,
+            PRIMARY KEY (profile_id, model_id, api_surface)
+          );
+        `);
+        for (const column of ["profile_id TEXT", "role TEXT"]) {
           const name = column.split(" ")[0];
           if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
         }
@@ -1383,8 +1438,13 @@ export class WorkspaceDatabase {
       Number.isFinite(parsedTemperature) && parsedTemperature >= 0 && parsedTemperature <= 1.5
         ? parsedTemperature
         : undefined;
+    const storedSurface = this.getSetting("ai.apiSurface", "");
+    const apiSurface = ["auto", "openai-chat", "openai-responses", "anthropic-messages"].includes(storedSurface)
+      ? (storedSurface as AiSettings["apiSurface"])
+      : undefined;
     return {
       protocol,
+      apiSurface,
       baseUrl,
       model,
       embeddingModel,
@@ -1399,6 +1459,7 @@ export class WorkspaceDatabase {
 
   saveAiSettings(settings: Omit<AiSettings, "hasApiKey">) {
     this.setSetting("ai.protocol", settings.protocol);
+    this.setSetting("ai.apiSurface", settings.apiSurface ?? "");
     this.setSetting("ai.baseUrl", settings.baseUrl);
     this.setSetting("ai.model", settings.model);
     this.setSetting("ai.embeddingModel", settings.embeddingModel);
@@ -1411,6 +1472,94 @@ export class WorkspaceDatabase {
       settings.temperatureOverride === undefined ? "" : String(settings.temperatureOverride),
     );
     return this.getAiSettings();
+  }
+
+  /** 旧版单来源设置首次读取时迁移为一条“默认来源”，幂等。 */
+  ensureDefaultAiProfile(): AiProfile | null {
+    if (this.aiProfiles.countProfiles() > 0) return null;
+    const legacyBaseUrl = this.getSetting("ai.baseUrl", "").trim();
+    if (!legacyBaseUrl) return null;
+    const anthropic = this.getSetting("ai.protocol", "") === "anthropic-messages";
+    const profile: AiProfile = {
+      id: randomUUID(),
+      name: "默认来源",
+      apiSurface: anthropic ? "anthropic-messages" : "auto",
+      baseUrl: legacyBaseUrl,
+      defaultModel: this.getSetting("ai.model", ""),
+      authScheme: anthropic ? "x-api-key" : "bearer",
+      extraHeaders: {},
+      extraQuery: {},
+      localEndpoint: false,
+      enabled: true,
+      sortOrder: 0,
+      notes: "由旧版模型设置迁移",
+      lastUsedAt: null,
+      lastTestAt: null,
+      lastTestOk: null,
+      lastError: null,
+    };
+    this.aiProfiles.saveProfile(profile);
+    this.aiProfiles.setDefaultProfileId(profile.id);
+    return profile;
+  }
+
+  listAiProfiles(): AiProfile[] {
+    this.ensureDefaultAiProfile();
+    return this.aiProfiles.listProfiles();
+  }
+
+  getAiProfile(id: string): AiProfile | null {
+    return this.aiProfiles.findProfile(id);
+  }
+
+  saveAiProfile(profile: AiProfile): AiProfile {
+    return this.aiProfiles.saveProfile(profile);
+  }
+
+  deleteAiProfile(id: string): void {
+    this.aiProfiles.deleteProfile(id);
+    if (this.aiProfiles.getDefaultProfileId() === id) this.aiProfiles.setDefaultProfileId(null);
+  }
+
+  getDefaultAiProfileId(): string | null {
+    this.ensureDefaultAiProfile();
+    return this.aiProfiles.getDefaultProfileId();
+  }
+
+  setDefaultAiProfileId(id: string | null): void {
+    this.aiProfiles.setDefaultProfileId(id);
+  }
+
+  listAiRoleRoutes(): AiRoleRoute[] {
+    return this.aiProfiles.listRoleRoutes();
+  }
+
+  saveAiRoleRoute(route: AiRoleRoute): AiRoleRoute {
+    return this.aiProfiles.saveRoleRoute(route);
+  }
+
+  listModelCapabilities(profileId: string): StoredModelCapability[] {
+    return this.aiProfiles.listCapabilities(profileId);
+  }
+
+  saveModelCapability(record: StoredModelCapability): StoredModelCapability {
+    return this.aiProfiles.saveCapability(record);
+  }
+
+  getProxySettings(): ProxySettings {
+    return {
+      enabled: this.getSetting("network.proxy.enabled", "false") === "true",
+      url: this.getSetting("network.proxy.url", ""),
+      username: this.getSetting("network.proxy.username", ""),
+      hasPassword: false,
+    };
+  }
+
+  saveProxySettings(input: ProxySettingsInput): ProxySettings {
+    this.setSetting("network.proxy.enabled", String(input.enabled));
+    this.setSetting("network.proxy.url", input.url.trim());
+    this.setSetting("network.proxy.username", input.username.trim());
+    return this.getProxySettings();
   }
 
   getAutoBackupSettings(): AutoBackupSettings {

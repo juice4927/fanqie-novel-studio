@@ -18,6 +18,8 @@ import {
   Wrench,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AiProfileManager } from "../components/AiProfileManager";
+import { NetworkProxySettings } from "../components/NetworkProxySettings";
 import { Badge, Button, Field, Input, Select } from "../components/UI";
 import { describeError } from "../lib/error-message";
 import { formatDate } from "../lib/format";
@@ -256,13 +258,19 @@ export function SettingsPage({
         </div>
       </header>
       <section className="settings-section">
+        <AiProfileManager api={api} notify={notify} />
+      </section>
+      <section className="settings-section">
+        <NetworkProxySettings api={api} notify={notify} />
+      </section>
+      <section className="settings-section">
         <div className="settings-title">
           <span className="settings-icon">
             <KeyRound size={19} />
           </span>
           <div>
-            <h2>模型供应商</h2>
-            <p>支持 OpenAI Responses、兼容 Chat Completions，以及 Anthropic Claude Messages API。</p>
+            <h2>模型供应商（单来源回退）</h2>
+            <p>没有配置任何来源时使用这里的设置；已配置来源时以上方来源与角色路由为准。</p>
           </div>
           <Badge tone={settings.hasApiKey ? "success" : "warning"}>
             {settings.hasApiKey ? "密钥已保存" : "未配置密钥"}

@@ -1001,6 +1001,66 @@ export function createBrowserApi(): AppApi {
       persist();
       return state.settings;
     },
+    async listAiProfiles() {
+      return [
+        {
+          id: "browser-default",
+          name: "默认来源",
+          apiSurface: state.settings.apiSurface ?? "auto",
+          baseUrl: state.settings.baseUrl,
+          defaultModel: state.settings.model,
+          authScheme: state.settings.protocol === "anthropic-messages" ? ("x-api-key" as const) : ("bearer" as const),
+          extraHeaders: {},
+          extraQuery: {},
+          localEndpoint: false,
+          enabled: true,
+          sortOrder: 0,
+          notes: "浏览器预览来源",
+          lastUsedAt: null,
+          lastTestAt: null,
+          lastTestOk: null,
+          lastError: null,
+          hasApiKey: state.settings.hasApiKey,
+        },
+      ];
+    },
+    async saveAiProfile(profile) {
+      return { ...profile, hasApiKey: Boolean(profile.hasApiKey) };
+    },
+    async deleteAiProfile() {
+      throw new Error("浏览器预览不支持删除来源，请在桌面版操作");
+    },
+    async setDefaultAiProfile() {},
+    async getDefaultAiProfileId() {
+      return "browser-default";
+    },
+    async listAiRoleRoutes() {
+      return [];
+    },
+    async setAiRoleRoute(role) {
+      return { role, profileId: null, modelId: null };
+    },
+    async testAiProfile() {
+      return { ok: false, message: "浏览器预览不调用真实模型接口，请在桌面版测试连接。" };
+    },
+    async refreshAiProfileModels() {
+      return [];
+    },
+    async exportAiProfiles() {
+      return JSON.stringify({ schemaVersion: 1, profiles: [], roleRoutes: [] }, null, 2);
+    },
+    async importAiProfiles() {
+      return [];
+    },
+    async getProxySettings() {
+      return { enabled: false, url: "", username: "", hasPassword: false };
+    },
+    async saveProxySettings(input) {
+      return { ...input, hasPassword: Boolean(input.password) };
+    },
+    async testProxyConnection() {
+      return { ok: false, message: "浏览器预览不发起真实网络请求，请在桌面版测试代理。" };
+    },
     async listAiJobs() {
       return [];
     },
