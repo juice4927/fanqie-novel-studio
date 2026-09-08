@@ -32,14 +32,6 @@ export function prepareFactSave(
           (fact.validToChapter === null || fact.validToChapter >= next.validFromChapter),
       )
     : undefined;
-  const replacement =
-    next.confidence === "已确认" && proposedReplacement
-      ? {
-          ...proposedReplacement,
-          validToChapter: next.validFromChapter - 1,
-          updatedAt: options.updatedAt,
-        }
-      : undefined;
   const hasConflict = facts.some(
     (fact) =>
       fact.id !== next.id &&
@@ -54,5 +46,14 @@ export function prepareFactSave(
   if (next.confidence !== "已忽略" && hasConflict) {
     next.confidence = "有冲突";
   }
+  // 降级为“有冲突”后不能再关闭旧事实，否则同一键会失去所有已确认值。
+  const replacement =
+    next.confidence === "已确认" && proposedReplacement
+      ? {
+          ...proposedReplacement,
+          validToChapter: next.validFromChapter - 1,
+          updatedAt: options.updatedAt,
+        }
+      : undefined;
   return { fact: next, replacement };
 }

@@ -95,6 +95,25 @@ describe("fact save rules", () => {
     expect(historical.fact.confidence).toBe("已确认");
   });
 
+  it("keeps the old fact open when the replacement conflicts with another active value", () => {
+    const current = fact();
+    const conflicting = fact({ id: "conflicting", value: "广州", validFromChapter: 2 });
+    const prepared = prepareFactSave(
+      [current, conflicting],
+      fact({
+        id: "candidate",
+        value: "上海",
+        validFromChapter: 8,
+        evidenceChapter: 8,
+        replacesFactId: current.id,
+      }),
+      { factId: "candidate", updatedAt: timestamp },
+    );
+
+    expect(prepared.fact.confidence).toBe("有冲突");
+    expect(prepared.replacement).toBeUndefined();
+  });
+
   it("keeps ignored candidates out of conflicts", () => {
     const ignored = prepareFactSave([fact()], fact({ id: "ignored", value: "上海", confidence: "已忽略" }), {
       factId: "ignored",
