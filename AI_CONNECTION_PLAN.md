@@ -33,6 +33,7 @@
 - 新增 20 个测试文件；`tests/database.test.ts` 的 catalog `user_version` 断言随新迁移由 6 更新为 7。
 - 审计表 `ai_jobs` 的 `profile_id` / `role` 列现在会真实写入（此前只建列未赋值），任务可追溯到来源与角色。
 - 代理线（`OUTBOUND_PROXY_PLAN.md`）已合并实施，`netguard.ts` 的 dispatcher 优先级为 `options.dispatcher ?? 代理 dispatcher ?? 公网 dispatcher`；本地端点走独立直连通道，两者都只放宽“连接目标”，不放宽目的地校验。
+- §5.4 的「模型下拉」已由 `AI_MODEL_LIST_PLAN.md` 补完：`listAiProfileModels` 读回本地清单，默认模型与角色路由模型输入框挂 `datalist`，打开弹窗/测试成功/保存成功后自动刷新（主进程 10 分钟节流），换 `baseUrl` 或协议面时清空该来源的能力行。
 
 ## 0. 一句话结论
 
