@@ -37,8 +37,9 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_OWNER: ${{ github.repository_owner }}
-      GH_REPO: ${{ github.event.repository.name }}
+      # 不要叫 GH_REPO：gh CLI 会把它当作 [HOST/]OWNER/REPO 解析并直接报错。
+      PUBLISH_OWNER: ${{ github.repository_owner }}
+      PUBLISH_REPO: ${{ github.event.repository.name }}
       WINDOWS_PUBLISHER_NAME: ${{ secrets.WINDOWS_PUBLISHER_NAME }}
       CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
       CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -56,17 +57,18 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          gh release view $tag 2>$null | Out-Null
+          $repo = "$env:PUBLISH_OWNER/$env:PUBLISH_REPO"
+          gh release view $tag --repo $repo 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --verify-tag --title ($tag -replace '^v', '') --generate-notes
+            gh release create $tag --repo $repo --verify-tag --title ($tag -replace '^v', '') --generate-notes
           }
       - shell: pwsh
         run: >-
           npm run release:win --
           --publish always
           --config.publish.provider=github
-          --config.publish.owner="$env:GH_OWNER"
-          --config.publish.repo="$env:GH_REPO"
+          --config.publish.owner="$env:PUBLISH_OWNER"
+          --config.publish.repo="$env:PUBLISH_REPO"
           --config.publish.releaseType=release
       - uses: actions/upload-artifact@v4
         with:
