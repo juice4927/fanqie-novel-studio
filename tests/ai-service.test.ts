@@ -394,6 +394,37 @@ describe("AI provider routing", () => {
     expect(body.reasoning).toEqual({ effort: "high" });
   });
 
+  it("reports a successful model connection test", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output: [{ content: [{ type: "output_text", text: JSON.stringify({ ok: true }) }] }],
+            usage: { input_tokens: 5, output_tokens: 2 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new AiService(databaseFor("gpt-5.1"), () => "secret").testConnection()).resolves.toEqual({
+      ok: true,
+      message: "连接成功：gpt-5.1",
+    });
+  });
+
+  it("returns a failed connection test instead of throwing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("unauthorized", { status: 401 })),
+    );
+
+    const result = await new AiService(databaseFor("gpt-5.1"), () => "secret").testConnection();
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("401");
+  });
+
   it("falls back to chat completions when a GPT-compatible endpoint lacks Responses", async () => {
     const fetchMock = vi
       .fn()

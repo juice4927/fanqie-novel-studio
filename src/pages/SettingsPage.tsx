@@ -8,6 +8,7 @@ import {
   HardDrive,
   KeyRound,
   Play,
+  PlugZap,
   RefreshCw,
   RotateCcw,
   Save,
@@ -17,6 +18,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge, Button, Field, Input, Select } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import type {
   AiJobRecord,
   AiSettings,
@@ -47,6 +49,24 @@ const formatBytes = (value: number) =>
         : `${(value / 1024 ** 3).toFixed(2)} GB`;
 const elapsed = (from: string, to: string | null) =>
   to ? `${((Date.parse(to) - Date.parse(from)) / 1000).toFixed(1)}s` : "--";
+const AI_TASK_LABELS: Record<string, string> = {
+  "analyze-novel-revision": "分析修订方案",
+  "connection-test": "连接测试",
+  "deconstruct-aggregate": "拆书汇总",
+  "deconstruct-batch": "批量拆书",
+  "deconstruct-stage": "阶段拆书",
+  "deconstruct-volume": "分卷拆书",
+  "draft-chapter": "生成正文",
+  "expand-book-concept-skeleton": "扩展作品方向",
+  "extract-chapter-facts": "提取章节事实",
+  "generate-chapter-plans": "生成章纲",
+  "generate-concepts": "生成作品方向",
+  "generate-story-structure": "生成故事结构",
+  "quality-review": "语义质检",
+  "review-planning-logic": "规划逻辑审查",
+  "revise-chapter-quality": "按质检修订",
+  "suggest-aesthetic-profile": "建议审美画像",
+};
 const upsertAiJob = (jobs: readonly AiJobRecord[], incoming: AiJobRecord) =>
   [incoming, ...jobs.filter((job) => job.id !== incoming.id)].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
@@ -79,6 +99,7 @@ export function SettingsPage({
   const [healthTask, setHealthTask] = useState<HealthCheckTask | null>(null);
   const [aiJobs, setAiJobs] = useState<AiJobRecord[]>([]);
   const [busy, setBusy] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
   useEffect(() => {
     void Promise.all([api.getAiSettings(), api.getWorkspacePath(), api.getAutoBackupSettings(), api.listAiJobs()]).then(
       ([nextSettings, path, nextAutoBackup, jobs]) => {
@@ -109,10 +130,29 @@ export function SettingsPage({
           if (next.report) setHealth(next.report);
           if (next.status === "失败") notify(next.error || "健康检查失败", "error");
         })
-        .catch((error) => notify(error instanceof Error ? error.message : String(error), "error"));
+        .catch((error) => notify(describeError(error), "error"));
     }, 250);
     return () => window.clearTimeout(timer);
   }, [api, healthTask, notify]);
+
+  const persistAiSettings = async () => {
+    const saved = await api.saveAiSettings(
+      {
+        protocol: settings.protocol,
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        embeddingModel: settings.embeddingModel,
+        inputPricePerMillion: settings.inputPricePerMillion,
+        outputPricePerMillion: settings.outputPricePerMillion,
+        longTaskTimeoutMinutes: settings.longTaskTimeoutMinutes,
+        reasoningEffort: settings.reasoningEffort,
+      },
+      apiKey || undefined,
+    );
+    setSettings(saved);
+    setApiKey("");
+    return saved;
+  };
 
   const run = async (operation: "backup" | "restore") => {
     setBusy(true);
@@ -121,7 +161,7 @@ export function SettingsPage({
       if (result)
         notify(operation === "backup" ? `加密备份已创建：${result}` : `备份已校验并恢复到副本目录：${result}`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     } finally {
       setBusy(false);
     }
@@ -133,7 +173,7 @@ export function SettingsPage({
       setAiJobs((current) => upsertAiJob(current, retried));
       notify("AI 任务已重新开始");
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -285,28 +325,34 @@ export function SettingsPage({
               icon={<Save size={16} />}
               onClick={async () => {
                 try {
-                  const saved = await api.saveAiSettings(
-                    {
-                      protocol: settings.protocol,
-                      baseUrl: settings.baseUrl,
-                      model: settings.model,
-                      embeddingModel: settings.embeddingModel,
-                      inputPricePerMillion: settings.inputPricePerMillion,
-                      outputPricePerMillion: settings.outputPricePerMillion,
-                      longTaskTimeoutMinutes: settings.longTaskTimeoutMinutes,
-                      reasoningEffort: settings.reasoningEffort,
-                    },
-                    apiKey || undefined,
-                  );
-                  setSettings(saved);
-                  setApiKey("");
+                  await persistAiSettings();
                   notify("模型设置已保存");
                 } catch (error) {
-                  notify(error instanceof Error ? error.message : String(error), "error");
+                  notify(describeError(error), "error");
                 }
               }}
             >
               保存模型设置
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<PlugZap size={16} />}
+              disabled={testingConnection}
+              onClick={async () => {
+                setTestingConnection(true);
+                try {
+                  await persistAiSettings();
+                  const result = await api.testAiConnection();
+                  if (result.ok) notify(result.message);
+                  else notify(describeError(result.message), "error");
+                } catch (error) {
+                  notify(describeError(error), "error");
+                } finally {
+                  setTestingConnection(false);
+                }
+              }}
+            >
+              {testingConnection ? "测试中…" : "保存并测试连接"}
             </Button>
           </div>
         </div>
@@ -360,7 +406,8 @@ export function SettingsPage({
                 <div>
                   <strong>{job.inputSummary}</strong>
                   <small>
-                    {job.taskType} · {job.model} · {new Date(job.createdAt).toLocaleString()}
+                    {AI_TASK_LABELS[job.taskType] ?? job.taskType} · {job.model} ·{" "}
+                    {new Date(job.createdAt).toLocaleString()}
                   </small>
                   <small>
                     响应头 {elapsed(job.createdAt, job.headersAt)} · 首字 {elapsed(job.createdAt, job.firstTokenAt)} ·{" "}
@@ -519,7 +566,7 @@ export function SettingsPage({
                     result.lastStatus === "成功" ? "success" : "error",
                   );
                 } catch (error) {
-                  notify(error instanceof Error ? error.message : String(error), "error");
+                  notify(describeError(error), "error");
                 } finally {
                   setBusy(false);
                 }
@@ -550,7 +597,7 @@ export function SettingsPage({
                   setAutoBackupPassword("");
                   notify(autoBackup.enabled ? "自动备份已启用" : "自动备份已关闭，专用密码已删除");
                 } catch (error) {
-                  notify(error instanceof Error ? error.message : String(error), "error");
+                  notify(describeError(error), "error");
                 } finally {
                   setBusy(false);
                 }
@@ -615,7 +662,7 @@ export function SettingsPage({
                             setHealth(report);
                             notify("章节搜索索引已从正文记录重建");
                           } catch (error) {
-                            notify(error instanceof Error ? error.message : String(error), "error");
+                            notify(describeError(error), "error");
                           } finally {
                             setBusy(false);
                           }
@@ -654,7 +701,7 @@ export function SettingsPage({
                   const result = await api.exportDiagnosticBundle();
                   if (result) notify(`诊断包已导出：${result}`);
                 } catch (error) {
-                  notify(error instanceof Error ? error.message : String(error), "error");
+                  notify(describeError(error), "error");
                 } finally {
                   setBusy(false);
                 }
@@ -683,7 +730,7 @@ export function SettingsPage({
                     setHealthTask(task);
                     if (task.report) setHealth(task.report);
                   } catch (error) {
-                    notify(error instanceof Error ? error.message : String(error), "error");
+                    notify(describeError(error), "error");
                   }
                 }}
               >

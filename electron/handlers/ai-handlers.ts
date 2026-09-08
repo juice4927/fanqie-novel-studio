@@ -56,6 +56,7 @@ export interface AiHandlerDependencies {
     | "reviewChapter"
     | "reviewPlanning"
     | "reviseChapter"
+    | "testConnection"
   >;
   compileContext: (
     project: ProjectDetail,
@@ -407,6 +408,7 @@ export function registerAiHandlers({
     ...database.getAiSettings(),
     hasApiKey: Boolean(getApiKey()),
   }));
+  register("testAiConnection", () => ai.testConnection());
   register("saveAiSettings", async (settings, apiKey) => {
     const previousSettings = database.getAiSettings();
     const previousOrigin = new URL(previousSettings.baseUrl).origin;

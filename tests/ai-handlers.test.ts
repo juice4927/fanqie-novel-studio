@@ -279,6 +279,7 @@ function createDependencies(completion: Promise<Chapter> = new Promise(() => {})
       reviewChapter: vi.fn(),
       reviewPlanning: vi.fn(),
       reviseChapter: vi.fn(),
+      testConnection: vi.fn(async () => ({ ok: true, message: "连接成功：test-model" })),
     },
     compileContext: vi.fn(() => ({ estimatedTokens: 123 }) as ContextPackage),
     generateChapterDraft,
@@ -346,8 +347,19 @@ describe("AI handlers", () => {
       "reviseChapterFromQuality",
       "runQualityCheck",
       "saveAiSettings",
+      "testAiConnection",
       "transitionChapter",
     ]);
+  });
+
+  it("routes connection tests to the AI service", async () => {
+    const { dependencies, handlers } = createDependencies();
+    registerAiHandlers(dependencies);
+
+    await expect(handlers.get("testAiConnection")!()).resolves.toEqual({
+      ok: true,
+      message: "连接成功：test-model",
+    });
   });
 
   it("merges local quality results with semantic fallback and advances drafts", async () => {

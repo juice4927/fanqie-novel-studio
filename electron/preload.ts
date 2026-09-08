@@ -87,6 +87,7 @@ const api: AppApi = {
   previewChapterBatch: (id, chapterId) => invoke("previewChapterBatch", id, chapterId),
   generateChapterBatch: (id, chapterId) => invoke("generateChapterBatch", id, chapterId),
   getAiSettings: () => invoke("getAiSettings"),
+  testAiConnection: () => invoke("testAiConnection"),
   saveAiSettings: (settings, apiKey) => invoke("saveAiSettings", settings, apiKey),
   listAiJobs: (projectId) => invoke("listAiJobs", projectId),
   cancelAiJob: (id) => invoke("cancelAiJob", id),

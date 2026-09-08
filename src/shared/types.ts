@@ -932,6 +932,7 @@ export interface AppApi {
   previewChapterBatch(id: string, chapterId: string): Promise<BatchGenerationPreview>;
   generateChapterBatch(id: string, chapterId: string): Promise<Chapter[]>;
   getAiSettings(): Promise<AiSettings>;
+  testAiConnection(): Promise<{ ok: boolean; message: string }>;
   saveAiSettings(settings: Omit<AiSettings, "hasApiKey">, apiKey?: string): Promise<AiSettings>;
   listAiJobs(projectId?: string): Promise<AiJobRecord[]>;
   cancelAiJob(id: string): Promise<boolean>;

@@ -949,6 +949,9 @@ export function createBrowserApi(): AppApi {
     async getAiSettings() {
       return state.settings;
     },
+    async testAiConnection() {
+      return { ok: false, message: "浏览器预览不调用真实模型接口，请在桌面版测试连接。" };
+    },
     async saveAiSettings(settings, apiKey) {
       const providerChanged =
         state.settings.protocol !== settings.protocol ||

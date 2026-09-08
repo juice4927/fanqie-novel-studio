@@ -1528,4 +1528,25 @@ export class AiService {
       updatedAt: now(),
     };
   }
+
+  /** 用一次最小结构化请求验证端点、协议与密钥；任务会记录在 AI 任务中心，失败不抛出。 */
+  async testConnection(): Promise<{ ok: boolean; message: string }> {
+    const settings = this.database.getAiSettings();
+    try {
+      await this.runJson({
+        projectId: null,
+        taskType: "connection-test",
+        inputSummary: "模型连接测试",
+        system: "你是连接测试助手，只返回 JSON，不使用 Markdown。",
+        user: '请只返回 {"ok": true}。',
+        schema: z.object({ ok: z.boolean() }),
+        timeoutMs: 30_000,
+        cachePolicy: "bypass",
+        reasoningEffort: "low",
+      });
+      return { ok: true, message: `连接成功：${settings.model}` };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
 }

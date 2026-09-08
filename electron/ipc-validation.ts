@@ -582,6 +582,7 @@ const schemas = {
   previewChapterBatch: projectEntity,
   generateChapterBatch: projectEntity,
   getAiSettings: noArgs,
+  testAiConnection: noArgs,
   saveAiSettings: z.tuple([
     z
       .object({
