@@ -147,6 +147,9 @@ describe("structured story summaries", () => {
     expect(updates.find((item) => item.layer === "十章阶段")?.version).toBe(5);
     expect(updates.find((item) => item.layer === "全书")?.version).toBe(8);
     expect(updates.find((item) => item.layer === "分卷")?.content).toContain("取得第一份证据");
+    const volume = updates.find((item) => item.layer === "分卷")!;
+    expect(volume).toMatchObject({ fromChapter: 1, toChapter: 60 });
+    expect(buildLongTermMemory(updates, 3, 12000)).toContain("取得第一份证据");
     expect(project).toEqual(snapshot);
   });
 });

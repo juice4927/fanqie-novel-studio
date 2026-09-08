@@ -153,7 +153,9 @@ export function prepareFinalizedChapterSummaries(
         layer: "分卷",
         title: volume.title,
         fromChapter: cursor,
-        toChapter: Math.min(end, Math.max(...finalized.map((item) => item.number))),
+        // 分卷摘要覆盖整个规划卷范围，正文仍只汇总已定稿章节：
+        // 否则写到卷中段时，buildLongTermMemory 找不到当前分卷记忆。
+        toChapter: end,
         content: `分卷目标：${volume.goal}\n${aggregateStorySummaries(items, 10000 - volume.goal.length - 6)}`,
       });
       break;
