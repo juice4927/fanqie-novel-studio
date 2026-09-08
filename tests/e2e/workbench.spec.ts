@@ -68,6 +68,8 @@ test("navigates through research and the complete project workflow", async ({ pa
   const manuscript = page.getByPlaceholder("在这里写正文，或先保存章纲后使用 AI 生成草稿。");
   await manuscript.fill("自动保存回归文本：雨落在旧城的玻璃窗上。");
   await expect(page.getByRole("status")).toHaveText("已保存", { timeout: 5000 });
+  await page.keyboard.press("Control+s");
+  await expect(page.getByText("章节已保存并建立新版本")).toBeVisible();
   await page.getByRole("button", { name: /状态账本/ }).click();
   await page.getByRole("button", { name: /写作台/ }).click();
   await page.locator(".chapter-scroll button").filter({ hasText: "回声的代价" }).click();
@@ -117,7 +119,7 @@ test("navigates through research and the complete project workflow", async ({ pa
   await expect(page.getByRole("heading", { name: "都市脑洞专属账本" })).toBeVisible();
   await expect(page.getByRole("button", { name: /能力规则表/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "期待 / 兑现账本" })).toBeVisible();
-  await expect(page.getByText("红伞女孩为何也能听见回声")).toBeVisible();
+  await expect(page.locator(".expectation-ledger").getByText("红伞女孩为何也能听见回声")).toBeVisible();
   const ledgerOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );

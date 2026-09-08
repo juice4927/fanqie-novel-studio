@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Select } from "../components/UI";
+import { describeError } from "../lib/error-message";
 import { useNavigationGuard } from "../lib/navigation-guard";
 import { GENRE_PLUGINS } from "../shared/genre-plugins";
 import { PROJECT_STATUSES } from "../shared/status-constants";
@@ -57,8 +58,12 @@ export function ProjectPage({
   const [insights, setInsights] = useState<InsightPack[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [writingMounted, setWritingMounted] = useState(false);
   const requestRef = useRef(0);
   const { confirmNavigation } = useNavigationGuard();
+  useEffect(() => {
+    if (tab === "写作台") setWritingMounted(true);
+  }, [tab]);
 
   const reload = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -149,7 +154,7 @@ export function ProjectPage({
                 });
                 await reload();
               } catch (error) {
-                notify(String(error), "error");
+                notify(describeError(error), "error");
               }
             }}
           >
@@ -183,7 +188,11 @@ export function ProjectPage({
         )}
         {tab === "故事圣经" && <StoryBiblePage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "规划台" && <PlanningPage project={project} api={api} reload={reload} notify={notify} />}
-        {tab === "写作台" && <WritingPage project={project} api={api} reload={reload} notify={notify} />}
+        {writingMounted && (
+          <div hidden={tab !== "写作台"}>
+            <WritingPage project={project} api={api} reload={reload} notify={notify} active={tab === "写作台"} />
+          </div>
+        )}
         {tab === "状态账本" && <LedgerPage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "质检中心" && <QualityPage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "发布日历" && <PublishingPage project={project} api={api} reload={reload} notify={notify} />}

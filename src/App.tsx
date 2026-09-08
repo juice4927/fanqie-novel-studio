@@ -10,6 +10,7 @@ const ResearchPage = lazy(() => import("./pages/ResearchPage").then((m) => ({ de
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const ProjectPage = lazy(() => import("./pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
 
+import { describeError } from "./lib/error-message";
 import type { DashboardData, ProjectSummary } from "./shared/types";
 
 type AppPage = "dashboard" | "research" | "project" | "settings";
@@ -207,7 +208,7 @@ function Workbench() {
                     await reload();
                     notify(result);
                   } catch (error) {
-                    notify(error instanceof Error ? error.message : String(error), "error");
+                    notify(describeError(error), "error");
                   } finally {
                     setDeleteBusy(false);
                   }
@@ -220,7 +221,11 @@ function Workbench() {
         </Modal>
       )}
       {toast && (
-        <div className={`toast toast-${toast.tone}`}>
+        <div
+          className={`toast toast-${toast.tone}`}
+          role={toast.tone === "error" ? "alert" : "status"}
+          aria-live={toast.tone === "error" ? "assertive" : "polite"}
+        >
           <span>{toast.message}</span>
           <button type="button" aria-label="关闭通知" onClick={() => setToast(null)}>
             <X size={15} />

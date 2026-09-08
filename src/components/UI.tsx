@@ -78,14 +78,16 @@ export function Modal({
     onCloseRef.current = onClose;
   }, [onClose]);
   useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // 子控件通过 autoFocus 已在提交阶段拿到焦点时不要抢走它；否则聚焦第一个可聚焦元素。
+    const previousFocus = active && dialog?.contains(active) ? null : active;
     const focusable = () => [
       ...(dialog?.querySelectorAll<HTMLElement>(
         'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
       ) ?? []),
     ];
-    (focusable()[0] ?? dialog)?.focus();
+    if (previousFocus) (focusable()[0] ?? dialog)?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -196,20 +198,24 @@ export function Segmented<T extends string>({
   value,
   onChange,
   disabled = false,
+  label,
 }: {
   options: readonly T[];
   value: T;
   onChange: (value: T) => void;
   disabled?: boolean;
+  label?: string;
 }) {
   return (
-    <div className="segmented">
+    // biome-ignore lint/a11y/useSemanticElements: 分段按钮组不是表单字段，fieldset 会引入额外语义和默认样式
+    <div className="segmented" role="group" aria-label={label}>
       {options.map((option) => (
         <button
           type="button"
           key={option}
           disabled={disabled}
           className={value === option ? "active" : ""}
+          aria-pressed={value === option}
           onClick={() => onChange(option)}
         >
           {option}

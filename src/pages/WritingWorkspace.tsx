@@ -12,7 +12,7 @@ import {
   SearchCheck,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Field, IconButton, Input, Modal, Segmented, Select, Textarea } from "../components/UI";
 import {
   AutosaveCoordinator,
@@ -21,6 +21,7 @@ import {
   readRecoveredChapter,
   writeRecoveredChapter,
 } from "../lib/chapter-draft";
+import { describeError } from "../lib/error-message";
 import { formatCount, formatDate } from "../lib/format";
 import { useNavigationGuard } from "../lib/navigation-guard";
 import { canAcceptGeneratedDraft, summarizeQualityOverview } from "../shared/generated-review";
@@ -73,7 +74,13 @@ const EMPTY_CHAPTER = (number: number): Chapter => ({
   updatedAt: new Date().toISOString(),
 });
 
-export function WritingPage({ project, api, reload, notify }: CommonProjectProps) {
+export function WritingPage({
+  project,
+  api,
+  reload,
+  notify,
+  active = true,
+}: CommonProjectProps & { active?: boolean }) {
   const { registerLeaveGuard } = useNavigationGuard();
   const [selectedId, setSelectedId] = useState(project.chapters[0]?.id ?? "");
   const selected = project.chapters.find((chapter) => chapter.id === selectedId);
@@ -102,6 +109,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
   } | null>(null);
   const [revertNote, setRevertNote] = useState("");
   const [reviewSelectionText, setReviewSelectionText] = useState("");
+  const [reviewContext, setReviewContext] = useState<ContextPackage | null>(null);
   const [generationQuality, setGenerationQuality] = useState<GenerationQuality | null>(null);
   const lastSavedSignature = useRef(chapterDraftSignature(selected ?? draft));
   const draftRef = useRef(draft);
@@ -240,23 +248,23 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
       chapterRequestRef.current += 1;
     };
   }, [api, chapterId, project.summary.id]);
-  useEffect(
-    () =>
-      registerLeaveGuard(() => {
-        const current = draftRef.current;
-        if (chapterDraftSignature(current) === lastSavedSignature.current) return true;
-        // Persist immediately: navigation may happen before the recovery debounce fires.
-        const recovered = writeRecoveredChapter(project.summary.id, current);
-        setRecoveryAvailable(recovered);
-        return window.confirm(
-          recovered
-            ? "当前章节还有未保存内容，已保留本地恢复稿，确定离开写作台吗？"
-            : "当前章节还有未保存内容，且无法保留恢复稿。离开可能丢失修改，确定离开吗？",
-        );
-      }),
-    [project.summary.id, registerLeaveGuard],
-  );
-  const dirty = chapterDraftSignature(draft) !== lastSavedSignature.current;
+  useEffect(() => {
+    if (!active) return;
+    return registerLeaveGuard(() => {
+      const current = draftRef.current;
+      if (chapterDraftSignature(current) === lastSavedSignature.current) return true;
+      // Persist immediately: navigation may happen before the recovery debounce fires.
+      const recovered = writeRecoveredChapter(project.summary.id, current);
+      setRecoveryAvailable(recovered);
+      return window.confirm(
+        recovered
+          ? "当前章节还有未保存内容，已保留本地恢复稿，确定离开写作台吗？"
+          : "当前章节还有未保存内容，且无法保留恢复稿。离开可能丢失修改，确定离开吗？",
+      );
+    });
+  }, [active, project.summary.id, registerLeaveGuard]);
+  const draftSignature = useMemo(() => chapterDraftSignature(draft), [draft]);
+  const dirty = draftSignature !== lastSavedSignature.current;
   useEffect(() => {
     if (busy || chapterLoading) return;
     if (!dirty) {
@@ -306,10 +314,13 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
     }, 180);
     return () => window.clearTimeout(timer);
   }, [api, project.summary.id, query]);
-  const filteredChapters =
-    query.trim().length >= 2
-      ? project.chapters.filter((chapter) => searchHits.some((hit) => hit.id === chapter.id))
-      : project.chapters.slice(0, loadedCount);
+  const filteredChapters = useMemo(
+    () =>
+      query.trim().length >= 2
+        ? project.chapters.filter((chapter) => searchHits.some((hit) => hit.id === chapter.id))
+        : project.chapters.slice(0, loadedCount),
+    [query, searchHits, project.chapters, loadedCount],
+  );
   const ROW_HEIGHT = 54;
   const OVERSCAN = 6;
   const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
@@ -351,7 +362,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
       notify("章节已保存并建立新版本");
     } catch (error) {
       setSaveStatus("error");
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     }
   };
   const saveLatestForAction = async () => {
@@ -369,6 +380,11 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
     setSelectedId(saved.id);
     setSaveStatus("saved");
     return saved;
+  };
+  const captureReviewSelection = () => {
+    const selection = window.getSelection();
+    const text = selection ? selection.toString() : "";
+    setReviewSelectionText(text && text.length <= 2000 ? text : "");
   };
   const openRevisionFromReviewSelection = () => {
     if (!review || !reviewSelectionText) return;
@@ -402,7 +418,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
         setDraft({ ...draftRef.current, status: "待定稿" });
       }
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     } finally {
       setBusy(false);
     }
@@ -446,7 +462,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
       await reload();
       notify("已打回，正文恢复为生成前内容");
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     } finally {
       setBusy(false);
     }
@@ -460,7 +476,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
       );
       notify("已采纳该章并进入待定稿");
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     }
   };
   const revertBatchChapter = async (chapterId: string, previousContent: string) => {
@@ -475,7 +491,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
       await reload();
       notify("已打回该章，正文恢复为生成前内容");
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
+      notify(describeError(error), "error");
     }
   };
 
@@ -486,6 +502,8 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
     return true;
   };
   const selectChapter = (chapter: Chapter) => {
+    // 重复点击当前章节不应重置草稿：列表里的章节只有元数据，正文是懒加载的。
+    if (chapter.id === draftRef.current.id) return;
     if (!canDiscardDraft()) return;
     chapterRequestRef.current += 1;
     setSelectedId(chapter.id);
@@ -495,6 +513,84 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
     setSaveStatus("saved");
     setContext(null);
   };
+  const selectRelativeChapter = (delta: number) => {
+    const chapters = project.chapters;
+    if (!chapters.length) return;
+    const currentIndex = chapters.findIndex((item) => item.id === draftRef.current.id);
+    const targetIndex = currentIndex < 0 ? (delta > 0 ? 0 : chapters.length - 1) : currentIndex + delta;
+    const target = chapters[targetIndex];
+    if (target) selectChapter(target);
+  };
+  const startNewChapter = () => {
+    if (!canDiscardDraft()) return;
+    chapterRequestRef.current += 1;
+    setChapterLoading(false);
+    const empty = EMPTY_CHAPTER(project.chapters.length + 1);
+    // 新章没有服务端记录，只能靠本地恢复稿兜底：重新新建时先取回它。
+    const recovered = readRecoveredChapter(project.summary.id, empty);
+    const recoveredDraft = chapterDraftSignature(recovered) !== chapterDraftSignature(empty);
+    setSelectedId("");
+    setDraft(recovered);
+    draftRef.current = recovered;
+    lastSavedSignature.current = chapterDraftSignature(empty);
+    setSaveStatus(recoveredDraft ? "dirty" : "saved");
+    setRecoveryAvailable(recoveredDraft);
+    setContext(null);
+    if (recoveredDraft) notify("已恢复上次未保存的新章草稿");
+  };
+  const runQualityCheck = async () => {
+    if (!draftRef.current.id || busy || chapterLoading) return;
+    setBusy(true);
+    try {
+      const saved = await saveLatestForAction();
+      const issues = await api.runQualityCheck(project.summary.id, saved.id);
+      await api.transitionChapter(project.summary.id, saved.id, "待定稿");
+      await reload();
+      notify(issues.length ? `质检完成，发现 ${issues.length} 项问题` : "质检完成，未发现问题");
+    } catch (error) {
+      notify(describeError(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const shortcutsRef = useRef({ save, runQualityCheck, selectRelativeChapter, startNewChapter });
+  shortcutsRef.current = { save, runQualityCheck, selectRelativeChapter, startNewChapter };
+  useEffect(() => {
+    // 写作台被隐藏时（切到其他工作区）不接管全局快捷键。
+    if (!active) return;
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      // 弹窗内的输入交给弹窗自己处理。
+      if (document.querySelector('[role="dialog"]')) return;
+      const modifier = event.ctrlKey || event.metaKey;
+      if (modifier && !event.shiftKey && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void shortcutsRef.current.save();
+        return;
+      }
+      if (modifier && event.key === "Enter") {
+        event.preventDefault();
+        void shortcutsRef.current.runQualityCheck();
+        return;
+      }
+      if (event.altKey && event.key === "ArrowUp") {
+        event.preventDefault();
+        shortcutsRef.current.selectRelativeChapter(-1);
+        return;
+      }
+      if (event.altKey && event.key === "ArrowDown") {
+        event.preventDefault();
+        shortcutsRef.current.selectRelativeChapter(1);
+        return;
+      }
+      if (event.altKey && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        shortcutsRef.current.startNewChapter();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [active]);
   const editorBusy = busy || chapterLoading;
   const revisionRepairItems = revisionProposal
     ? [
@@ -548,27 +644,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             <strong>章节</strong>
             <small>{project.chapters.length} 章</small>
           </span>
-          <IconButton
-            label="新建章节"
-            disabled={editorBusy}
-            onClick={() => {
-              if (!canDiscardDraft()) return;
-              chapterRequestRef.current += 1;
-              setChapterLoading(false);
-              const empty = EMPTY_CHAPTER(project.chapters.length + 1);
-              // 新章没有服务端记录，只能靠本地恢复稿兜底：重新点“新建章节”时先取回它。
-              const recovered = readRecoveredChapter(project.summary.id, empty);
-              const recoveredDraft = chapterDraftSignature(recovered) !== chapterDraftSignature(empty);
-              setSelectedId("");
-              setDraft(recovered);
-              draftRef.current = recovered;
-              lastSavedSignature.current = chapterDraftSignature(empty);
-              setSaveStatus(recoveredDraft ? "dirty" : "saved");
-              setRecoveryAvailable(recoveredDraft);
-              setContext(null);
-              if (recoveredDraft) notify("已恢复上次未保存的新章草稿");
-            }}
-          >
+          <IconButton label="新建章节（Alt+N）" disabled={editorBusy} onClick={startNewChapter}>
             <Plus size={17} />
           </IconButton>
         </div>
@@ -577,6 +653,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           <input
             disabled={editorBusy}
             value={query}
+            aria-label="检索正文"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="检索正文"
           />
@@ -610,6 +687,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                   key={chapter.id}
                   disabled={editorBusy}
                   className={selectedId === chapter.id ? "active" : ""}
+                  aria-current={selectedId === chapter.id ? "true" : undefined}
                   onClick={() => selectChapter(chapter)}
                 >
                   <span>{chapter.number}</span>
@@ -634,6 +712,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               className="title-input"
               disabled={editorBusy}
               value={draft.title}
+              aria-label="章节标题"
               onChange={(event) => setDraft({ ...draft, title: event.target.value })}
               placeholder="章节标题"
             />
@@ -673,6 +752,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               options={["逐章", "五章批次"] as const}
               value={draft.batchMode}
               disabled={editorBusy}
+              label="章节处理方式"
               onChange={(batchMode) => setDraft({ ...draft, batchMode })}
             />
             <label className="key-toggle">
@@ -694,6 +774,8 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               variant="secondary"
               icon={<Save size={16} />}
               disabled={editorBusy || saveStatus === "saving"}
+              aria-keyshortcuts="Control+S"
+              title="保存并建立新版本（Ctrl+S）"
               onClick={save}
             >
               建立版本
@@ -729,7 +811,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                 const saved = await saveLatestForAction();
                 setContext(await api.compileContext(project.summary.id, saved.id));
               } catch (error) {
-                notify(String(error), "error");
+                notify(describeError(error), "error");
               } finally {
                 setBusy(false);
               }
@@ -766,6 +848,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                 setSaveStatus("saved");
                 await reload();
                 setReview({ chapter: result, previousChapter: beforeGeneration, issues: [], checking: true });
+                setReviewContext(null);
                 void api
                   .runQualityCheck(project.summary.id, result.id)
                   .then((issues) =>
@@ -783,7 +866,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
               } catch (error) {
                 draftRef.current = beforeGeneration;
                 setDraft(beforeGeneration);
-                notify(error instanceof Error ? error.message : String(error), "error");
+                notify(describeError(error), "error");
               } finally {
                 setBusy(false);
               }
@@ -802,7 +885,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                   const saved = await saveLatestForAction();
                   setBatchPreview(await api.previewChapterBatch(project.summary.id, saved.id));
                 } catch (error) {
-                  notify(error instanceof Error ? error.message : String(error), "error");
+                  notify(describeError(error), "error");
                 } finally {
                   setBusy(false);
                 }
@@ -814,20 +897,9 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
           <Button
             disabled={!draft.id || editorBusy}
             icon={<SearchCheck size={16} />}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                const saved = await saveLatestForAction();
-                const issues = await api.runQualityCheck(project.summary.id, saved.id);
-                await api.transitionChapter(project.summary.id, saved.id, "待定稿");
-                await reload();
-                notify(issues.length ? `质检完成，发现 ${issues.length} 项问题` : "质检完成，未发现问题");
-              } catch (error) {
-                notify(error instanceof Error ? error.message : String(error), "error");
-              } finally {
-                setBusy(false);
-              }
-            }}
+            aria-keyshortcuts="Control+Enter"
+            title="运行质检并进入待定稿（Ctrl+Enter）"
+            onClick={runQualityCheck}
           >
             运行质检
           </Button>
@@ -853,7 +925,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                     notify("章节已定稿；未配置 AI，未扫描状态候选");
                   }
                 } catch (error) {
-                  notify(error instanceof Error ? error.message : String(error), "error");
+                  notify(describeError(error), "error");
                 }
               }}
             >
@@ -985,6 +1057,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             className="manuscript"
             value={draft.content}
             disabled={editorBusy}
+            aria-label="章节正文"
             onChange={(event) => setDraft({ ...draft, content: event.target.value })}
             placeholder="在这里写正文，或先保存章纲后使用 AI 生成草稿。"
           />
@@ -1147,6 +1220,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
             if (busy) return;
             setReview(null);
             setReviewSelectionText("");
+            setReviewContext(null);
           }}
           width={940}
         >
@@ -1168,27 +1242,26 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                 {buildChapterSummary(review.chapter)}
               </pre>
             </details>
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: 阅读区划词交给 AI 修改，需要原生文本选区 */}
-            <div
+            <textarea
+              readOnly
+              aria-label="AI 生成正文，可选中文字后交给 AI 修改"
+              value={review.chapter.content || "（空正文）"}
               style={{
-                whiteSpace: "pre-wrap",
+                width: "100%",
+                height: 340,
+                resize: "none",
                 lineHeight: 1.9,
-                maxHeight: 340,
-                overflowY: "auto",
                 padding: 12,
                 background: "var(--surface-soft)",
                 border: "1px solid var(--line)",
                 borderRadius: 6,
                 fontSize: 15,
+                fontFamily: "inherit",
+                color: "inherit",
               }}
-              onMouseUp={() => {
-                const selection = window.getSelection();
-                const text = selection ? selection.toString() : "";
-                setReviewSelectionText(text && text.length <= 2000 ? text : "");
-              }}
-            >
-              {review.chapter.content || "（空正文）"}
-            </div>
+              onMouseUp={captureReviewSelection}
+              onKeyUp={captureReviewSelection}
+            />
             {reviewSelectionText && (
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
                 <Button
@@ -1200,6 +1273,50 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                 </Button>
               </div>
             )}
+            <section>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <span>
+                  <strong>生成依据</strong>{" "}
+                  <small className="muted-line">
+                    {reviewContext
+                      ? `约 ${reviewContext.estimatedTokens} tokens`
+                      : "查看本章实际使用的契约、账本事实和摘要"}
+                  </small>
+                </span>
+                <Button
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      setReviewContext(await api.compileContext(project.summary.id, review.chapter.id));
+                    } catch (error) {
+                      notify(describeError(error), "error");
+                    }
+                  }}
+                >
+                  {reviewContext ? "刷新依据" : "查看生成依据"}
+                </Button>
+              </div>
+              {reviewContext?.diagnostics && (
+                <div className="simple-list" style={{ marginTop: 8 }}>
+                  {reviewContext.diagnostics.sections.map((section) => (
+                    <div key={section.key}>
+                      <span>
+                        <strong>{section.label}</strong>
+                        <small>{section.source}</small>
+                      </span>
+                      <Badge
+                        tone={
+                          section.status === "已包含" ? "success" : section.status === "已截断" ? "warning" : "neutral"
+                        }
+                      >
+                        {section.status} {section.includedItems}/{section.totalItems}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
             <section>
               {review.checking ? (
                 <p className="muted-line">正在运行质检…</p>
@@ -1417,7 +1534,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                         ...(proposal.textRepair ? [proposal.textRepair.id] : []),
                       ]);
                     } catch (error) {
-                      notify(error instanceof Error ? error.message : String(error), "error");
+                      notify(describeError(error), "error");
                     } finally {
                       setRevisionBusy(false);
                     }
@@ -1449,7 +1566,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                         `已应用 ${result.appliedTargets.length} 个目标${result.changeRequestIds.length ? `，建立 ${result.changeRequestIds.length} 条受保护变更记录` : ""}${contractNote}`,
                       );
                     } catch (error) {
-                      notify(error instanceof Error ? error.message : String(error), "error");
+                      notify(describeError(error), "error");
                     } finally {
                       setRevisionBusy(false);
                     }
@@ -1610,7 +1727,7 @@ export function WritingPage({ project, api, reload, notify }: CommonProjectProps
                       ),
                     );
                   } catch (error) {
-                    notify(error instanceof Error ? error.message : String(error), "error");
+                    notify(describeError(error), "error");
                   } finally {
                     setBusy(false);
                   }
