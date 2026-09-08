@@ -683,18 +683,8 @@ export function createBrowserApi(): AppApi {
       const chapter = project.chapters[chapterIndex];
       if (!chapter) throw new Error("章节不存在");
       const issues: QualityIssue[] = [];
-      if (chapter.wordCount < 1200)
-        issues.push({
-          id: id(),
-          projectId,
-          chapterId,
-          severity: "警告",
-          category: "篇幅",
-          message: `本章仅 ${chapter.wordCount} 字，可能不足以完成目标`,
-          evidence: "",
-          status: "待处理",
-          createdAt: now(),
-        });
+      const observations: string[] = [];
+      if (chapter.wordCount < 1200) observations.push(`本章 ${chapter.wordCount} 字，低于建议的 1200 字。`);
       if (chapter.isKeyChapter && chapter.batchMode === "五章批次")
         issues.push({
           id: id(),
@@ -707,6 +697,25 @@ export function createBrowserApi(): AppApi {
           status: "待处理",
           createdAt: now(),
         });
+      for (const [label, value] of [
+        ["本章承诺", chapter.chapterPromise],
+        ["预期回报", chapter.expectedPayoff],
+        ["当前危机", chapter.crisis],
+        ["结尾期待", chapter.endingExpectation],
+      ] as const) {
+        if (String(value ?? "").trim()) continue;
+        issues.push({
+          id: id(),
+          projectId,
+          chapterId,
+          severity: "建议",
+          category: "章节商业意图",
+          message: `${label}尚未规划，建议在写作台补充后再判断本章闭环。`,
+          evidence: "",
+          status: "待处理",
+          createdAt: now(),
+        });
+      }
       const plan = prepareQualityIssueSave(project.issues, chapterId, issues);
       for (const issue of plan.upserts) {
         const index = project.issues.findIndex((item) => item.id === issue.id);
@@ -732,7 +741,7 @@ export function createBrowserApi(): AppApi {
       }
       project.summary.updatedAt = updatedAt;
       persist();
-      return issues;
+      return { issues, observations };
     },
     async reviseChapterFromQuality() {
       throw new Error("AI 修订正文需要在桌面版配置模型后使用");

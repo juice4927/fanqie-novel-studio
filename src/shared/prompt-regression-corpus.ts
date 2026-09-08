@@ -57,5 +57,19 @@ export const PROMPT_REGRESSION_BASELINE = {
       inputTokens: 3200,
       outputTokens: 220,
     },
+    {
+      fixture: {
+        id: "quality-review-observations",
+        requiredKeys: ["issues", "observations"],
+        forbiddenFacts: ["不存在的契约条款"],
+        maxCharacters: 3000,
+      } satisfies PromptFixture,
+      output: {
+        issues: [],
+        observations: ["本章 1800 字，低于目标 2200 字；情绪温度偏低，但未与审美设定冲突。"],
+      },
+      inputTokens: 3200,
+      outputTokens: 160,
+    },
   ],
 } as const;

@@ -29,7 +29,11 @@ describe("actual quality run evaluation", () => {
   it("aggregates model output with usage and cost measurements", () => {
     const result = evaluateQualityRun(run(), fixtures, corpusHash);
     expect(result.summary.passed).toBe(true);
-    expect(result.measurements).toMatchObject({ inputTokens: 60, outputTokens: 120, cost: 0.06 });
+    expect(result.measurements).toMatchObject({
+      inputTokens: fixtures.length * 10,
+      outputTokens: fixtures.length * 20,
+      cost: fixtures.length * 0.01,
+    });
   });
 
   it("rejects incomplete or mismatched runs before grading", () => {

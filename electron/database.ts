@@ -1377,6 +1377,12 @@ export class WorkspaceDatabase {
     const reasoningEffort = ["low", "medium", "high"].includes(storedReasoningEffort)
       ? (storedReasoningEffort as AiSettings["reasoningEffort"])
       : undefined;
+    const storedTemperature = this.getSetting("ai.temperatureOverride", "").trim();
+    const parsedTemperature = storedTemperature ? Number(storedTemperature) : Number.NaN;
+    const temperatureOverride =
+      Number.isFinite(parsedTemperature) && parsedTemperature >= 0 && parsedTemperature <= 1.5
+        ? parsedTemperature
+        : undefined;
     return {
       protocol,
       baseUrl,
@@ -1387,6 +1393,7 @@ export class WorkspaceDatabase {
       outputPricePerMillion,
       longTaskTimeoutMinutes,
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(temperatureOverride !== undefined ? { temperatureOverride } : {}),
     };
   }
 
@@ -1399,6 +1406,10 @@ export class WorkspaceDatabase {
     this.setSetting("ai.outputPricePerMillion", String(settings.outputPricePerMillion));
     this.setSetting("ai.longTaskTimeoutMinutes", String(settings.longTaskTimeoutMinutes));
     this.setSetting("ai.reasoningEffort", settings.reasoningEffort ?? "");
+    this.setSetting(
+      "ai.temperatureOverride",
+      settings.temperatureOverride === undefined ? "" : String(settings.temperatureOverride),
+    );
     return this.getAiSettings();
   }
 

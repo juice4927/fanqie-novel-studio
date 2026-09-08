@@ -84,7 +84,7 @@ export interface AiHandlerDependencies {
     contract: ProjectDetail["contract"];
     genre: ProjectDetail["summary"]["genre"];
     originalityMatches: ReturnType<WorkspaceDatabase["findOriginalityMatches"]>;
-  }) => Promise<QualityIssue[]>;
+  }) => Promise<{ issues: QualityIssue[]; observations: string[] }>;
   createId: () => string;
   currentTimestamp: () => string;
   isGenerationActive: (projectId: string) => boolean;
@@ -129,7 +129,7 @@ export function registerAiHandlers({
       `${chapter.title} ${chapter.outline} ${chapter.content.slice(0, 500)}`,
       chapter.number,
     );
-    const localIssues = await runLocalQualityCheck({
+    const local = await runLocalQualityCheck({
       projectId: id,
       chapter,
       previousChapter: project.chapters.find((item) => item.number === chapter.number - 1),
@@ -139,6 +139,7 @@ export function registerAiHandlers({
       genre: project.summary.genre,
       originalityMatches: database.findOriginalityMatches(chapter.content),
     });
+    const localIssues = local.issues;
     const intentIssues: QualityIssue[] = [
       ["本章承诺", chapter.chapterPromise],
       ["预期回报", chapter.expectedPayoff],
@@ -177,13 +178,12 @@ export function registerAiHandlers({
         createdAt: currentTimestamp(),
       }));
     let semanticIssues: QualityIssue[] = [];
+    let observations = [...local.observations];
     if (getApiKey()) {
       try {
-        semanticIssues = await ai.reviewChapter(
-          { ...project, facts },
-          chapter,
-          compileContext(project, chapter, facts),
-        );
+        const review = await ai.reviewChapter({ ...project, facts }, chapter, compileContext(project, chapter, facts));
+        semanticIssues = review.issues;
+        observations = [...observations, ...review.observations];
       } catch (error) {
         semanticIssues = [
           {
@@ -211,7 +211,7 @@ export function registerAiHandlers({
     if (chapter.status === "草稿") {
       database.transitionChapter(id, chapterId, "待质检");
     }
-    return issues;
+    return { issues, observations };
   });
   register("reviseChapterFromQuality", async (id, chapterId) => {
     if (isGenerationActive(id)) {

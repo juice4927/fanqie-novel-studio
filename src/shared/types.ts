@@ -24,6 +24,10 @@ export const CHAPTER_FUNCTIONS = [
 ] as const;
 export type ChapterFunction = (typeof CHAPTER_FUNCTIONS)[number];
 
+export const GUIDANCE_MODES = ["自由", "均衡", "严谨"] as const;
+/** 创作自由度档位：决定提示词注入多少引导，以及写作采样温度。 */
+export type GuidanceMode = (typeof GUIDANCE_MODES)[number];
+
 export interface ProjectSummary {
   id: string;
   title: string;
@@ -210,6 +214,10 @@ export interface StoryContract extends GenreComposition {
   prohibitedPatterns: string[];
   majorStateChanges?: MajorStateChangeRules;
   aestheticProfile?: AestheticProfile;
+  /** 创作自由度：自由只给任务与硬边界，严谨注入全量题材参考。缺省为均衡。 */
+  guidanceMode?: GuidanceMode;
+  /** 作者补充引导（正向表述），作为写作偏好注入，不作为硬性禁写项。 */
+  creativeBrief?: string;
   version: number;
   approved: boolean;
   updatedAt: string;
@@ -331,6 +339,13 @@ export interface QualityIssue {
   createdAt: string;
 }
 
+export interface ChapterQualityReview {
+  /** 可处理的问题：会驱动改稿与状态门禁。 */
+  issues: QualityIssue[];
+  /** 统计观察：只展示，不生成问题、不驱动改稿。 */
+  observations: string[];
+}
+
 export interface ChangeRequest {
   id: string;
   targetKind: "创作契约" | "规划" | "章节";
@@ -430,6 +445,8 @@ export interface AiSettings {
   outputPricePerMillion: number;
   longTaskTimeoutMinutes: number;
   reasoningEffort?: AiReasoningEffort;
+  /** 写作任务采样温度覆盖，0–1.5；留空时按创作自由度档位推导。 */
+  temperatureOverride?: number;
 }
 
 export type AiJobStatus = "运行中" | "成功" | "失败" | "已取消" | "已中断";
@@ -568,6 +585,8 @@ export interface ContextPackage {
   relevantFacts: string;
   forbiddenKnowledge: string;
   authorStyle: string;
+  /** 本次上下文使用的创作自由度档位；缺省按均衡处理，用于推导写作温度。 */
+  guidanceMode?: GuidanceMode;
   estimatedTokens: number;
   diagnostics?: ContextDiagnostics;
 }
@@ -885,7 +904,7 @@ export interface AppApi {
   searchProject(id: string, query: string, offset?: number, limit?: number): Promise<SearchHit[]>;
   listRevisions(id: string, collection: RevisionRecord["collection"], entityId: string): Promise<RevisionRecord[]>;
   restoreRevision(id: string, revisionId: string): Promise<void>;
-  runQualityCheck(id: string, chapterId: string): Promise<QualityIssue[]>;
+  runQualityCheck(id: string, chapterId: string): Promise<ChapterQualityReview>;
   reviseChapterFromQuality(id: string, chapterId: string): Promise<Chapter>;
   extractChapterFacts(id: string, chapterId: string): Promise<LedgerFact[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;

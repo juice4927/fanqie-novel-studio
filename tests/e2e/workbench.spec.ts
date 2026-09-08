@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { COMMERCIAL_KNOWLEDGE_VERSION } from "../../src/shared/commercial-knowledge";
 
 const screenshotRoot = process.env.SCREENSHOT_DIR;
 
@@ -20,7 +21,7 @@ test("navigates through research and the complete project workflow", async ({ pa
   await page.getByRole("button", { name: "市场研究" }).click();
   await expect(page.getByRole("heading", { name: "榜单、样本与洞察" })).toBeVisible();
   await page.getByRole("button", { name: "商业知识" }).click();
-  await expect(page.getByText("cn-web-fiction.2026-07.v5-motif-balance")).toBeVisible();
+  await expect(page.getByText(COMMERCIAL_KNOWLEDGE_VERSION)).toBeVisible();
   for (const genre of ["都市脑洞", "玄幻/仙侠", "历史/架空", "现言甜宠", "古言宅斗", "年代重生"])
     await expect(page.getByText(genre, { exact: true }).first()).toBeVisible();
   if (screenshotRoot)

@@ -33,7 +33,7 @@ const contract: StoryContract = {
 describe("genre-specific local quality checks", () => {
   it("detects repeated genre payoff mechanisms across recent chapters", () => {
     const current = chapter(4, "围观震惊并打脸");
-    const issues = qualityCheck({
+    const { issues } = qualityCheck({
       projectId: "project",
       chapter: current,
       previousChapter: chapter(3, "围观震惊"),
@@ -46,12 +46,12 @@ describe("genre-specific local quality checks", () => {
     expect(issues.some((issue) => issue.category === "重复疲劳" && issue.message.includes("震惊循环"))).toBe(true);
   });
 
-  it("warns when a long chapter reads like a disembodied report", () => {
+  it("reports low narrative temperature as an observation instead of a problem", () => {
     const current = chapter(5, "核清田亩差额");
     current.content = "沈青禾翻开田册，逐项核对田亩与户数，随后把结果记入新册。".repeat(70);
     current.wordCount = current.content.length;
 
-    const issues = qualityCheck({
+    const result = qualityCheck({
       projectId: "project",
       chapter: current,
       recentChapters: [],
@@ -61,6 +61,25 @@ describe("genre-specific local quality checks", () => {
       originalityMatches: [],
     });
 
-    expect(issues.some((issue) => issue.category === "叙事温度" && issue.severity === "警告")).toBe(true);
+    expect(result.observations.some((item) => item.includes("具身情绪"))).toBe(true);
+    expect(result.issues.some((issue) => issue.category === "叙事温度")).toBe(false);
+  });
+
+  it("reports a short chapter as an observation instead of a problem", () => {
+    const current = chapter(6, "收尾");
+    current.wordCount = 900;
+
+    const result = qualityCheck({
+      projectId: "project",
+      chapter: current,
+      recentChapters: [],
+      facts: [],
+      contract,
+      genre: "都市脑洞",
+      originalityMatches: [],
+    });
+
+    expect(result.observations.some((item) => item.includes("900 字"))).toBe(true);
+    expect(result.issues.some((issue) => issue.category === "篇幅")).toBe(false);
   });
 });

@@ -10,6 +10,7 @@ import type {
   AestheticProfile,
   AestheticProfileSuggestion,
   AppApi,
+  GuidanceMode,
   ProjectDetail,
   StoryContract,
 } from "../shared/types";
@@ -46,6 +47,8 @@ const normalizeContract = (value: StoryContract): StoryContract => ({
   timelineAnchors: value.timelineAnchors ?? [],
   majorStateChanges: value.majorStateChanges ?? { include: [], exclude: [] },
   aestheticProfile: normalizeAestheticProfile(value.aestheticProfile),
+  guidanceMode: value.guidanceMode ?? "均衡",
+  creativeBrief: value.creativeBrief ?? "",
 });
 
 export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageProps) {
@@ -507,6 +510,26 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
             </div>
           </div>
         )}
+        <div className="form-grid two">
+          <Field label="创作自由度" hint="自由=只给本章任务与硬边界；均衡=加按需建议；严谨=注入全量题材参考">
+            <Select
+              value={contract.guidanceMode ?? "均衡"}
+              onChange={(event) => set("guidanceMode", event.target.value as GuidanceMode)}
+            >
+              <option value="自由">自由</option>
+              <option value="均衡">均衡</option>
+              <option value="严谨">严谨</option>
+            </Select>
+          </Field>
+          <Field label="补充引导" hint="正向表述；作为写作偏好注入，不是硬性禁写项">
+            <Textarea
+              rows={3}
+              value={contract.creativeBrief ?? ""}
+              onChange={(event) => set("creativeBrief", event.target.value)}
+              placeholder="如：我希望主角的每次胜利都伴随一个具体的麻烦"
+            />
+          </Field>
+        </div>
         <div className="form-grid two">
           <Field label="叙事距离" hint="镜头与人物内心的常态距离">
             <Select

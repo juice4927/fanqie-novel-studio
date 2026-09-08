@@ -256,7 +256,7 @@ function createDependencies(completion: Promise<Chapter> = new Promise(() => {})
   };
   const previewChapterBatch = vi.fn(() => batchPreview);
   const generateChapterBatch = vi.fn(async () => [chapter]);
-  const runLocalQualityCheck = vi.fn(async () => [localQualityIssue]);
+  const runLocalQualityCheck = vi.fn(async () => ({ issues: [localQualityIssue], observations: [] }));
   let idSequence = 0;
   const createId = vi.fn(() => `generated-${++idSequence}`);
   const currentTimestamp = vi.fn(() => "2026-07-31T01:00:00.000Z");
@@ -369,7 +369,7 @@ describe("AI handlers", () => {
     await saveApiKey("secret");
     registerAiHandlers(dependencies);
 
-    const issues = await handlers.get("runQualityCheck")!("project-1", qualityChapter.id);
+    const result = await handlers.get("runQualityCheck")!("project-1", qualityChapter.id);
 
     expect(runLocalQualityCheck).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -380,7 +380,7 @@ describe("AI handlers", () => {
         originalityMatches: [],
       }),
     );
-    expect(issues).toEqual([
+    expect(result.issues).toEqual([
       localQualityIssue,
       expect.objectContaining({
         category: "语义质检",
@@ -388,7 +388,8 @@ describe("AI handlers", () => {
         evidence: "cloud unavailable",
       }),
     ]);
-    expect(database.saveIssues).toHaveBeenCalledWith("project-1", qualityChapter.id, issues);
+    expect(result.observations).toEqual([]);
+    expect(database.saveIssues).toHaveBeenCalledWith("project-1", qualityChapter.id, result.issues);
     expect(database.transitionChapter).toHaveBeenCalledWith("project-1", qualityChapter.id, "待质检");
   });
 

@@ -38,6 +38,8 @@ export interface GenrePluginDefinition {
   targetAudience: string[];
   coreFantasies: string[];
   tabooBoundaries: string[];
+  /** 与 tabooBoundaries 一一对应的正向写法；写作提示词只用正向版，质检仍用原文匹配。 */
+  tabooAlternatives: string[];
   subtypes: GenreSubtype[];
   stages: Record<GenreStage, GenreStageRule>;
   conflictEngines: string[];
@@ -60,6 +62,11 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     targetAudience: ["偏好高概念和快反馈的移动端读者", "关注现实获益、身份变化与能力边界的成长型读者"],
     coreFantasies: ["用独特规则重写现实困境", "低位身份因能力获得可见反馈", "能力、资源和社会影响同步升级"],
     tabooBoundaries: ["金手指无边界且不付代价", "只靠围观震惊替代实际结果", "现实职业、财富和组织运行完全失真"],
+    tabooAlternatives: [
+      "能力有明确边界和代价：写收益时同时写出它消耗了什么。",
+      "让能力的结果落到具体的人、资源或处境上，而不只是旁人的反应。",
+      "写现实行业时给出可信的流程、成本和阻力，哪怕只用一个细节。",
+    ],
     subtypes: [
       {
         name: "系统成长",
@@ -194,6 +201,11 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     targetAudience: ["偏好升级获得感和世界探索的读者", "关注战力逻辑、资源竞争和大道选择的长线读者"],
     coreFantasies: ["从弱小到掌握自身命运", "突破带来解题方式质变", "探索更广世界并改写秩序"],
     tabooBoundaries: ["境界只涨数字不改变能力", "战力随剧情任意浮动", "资源凭空出现或地图无代价刷新"],
+    tabooAlternatives: [
+      "每次境界提升都带来一种可观察的新能力或新限制。",
+      "战力变化给出原因（状态、准备、环境或代价），让读者能预期。",
+      "资源的来路和消耗写清楚，让获取有过程。",
+    ],
     subtypes: [
       {
         name: "宗门升级",
@@ -306,6 +318,11 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     targetAudience: ["偏好权谋、经营和战争因果的读者", "在意制度可信度与群体命运变化的读者"],
     coreFantasies: ["用信息和组织能力突破时代限制", "建立可持续制度而非单次取巧", "个人决策改变势力与民生"],
     tabooBoundaries: ["现代知识无成本落地", "财政、人口、交通和军需凭空满足", "历史人物与势力失去自身目标"],
+    tabooAlternatives: [
+      "现代知识落地要经过材料、人手和权力的现实摩擦。",
+      "财政与后勤给出可信的来源或缺口，让计划带上代价。",
+      "每个势力按自己的利益行动，而不是为衬托主角存在。",
+    ],
     subtypes: [
       {
         name: "争霸经营",
@@ -436,6 +453,11 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     targetAudience: ["偏好稳定情绪价值和关系确认的读者", "重视成年人沟通、人格边界与共同成长的读者"],
     coreFantasies: ["被具体看见并坚定选择", "在亲密关系中保持独立成长", "双方共同抵御现实压力"],
     tabooBoundaries: ["控制、羞辱或侵犯边界被包装成爱", "靠拒绝沟通无限延长误会", "一方失去事业与人格只服务恋爱"],
+    tabooAlternatives: [
+      "关系推进建立在双方自愿和可撤回的边界上。",
+      "误会来自真实的信息差或处境，而不是拒绝开口。",
+      "两个角色各自保有事业、朋友和目标，关系是加法不是替代。",
+    ],
     subtypes: [
       {
         name: "职场恋爱",
@@ -567,6 +589,11 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     targetAudience: ["偏好家族权谋和女性成长的读者", "关注礼法、名分、财产与关系反转的读者"],
     coreFantasies: ["在受限身份中夺回生存与选择权", "用信息和规则让强权付出代价", "建立可控资源与可靠联盟"],
     tabooBoundaries: ["主角凭现代口号无视礼法后果", "证据和证人临时出现", "所有女性角色只围绕争宠互害"],
+    tabooAlternatives: [
+      "主角的每一步都计算礼法、名分和证据带来的实际后果。",
+      "证据的来路和持有者提前埋好，让翻盘有迹可循。",
+      "让对手有自己的处境和算计，冲突来自利益结构而非性别。",
+    ],
     subtypes: [
       {
         name: "家宅经营",
@@ -703,6 +730,11 @@ export const GENRE_PLUGINS: Record<Genre, GenrePluginDefinition> = {
     targetAudience: ["偏好生活改善、家庭成长和时代机会的读者", "关注物资细节、劳动过程与命运修正的读者"],
     coreFantasies: ["避开前世遗憾并保护重要的人", "靠劳动和判断逐步改善生活", "抓住时代变化但不脱离政策与物资边界"],
     tabooBoundaries: ["先知等于全知且永不衰减", "物价票证和政策混用年代", "靠囤货或投机一夜暴富而无风险"],
+    tabooAlternatives: [
+      "先知随时间和环境变化而衰减或失效，让主角重新学习。",
+      "时代细节用一个准确的生活成本或票据场景锚定。",
+      "暴富路径写出资金、渠道和人际风险，让收益带上代价。",
+    ],
     subtypes: [
       {
         name: "家庭修复",

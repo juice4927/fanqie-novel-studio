@@ -47,6 +47,11 @@ export function rejectsResponsesApi(status: number, detail: string) {
   return endpointMentioned && unsupported;
 }
 
+/** 输出上限被供应商拒绝：请求的 max_tokens / max_output_tokens 超过模型能力。 */
+export function rejectsOutputTokenLimit(status: number, detail: string) {
+  return status === 400 && /max[_\s-]?(?:output[_\s-]?)?tokens?/i.test(detail);
+}
+
 export function usesResponsesApi(model: string) {
   return /^gpt(?:-|$)/i.test(model.trim());
 }

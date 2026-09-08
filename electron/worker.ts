@@ -188,7 +188,13 @@ function repeatedPhrases(content: string) {
     .slice(0, 3);
 }
 
-export function qualityCheck(payload: QualityPayload): QualityIssue[] {
+export interface LocalQualityResult {
+  issues: QualityIssue[];
+  /** 统计观察：字数、重复表达、叙事温度等只展示，不生成问题、不驱动改稿。 */
+  observations: string[];
+}
+
+export function qualityCheck(payload: QualityPayload): LocalQualityResult {
   const {
     projectId,
     chapter,
@@ -200,6 +206,7 @@ export function qualityCheck(payload: QualityPayload): QualityIssue[] {
     originalityMatches,
   } = payload;
   const issues: QualityIssue[] = [];
+  const observations: string[] = [];
   const add = (severity: QualityIssue["severity"], category: string, message: string, evidence = "") =>
     issues.push({
       id: randomUUID(),
@@ -214,8 +221,8 @@ export function qualityCheck(payload: QualityPayload): QualityIssue[] {
     });
   if (!chapter.title.trim()) add("硬性", "章节完整性", "章节标题不能为空");
   if (!chapter.outline.trim()) add("警告", "章纲", "当前章节没有经过章纲约束");
-  if (chapter.wordCount < 1200) add("警告", "篇幅", `本章仅 ${chapter.wordCount} 字，可能不足以完成情节目标`);
-  if (chapter.wordCount > 4200) add("建议", "篇幅", `本章 ${chapter.wordCount} 字，建议检查移动端阅读节奏`);
+  if (chapter.wordCount < 1200) observations.push(`本章 ${chapter.wordCount} 字，低于建议的 1200 字。`);
+  if (chapter.wordCount > 4200) observations.push(`本章 ${chapter.wordCount} 字，偏长，可检查移动端阅读节奏。`);
   if (chapter.content && !/[？?!！…]$/.test(chapter.content.trim()))
     add("建议", "章末钩子", "章末缺少明显的问题、变化或未完成动作");
   if (chapter.isKeyChapter && chapter.batchMode === "五章批次") add("硬性", "审批模式", "关键章节必须切换为逐章审批");
@@ -223,15 +230,12 @@ export function qualityCheck(payload: QualityPayload): QualityIssue[] {
     if (chapter.content.includes(pattern)) add("硬性", "禁写清单", `正文命中禁写项：${pattern}`, pattern);
   }
   for (const phrase of repeatedPhrases(chapter.content))
-    add("建议", "重复表达", `短语“${phrase[0]}”在本章密集出现 ${phrase[1]} 次`, phrase[0]);
+    observations.push(`短语“${phrase[0]}”在本章密集出现 ${phrase[1]} 次。`);
   const aestheticProfile = normalizeAestheticProfile(contract.aestheticProfile);
   const temperature = analyzeProseTemperature(chapter.content, aestheticProfile.emotionalTemperature);
   if (temperature.lowTemperature) {
-    add(
-      "警告",
-      "叙事温度",
-      `本章的具身情绪与感官反馈低于本项目“${aestheticProfile.emotionalTemperature}”温度设定；请结合该书的情绪表达方式检查人物是否只承担说明和推进功能`,
-      `每千字具身情绪 ${temperature.embodiedEmotionPerThousand.toFixed(1)} 次，感官反馈 ${temperature.sensoryPerThousand.toFixed(1)} 次`,
+    observations.push(
+      `每千字具身情绪 ${temperature.embodiedEmotionPerThousand.toFixed(1)} 次、感官反馈 ${temperature.sensoryPerThousand.toFixed(1)} 次，低于本项目“${aestheticProfile.emotionalTemperature}”温度设定，仅作观察。`,
     );
   }
   for (const fact of facts.filter((item) => item.confidence === "有冲突")) {
@@ -278,7 +282,7 @@ export function qualityCheck(payload: QualityPayload): QualityIssue[] {
         fatigue.signals.filter((signal) => currentMechanism.includes(signal)).join("、"),
       );
   }
-  return issues;
+  return { issues, observations };
 }
 
 const cancelledTasks = new Set<string>();

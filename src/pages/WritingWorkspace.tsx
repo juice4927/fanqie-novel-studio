@@ -106,6 +106,7 @@ export function WritingPage({
     chapter: Chapter;
     previousChapter: Chapter;
     issues: QualityIssue[];
+    observations: string[];
     checking: boolean;
   } | null>(null);
   const [revertNote, setRevertNote] = useState("");
@@ -126,6 +127,7 @@ export function WritingPage({
     chapter: Chapter;
     previousContent: string;
     issues: QualityIssue[];
+    observations: string[];
     checking: boolean;
     adopted: boolean;
   }> | null>(null);
@@ -544,13 +546,19 @@ export function WritingPage({
     setBusy(true);
     try {
       const saved = await saveLatestForAction();
-      const issues = await api.runQualityCheck(project.summary.id, saved.id);
+      const review = await api.runQualityCheck(project.summary.id, saved.id);
+      const issues = review.issues;
       // 只有“草稿/待质检”才推进到待定稿；重复质检不应因状态机报错。
       const canAdvance = saved.status === "草稿" || saved.status === "待质检";
       if (canAdvance) await api.transitionChapter(project.summary.id, saved.id, "待定稿");
       await reload();
       const summary = issues.length ? `质检完成，发现 ${issues.length} 项问题` : "质检完成，未发现问题";
-      notify(canAdvance ? summary : `${summary}（当前状态“${saved.status}”，状态未变）`);
+      const observationNote = review.observations.length ? `，另有 ${review.observations.length} 条观察` : "";
+      notify(
+        canAdvance
+          ? `${summary}${observationNote}`
+          : `${summary}${observationNote}（当前状态“${saved.status}”，状态未变）`,
+      );
     } catch (error) {
       // 质检可能已经写入问题记录：失败时也要刷新，让问题列表可见。
       await reload().catch(() => undefined);
@@ -853,19 +861,27 @@ export function WritingPage({
                 setDraft(result);
                 setSaveStatus("saved");
                 await reload();
-                setReview({ chapter: result, previousChapter: beforeGeneration, issues: [], checking: true });
+                setReview({
+                  chapter: result,
+                  previousChapter: beforeGeneration,
+                  issues: [],
+                  observations: [],
+                  checking: true,
+                });
                 setReviewContext(null);
                 void api
                   .runQualityCheck(project.summary.id, result.id)
-                  .then((issues) =>
+                  .then((review) =>
                     setReview((current) =>
-                      current && current.chapter.id === result.id ? { ...current, issues, checking: false } : current,
+                      current && current.chapter.id === result.id
+                        ? { ...current, issues: review.issues, observations: review.observations, checking: false }
+                        : current,
                     ),
                   )
                   .catch(() =>
                     setReview((current) =>
                       current && current.chapter.id === result.id
-                        ? { ...current, issues: [], checking: false }
+                        ? { ...current, issues: [], observations: [], checking: false }
                         : current,
                     ),
                   );
@@ -1360,6 +1376,18 @@ export function WritingPage({
                       </li>
                     ))}
                   </ul>
+                  {review.observations.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <p style={{ opacity: 0.8 }}>观察（不构成问题，也不要求处理）</p>
+                      <ul style={{ paddingLeft: 18, marginTop: 4, opacity: 0.8 }}>
+                        {review.observations.map((item) => (
+                          <li key={item} style={{ marginBottom: 4 }}>
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1734,6 +1762,7 @@ export function WritingPage({
                         chapter,
                         previousContent: prior.get(chapter.id) ?? "",
                         issues: [],
+                        observations: [],
                         checking: true,
                         adopted: false,
                       })),
@@ -1741,9 +1770,10 @@ export function WritingPage({
                     void Promise.all(
                       result.map(async (chapter) => {
                         try {
-                          return { id: chapter.id, issues: await api.runQualityCheck(project.summary.id, chapter.id) };
+                          const review = await api.runQualityCheck(project.summary.id, chapter.id);
+                          return { id: chapter.id, issues: review.issues, observations: review.observations };
                         } catch {
-                          return { id: chapter.id, issues: [] as QualityIssue[] };
+                          return { id: chapter.id, issues: [] as QualityIssue[], observations: [] as string[] };
                         }
                       }),
                     ).then((checks) =>
@@ -1751,7 +1781,14 @@ export function WritingPage({
                         current
                           ? current.map((item) => {
                               const check = checks.find((entry) => entry.id === item.chapter.id);
-                              return check ? { ...item, issues: check.issues, checking: false } : item;
+                              return check
+                                ? {
+                                    ...item,
+                                    issues: check.issues,
+                                    observations: check.observations,
+                                    checking: false,
+                                  }
+                                : item;
                             })
                           : current,
                       ),

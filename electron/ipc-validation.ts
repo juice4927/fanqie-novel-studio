@@ -125,6 +125,8 @@ const contract = z
       })
       .strict()
       .optional(),
+    guidanceMode: z.enum(["自由", "均衡", "严谨"]).optional(),
+    creativeBrief: mediumText.optional(),
     version: z.number().int().min(0).max(1_000_000),
     approved: z.boolean(),
     updatedAt: timestamp,
@@ -595,6 +597,7 @@ const schemas = {
         outputPricePerMillion: z.number().min(0).max(1_000_000),
         longTaskTimeoutMinutes: z.number().int().min(5).max(15),
         reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+        temperatureOverride: z.number().min(0).max(1.5).optional(),
       })
       .strict(),
     z.string().max(10_000).optional(),

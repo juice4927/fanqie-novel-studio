@@ -1,4 +1,5 @@
 import { normalizeAestheticProfile } from "./aesthetic-profile";
+import { normalizeGuidanceMode } from "./guidance-mode";
 import type { ChangeRequest, StoryContract } from "./types";
 
 function contractContent(contract: StoryContract) {
@@ -31,6 +32,8 @@ function contractContent(contract: StoryContract) {
       exclude: [],
     },
     aestheticProfile: normalizeAestheticProfile(contract.aestheticProfile),
+    guidanceMode: normalizeGuidanceMode(contract.guidanceMode),
+    creativeBrief: contract.creativeBrief ?? "",
   };
 }
 
@@ -47,6 +50,8 @@ export function prepareContractUpdate(previous: StoryContract, candidate: StoryC
     contract: {
       ...candidate,
       aestheticProfile: normalizeAestheticProfile(candidate.aestheticProfile),
+      guidanceMode: normalizeGuidanceMode(candidate.guidanceMode),
+      creativeBrief: candidate.creativeBrief?.trim() || undefined,
       approved: false,
       version: previous.version + 1,
       updatedAt,

@@ -150,5 +150,46 @@ export const QUALITY_BENCHMARK = {
         ],
       },
     },
+    {
+      fixture: {
+        id: "flat-but-valid",
+        title: "平淡但无硬伤的章节不得误报",
+        genre: "都市脑洞",
+        stage: "中期",
+        chapter:
+          "林舟把录音笔收进外套内袋，沿走廊走到尽头。值班室的灯亮着，他隔着玻璃看了两分钟，确认里面只有一个人。回程路上他买了两个包子，边吃边把今天的见闻记进本子。明天还要来一次。",
+        contextEvidence: ["本章为过渡章，章纲只要求确认值班室人员，不要求兑现冲突。"],
+        expectedIssues: [],
+        forbiddenIssueTerms: ["平淡", "文风", "节奏缓慢", "缺少冲突", "情绪温度"],
+      },
+      baselineOutput: { issues: [] },
+    },
+    {
+      fixture: {
+        id: "setup-chapter-no-payoff",
+        title: "蓄势章未兑现回报不得判为问题",
+        genre: "玄幻/仙侠",
+        stage: "扩张",
+        chapter:
+          "沈砚在丹房外站了很久，手里那封信始终没有拆。师父说过，赤炎炉的火候要等三天，他数着日子，把每一味药材都重新称了一遍。夜里他梦见炉火熄灭，醒来时天还没亮。",
+        contextEvidence: ["本章章纲标注为蓄势章，回报预计在第 47 章兑现。"],
+        expectedIssues: [],
+        forbiddenIssueTerms: ["回报落空", "未兑现", "缺乏回报", "没有爽点"],
+      },
+      baselineOutput: { issues: [] },
+    },
+    {
+      fixture: {
+        id: "observation-only-length",
+        title: "字数与密度偏低只作观察",
+        genre: "年代重生",
+        stage: "追读",
+        chapter: "许棠把最后一针收好，布料叠成方块。她数了数剩下的线，够再做两件。",
+        contextEvidence: ["本章目标字数为 2200，实际偏短；无契约或事实冲突。"],
+        expectedIssues: [],
+        forbiddenIssueTerms: ["字数", "篇幅", "过短", "感官密度", "具身情绪"],
+      },
+      baselineOutput: { issues: [] },
+    },
   ] satisfies QualityBenchmarkCase[],
 } as const;

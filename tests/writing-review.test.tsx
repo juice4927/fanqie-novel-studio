@@ -36,7 +36,7 @@ async function mountWritingPage(overrides: Partial<AppApiLike> = {}) {
     ...baseApi,
     getChapter: vi.fn(async (_id: string, chapterId: string) => project.chapters.find((item) => item.id === chapterId)),
     generateChapterDraft: vi.fn(async () => generated),
-    runQualityCheck: vi.fn(async () => []),
+    runQualityCheck: vi.fn(async () => ({ issues: [], observations: [] })),
     transitionChapter: vi.fn(async (_id: string, _chapterId: string, status: string) => ({
       chapter: { ...generated, status },
       ledgerExtraction: { status: "不适用", candidateCount: 0 },
@@ -104,7 +104,7 @@ describe("AI generated draft review (director mode)", () => {
       createdAt: "2026-09-03T00:00:00.000Z",
     };
     const { api, unmount } = await mountWritingPage({
-      runQualityCheck: vi.fn(async () => [hardIssue]),
+      runQualityCheck: vi.fn(async () => ({ issues: [hardIssue], observations: [] })),
     });
     try {
       await userEvent.click(await screen.findByRole("button", { name: "AI 生成草稿" }));

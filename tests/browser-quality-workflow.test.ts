@@ -34,12 +34,12 @@ describe("browser quality workflow", () => {
     const project = await api.getProject("demo-project");
 
     expect(project.issues.find((item) => item.id === "issue-1")?.status).toBe("已解决");
-    expect(project.issues.find((item) => item.id === first[0].id)?.status).toBe("已解决");
-    expect(project.issues.find((item) => item.id === second[0].id)?.status).toBe("待处理");
-    expect(project.issues.filter((item) => item.status === "待处理")).toHaveLength(second.length);
+    expect(project.issues.find((item) => item.id === first.issues[0].id)?.status).toBe("已解决");
+    expect(project.issues.find((item) => item.id === second.issues[0].id)?.status).toBe("待处理");
+    expect(project.issues.filter((item) => item.status === "待处理")).toHaveLength(second.issues.length);
     expect(project.summary.updatedAt).toBe(savedAt);
 
-    await api.resolveIssue("demo-project", second[0].id, "已忽略");
+    await api.resolveIssue("demo-project", second.issues[0].id, "已忽略");
     await expect(api.resolveIssue("demo-project", "missing", "已解决")).rejects.toThrow("质检项不存在");
   });
 
@@ -52,8 +52,8 @@ describe("browser quality workflow", () => {
     storedState = JSON.stringify(state);
 
     const reloaded = createBrowserApi();
-    const issues = await reloaded.runQualityCheck("demo-project", "demo-chapter-1");
-    const hardIssue = issues.find((item) => item.severity === "硬性")!;
+    const review = await reloaded.runQualityCheck("demo-project", "demo-chapter-1");
+    const hardIssue = review.issues.find((item) => item.severity === "硬性")!;
     const project = await reloaded.getProject("demo-project");
 
     expect(project.chapters[0].batchMode).toBe("逐章");

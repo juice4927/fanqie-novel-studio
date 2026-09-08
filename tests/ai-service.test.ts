@@ -354,7 +354,7 @@ describe("AI provider routing", () => {
     expect(body).toMatchObject({
       model: "gpt-5.1",
       reasoning: { effort: "low" },
-      max_output_tokens: 10_000,
+      max_output_tokens: 12_000,
       store: false,
       instructions: expect.any(String),
       input: expect.any(String),
@@ -438,11 +438,32 @@ describe("AI provider routing", () => {
 
     await expect(
       new AiService(databaseFor("gpt-5.1"), () => "secret").reviewChapter(project, chapter, context),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ issues: [], observations: [] });
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "https://api.example.com/v1/responses",
       "https://api.example.com/v1/chat/completions",
     ]);
+  });
+
+  it("retries with a smaller output limit when the provider rejects max_tokens", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("max_tokens is too large for this model", { status: 400 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [] }) } }] }), {
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new AiService(databaseFor("deepseek-chat"), () => "secret").reviewChapter(project, chapter, context),
+    ).resolves.toEqual({ issues: [], observations: [] });
+
+    const first = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const second = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(first.max_tokens).toBe(12_000);
+    expect(second.max_tokens).toBe(8192);
   });
 
   it("does not retry a paid model response when AI audit persistence fails", async () => {
@@ -504,7 +525,7 @@ describe("AI provider routing", () => {
 
     await expect(
       new AiService(database, () => "secret", 120_000, 0, log).reviewChapter(project, chapter, context),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ issues: [], observations: [] });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(finishAiJob).toHaveBeenCalledOnce();
@@ -739,7 +760,7 @@ describe("AI provider routing", () => {
 
     await expect(
       new AiService(database, () => "sk-ant-secret").reviewChapter(project, chapter, context),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ issues: [], observations: [] });
 
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/messages");
     const headers = fetchMock.mock.calls[0][1]?.headers as Record<string, string>;
@@ -752,7 +773,7 @@ describe("AI provider routing", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(body).toMatchObject({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 8192,
+      max_tokens: 12_000,
       stream: true,
       system: expect.stringContaining("只返回合法 JSON"),
       messages: [{ role: "user", content: expect.any(String) }],
@@ -1263,7 +1284,7 @@ describe("semantic quality review", () => {
       estimatedTokens: 10,
     } satisfies ContextPackage;
 
-    const issues = await service.reviewChapter(project, chapter, context);
+    const { issues } = await service.reviewChapter(project, chapter, context);
 
     expect(issues).toMatchObject([
       { projectId: "project-1", chapterId: "chapter-3", severity: "硬性", category: "知识边界", status: "待处理" },
@@ -1342,7 +1363,7 @@ describe("semantic quality review", () => {
       estimatedTokens: 10,
     } satisfies ContextPackage;
 
-    expect((await service.reviewChapter(project, chapter, context))[0].severity).toBe("警告");
+    expect((await service.reviewChapter(project, chapter, context)).issues[0].severity).toBe("警告");
   });
 
   it("revises a chapter from pending issues and returns it to quality review", async () => {

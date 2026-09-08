@@ -114,6 +114,7 @@ describe("per-book isolation and gates", () => {
     expect(database.getAiSettings().longTaskTimeoutMinutes).toBe(10);
     expect(database.getAiSettings().protocol).toBe("openai-compatible");
     expect(database.getAiSettings().reasoningEffort).toBeUndefined();
+    expect(database.getAiSettings().temperatureOverride).toBeUndefined();
     const { hasApiKey: _hasApiKey, ...current } = database.getAiSettings();
     expect(
       database.saveAiSettings({
@@ -123,6 +124,7 @@ describe("per-book isolation and gates", () => {
         model: "claude-model",
         longTaskTimeoutMinutes: 15,
         reasoningEffort: "high",
+        temperatureOverride: 0,
       }),
     ).toMatchObject({
       protocol: "anthropic-messages",
@@ -130,7 +132,11 @@ describe("per-book isolation and gates", () => {
       model: "claude-model",
       longTaskTimeoutMinutes: 15,
       reasoningEffort: "high",
+      temperatureOverride: 0,
     });
+    // 清空后必须回到 undefined，而不是被 Number("") 解析成 0。
+    const { hasApiKey: _key, ...saved } = database.getAiSettings();
+    expect(database.saveAiSettings({ ...saved, temperatureOverride: undefined }).temperatureOverride).toBeUndefined();
   });
 
   it("records AI usage and marks abandoned running jobs as interrupted", () => {

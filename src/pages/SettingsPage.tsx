@@ -279,6 +279,25 @@ export function SettingsPage({
               </Select>
             </Field>
           )}
+          <Field
+            label="写作温度覆盖（可选）"
+            hint="0–1.5；留空时按作品的创作自由度推导（自由 0.95 / 均衡 0.85 / 严谨 0.70），只影响正文生成"
+          >
+            <Input
+              type="number"
+              min={0}
+              max={1.5}
+              step="0.05"
+              value={settings.temperatureOverride ?? ""}
+              placeholder="留空按自由度档位"
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  temperatureOverride: event.target.value === "" ? undefined : Number(event.target.value),
+                })
+              }
+            />
+          </Field>
           <div className="form-grid two">
             <Field label="输入价格 / 百万 Token">
               <Input

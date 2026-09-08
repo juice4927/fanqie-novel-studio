@@ -1,6 +1,7 @@
 import { compileAestheticGuidance } from "./aesthetic-profile";
-import { compileCommercialGuidance, resolveStoryStage } from "./commercial-knowledge";
-import { buildContextDiagnostics } from "./context-diagnostics";
+import { compileChapterGuidance, resolveStoryStage } from "./commercial-knowledge";
+import { buildContextDiagnostics, type ContextContentKey } from "./context-diagnostics";
+import { normalizeGuidanceMode } from "./guidance-mode";
 import { findCurrentVolume } from "./planning";
 import { analyzeProseTemperature } from "./prose-temperature";
 import { evaluateStoryConstraints } from "./story-constraints";
@@ -41,6 +42,12 @@ export type ProjectContextSource = Pick<
 
 const styleSampleStatuses = new Set<Chapter["status"]>(["已定稿", "待发布", "已发布"]);
 
+/**
+ * 上下文默认预算：正常项目远低于此值，只有长篇后期（长期记忆 + 80 条事实 + 30 章滚动章纲）
+ * 才会触发按优先级裁剪，避免把无上限的上下文塞给模型。
+ */
+export const DEFAULT_CONTEXT_BUDGET_TOKENS = 16_000;
+
 export function buildProjectContextInput(
   project: ProjectContextSource,
   chapter: Chapter,
@@ -73,8 +80,12 @@ export function compileProjectChapterContext(
   return compileChapterContext(buildProjectContextInput(project, chapter, relevantFacts));
 }
 
-export function compileChapterContext(input: ContextCompilerInput): ContextPackage {
+export function compileChapterContext(
+  input: ContextCompilerInput,
+  options: { budgetTokens?: number } = {},
+): ContextPackage {
   const { chapter, contract, summary } = input;
+  const budgetTokens = options.budgetTokens ?? DEFAULT_CONTEXT_BUDGET_TOKENS;
   const directorNotes = (input.directorNotes ?? []).filter(Boolean).slice(-20);
   const approvedPlans = input.plans
     .filter((plan) => plan.status === "已批准")
@@ -132,18 +143,44 @@ export function compileChapterContext(input: ContextCompilerInput): ContextPacka
       `终局：${contract.ending}`,
       `不可破坏规则：${contract.immutableRules.join("；") || "无"}`,
       `禁写项：${contract.prohibitedPatterns.join("；") || "无"}`,
+      ...(contract.creativeBrief?.trim()
+        ? [`作者补充引导（写作偏好，非硬性禁写项）：${contract.creativeBrief.trim()}`]
+        : []),
       `项目审美：\n${compileAestheticGuidance(contract.aestheticProfile)}`,
     ].join("\n"),
-    commercialGuidance: compileCommercialGuidance(summary.genre, chapter.number, {
-      currentWords: summary.currentWords,
-      targetWords: summary.targetWords,
-      subtype: contract.genreSubtype,
-      fanqieCategoryKey: contract.fanqieCategoryKey,
-      secondaryGenres: contract.secondaryGenres,
-      genreElements: contract.genreElements,
-      customGenreDirection: contract.customGenreDirection,
-      storyStage: resolveStoryStage(input.plans, summary.currentWords),
-    }),
+    commercialGuidance: compileChapterGuidance(
+      summary.genre,
+      chapter.number,
+      {
+        currentWords: summary.currentWords,
+        targetWords: summary.targetWords,
+        subtype: contract.genreSubtype,
+        fanqieCategoryKey: contract.fanqieCategoryKey,
+        secondaryGenres: contract.secondaryGenres,
+        genreElements: contract.genreElements,
+        customGenreDirection: contract.customGenreDirection,
+        storyStage: resolveStoryStage(input.plans, summary.currentWords),
+      },
+      contract.guidanceMode,
+      {
+        chapterFunction: chapter.chapterFunction ?? "行动",
+        isKeyChapter: chapter.isKeyChapter,
+        hasApprovedStructure: Boolean(volume) || Boolean(resolveStoryStage(input.plans, summary.currentWords)),
+        chapterText: [
+          chapter.outline,
+          chapter.chapterPromise,
+          chapter.expectedPayoff,
+          chapter.crisis,
+          chapter.endingExpectation,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        recentChapterTexts: input.recentChapters
+          .filter((item) => item.number < chapter.number)
+          .slice(-6)
+          .map((item) => item.outline),
+      },
+    ),
     chapterIntent: [
       `本章承诺：${chapter.chapterPromise || "未填写"}`,
       `预期回报：${chapter.expectedPayoff || "未填写"}`,
@@ -196,6 +233,7 @@ export function compileChapterContext(input: ContextCompilerInput): ContextPacka
         ? [`作者近期纠错偏好（后续写作必须遵守）：\n${directorNotes.map((note) => `- ${note}`).join("\n")}`]
         : []),
     ].join("\n"),
+    guidanceMode: normalizeGuidanceMode(contract.guidanceMode),
     estimatedTokens: 0,
   };
   context.estimatedTokens = estimateStructuredRequestTokens([
@@ -203,6 +241,7 @@ export function compileChapterContext(input: ContextCompilerInput): ContextPacka
     chapter.outline,
     chapter.chapterFunction ?? "行动",
   ]);
+  const trimmedSections = applyContextBudget(context, budgetTokens);
 
   const confirmedConflicts = input.constraintFacts.filter((fact) => fact.confidence === "有冲突");
   const constraintFindings = evaluateStoryConstraints(input.constraintFacts, chapter);
@@ -230,6 +269,7 @@ export function compileChapterContext(input: ContextCompilerInput): ContextPacka
       authorStyle: { includedItems: styleSamples.length, totalItems: styleSamples.length },
     },
     [
+      trimmedSections.length ? `已按 token 预算裁剪：${trimmedSections.join("、")}` : "",
       !contract.approved ? "创作契约尚未审批，生成门禁应阻止使用未确认方向" : "",
       missingIntent ? `本章商业意图缺少 ${missingIntent} 项` : "",
       !volume ? "当前章节没有已批准分卷目标" : "",
@@ -245,4 +285,53 @@ function contextText(context: ContextPackage) {
   return Object.values(context)
     .filter((value): value is string => typeof value === "string")
     .join("\n");
+}
+
+/** 按优先级裁剪的上下文段：文风统计与长期记忆先让位，硬边界永不裁剪。 */
+const TRIM_ORDER = [
+  "authorStyle",
+  "longTermMemory",
+  "recentSummary",
+  "relevantFacts",
+  "expectationLedger",
+  "rollingOutline",
+] as const satisfies readonly ContextContentKey[];
+
+function applyContextBudget(context: ContextPackage, budgetTokens: number): ContextContentKey[] {
+  const trimmed: ContextContentKey[] = [];
+  for (const key of TRIM_ORDER) {
+    if (context.estimatedTokens <= budgetTokens) break;
+    if (!context[key].trim()) continue;
+    context[key] = "";
+    trimmed.push(key);
+    context.estimatedTokens = estimateStructuredRequestTokens([contextText(context)]);
+  }
+  return trimmed;
+}
+
+const CONTEXT_SECTION_TITLES = [
+  ["chapterIntent", "本章任务"],
+  ["rollingOutline", "滚动章纲"],
+  ["contract", "创作契约与审美"],
+  ["commercialGuidance", "题材引导"],
+  ["volumeGoal", "当前卷目标"],
+  ["expectationLedger", "跨章期待"],
+  ["recentSummary", "近期摘要"],
+  ["longTermMemory", "长期记忆"],
+  ["relevantFacts", "相关事实"],
+  ["authorStyle", "作者文风参考"],
+  ["forbiddenKnowledge", "角色未知信息（边界）"],
+] as const satisfies ReadonlyArray<readonly [ContextContentKey, string]>;
+
+/**
+ * 把上下文渲染成分节标签文本，替代 JSON.stringify：
+ * 键名与转义不再占用 token，模型读到的是一份写作简报而不是数据校验表。
+ */
+export function renderContextForPrompt(context: ContextPackage): string {
+  return CONTEXT_SECTION_TITLES.map(([key, title]) => {
+    const value = context[key]?.trim();
+    return value ? `## ${title}\n${value}` : "";
+  })
+    .filter(Boolean)
+    .join("\n\n");
 }

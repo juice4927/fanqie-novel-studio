@@ -1,9 +1,11 @@
 import { getFanqieCategoryProfile } from "./fanqie-taxonomy";
 import { compileGenreComposition, type GenreComposition } from "./genre-composition";
 import { GENRE_PLUGINS, type GenreStage } from "./genre-plugins";
+import { resolveGuidanceLevel } from "./guidance-mode";
+import { formatRetrievedGuidance, type GuidanceSignal, retrieveGuidance } from "./guidance-retrieval";
 import type { Genre } from "./types";
 
-export const COMMERCIAL_KNOWLEDGE_VERSION = "cn-web-fiction.2026-07.v5-motif-balance";
+export const COMMERCIAL_KNOWLEDGE_VERSION = "cn-web-fiction.2026-09.v7-on-demand";
 
 export interface CommercialKnowledgeSource {
   title: string;
@@ -105,6 +107,11 @@ export function resolveGenreStage(chapterNumber: number, progress?: CommercialPr
   return "扩张";
 }
 
+/**
+ * 全量题材参考：包含阶段规则、工具箱与检查清单。
+ * 只用于规划、概念生成、拆解与质检这类"需要清单"的任务；
+ * 写作任务的上下文请用 compileChapterGuidance，避免清单压过本章任务。
+ */
 export function compileCommercialGuidance(genre: Genre, chapterNumber: number, progress?: CommercialProgress) {
   const plugin = GENRE_PLUGINS[genre];
   const phase = resolveGenreStage(chapterNumber, progress);
@@ -140,7 +147,8 @@ export function compileCommercialGuidance(genre: Genre, chapterNumber: number, p
       : []),
     `目标读者：${plugin.targetAudience.join("；")}`,
     `基础题材母题（按需选用，不是固定套路）：${plugin.coreFantasies.join("；")}`,
-    `禁忌边界：${plugin.tabooBoundaries.join("；")}`,
+    `正向边界：${plugin.tabooAlternatives.join("；")}`,
+    `（禁止的反面：${plugin.tabooBoundaries.join("；")}）`,
     ...(progress?.storyStage
       ? [
           `项目阶段目标：${progress.storyStage.goal}`,
@@ -169,6 +177,29 @@ export function compileCommercialGuidance(genre: Genre, chapterNumber: number, p
     ...plugin.qualityChecks.map((item) => `- ${item}`),
     "使用边界：密度和字数仅用于观察，不作为机械硬门禁；不得为制造钩子破坏人物动机、事实或创作契约。成本、资源与后果是抽象约束，不得在作者未指定时反复具象为债务、欠款、账目、清算或同类财务母题。",
   ].join("\n");
+}
+
+/**
+ * 写作任务上下文的题材引导入口：默认不注入任何通用商业知识，
+ * 只有命中信号（重复疲劳、关键章/高潮/揭秘、缺少已批准结构）时才按需取 1–2 条；
+ * 严谨档返回完整题材参考，供作者显式选择"要清单"的场景。
+ */
+export function compileChapterGuidance(
+  genre: Genre,
+  chapterNumber: number,
+  progress?: CommercialProgress,
+  mode?: string | null,
+  signal?: Omit<GuidanceSignal, "chapterNumber" | "phase">,
+): string {
+  const level = resolveGuidanceLevel(mode);
+  if (level.fullReference) return compileCommercialGuidance(genre, chapterNumber, progress);
+  if (!level.retrieval || !signal) return "";
+  const items = retrieveGuidance(genre, {
+    ...signal,
+    chapterNumber,
+    phase: resolveGenreStage(chapterNumber, progress),
+  });
+  return formatRetrievedGuidance(items);
 }
 
 export function compileDeconstructionFramework(genre: Genre) {

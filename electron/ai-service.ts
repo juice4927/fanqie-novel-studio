@@ -6,10 +6,19 @@ import {
   compileDeconstructionFramework,
   resolveStoryStage,
 } from "../src/shared/commercial-knowledge";
-import { contextForModel } from "../src/shared/context-diagnostics";
+import { renderContextForPrompt } from "../src/shared/context-compiler";
 import { AppError, isAppError } from "../src/shared/error-codes";
+import { getFanqieCategoryProfile } from "../src/shared/fanqie-taxonomy";
 import { NARRATIVE_GENRES } from "../src/shared/genre-composition";
 import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
+import {
+  compileBeatSuggestion,
+  compileGuidanceModeInstruction,
+  compileIntensityHint,
+  guidanceCharacterWindow,
+  guidanceTemperature,
+  resolveGuidanceLevel,
+} from "../src/shared/guidance-mode";
 import { chapterRevisionSnapshot, contractFieldText, planRevisionSnapshot } from "../src/shared/novel-revision";
 import { PROMPT_VERSION } from "../src/shared/prompt-version";
 import { parseStoryNumber } from "../src/shared/story-constraints";
@@ -20,6 +29,7 @@ import type {
   BookConceptSkeleton,
   Chapter,
   ChapterDraftStreamEvent,
+  ChapterQualityReview,
   ConceptCandidate,
   ContextPackage,
   InsightPack,
@@ -87,6 +97,7 @@ import {
   readChatCompletionStream,
   readResponsesStream,
   rejectsJsonMode,
+  rejectsOutputTokenLimit,
   rejectsResponsesApi,
   rejectsStreaming,
   supportsReasoning,
@@ -147,6 +158,8 @@ export class AiService {
     cachePolicy?: AiCachePolicy;
     onJobStarted?: (jobId: string) => void;
     onCacheHit?: () => void;
+    /** 写作任务的创作自由度档位，用于推导采样温度。 */
+    guidanceMode?: string;
   }): Promise<T> {
     const settings = this.database.getAiSettings();
     const apiKey = this.getApiKey();
@@ -207,7 +220,12 @@ export class AiService {
     // A saved setting is the author's global preference; task defaults only
     // apply to older workspaces that have no persisted preference.
     const reasoningEffort = settings.reasoningEffort ?? options.reasoningEffort ?? "medium";
-    const maxOutputTokens = options.taskType === "draft-chapter" ? 12_000 : options.longTask ? 10_000 : 6_000;
+    const maxOutputTokens = options.taskType === "draft-chapter" ? 16_000 : options.longTask ? 12_000 : 8_000;
+    let requestMaxTokens = maxOutputTokens;
+    const draftTemperature = () =>
+      typeof settings.temperatureOverride === "number"
+        ? Math.min(1.5, Math.max(0, settings.temperatureOverride))
+        : guidanceTemperature(options.guidanceMode);
     this.activeRequests.set(jobId, controller);
     const telemetry = (status?: "失败" | "已取消") => ({
       ...cumulativeUsage,
@@ -277,8 +295,8 @@ export class AiService {
                 useAnthropic
                   ? {
                       model: settings.model,
-                      max_tokens: 8192,
-                      temperature: options.taskType === "draft-chapter" ? 0.85 : 0.35,
+                      max_tokens: requestMaxTokens,
+                      temperature: options.taskType === "draft-chapter" ? draftTemperature() : 0.35,
                       ...(useStreaming ? { stream: true } : {}),
                       system: `${options.system}\n只返回合法 JSON，不使用 Markdown。`,
                       messages: [{ role: "user", content: `${options.user}${repairInstruction}` }],
@@ -287,7 +305,7 @@ export class AiService {
                     ? {
                         model: settings.model,
                         ...(supportsReasoning(settings.model) ? { reasoning: { effort: reasoningEffort } } : {}),
-                        max_output_tokens: maxOutputTokens,
+                        max_output_tokens: requestMaxTokens,
                         store: false,
                         ...(useStreaming ? { stream: true } : {}),
                         instructions: `${options.system}\n只返回合法 JSON，不使用 Markdown。`,
@@ -296,8 +314,8 @@ export class AiService {
                       }
                     : {
                         model: settings.model,
-                        max_tokens: maxOutputTokens,
-                        temperature: options.taskType === "draft-chapter" ? 0.85 : 0.35,
+                        max_tokens: requestMaxTokens,
+                        temperature: options.taskType === "draft-chapter" ? draftTemperature() : 0.35,
                         ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
                         ...(useStreaming ? { stream: true } : {}),
                         ...(useStreaming && includeStreamUsage ? { stream_options: { include_usage: true } } : {}),
@@ -370,6 +388,17 @@ export class AiService {
                 reason: "JSON mode unsupported",
               });
               useJsonMode = false;
+              attempt -= 1;
+              continue;
+            }
+            if (requestMaxTokens > 8192 && rejectsOutputTokenLimit(response.status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", {
+                jobId,
+                taskType: options.taskType,
+                attempt: httpAttempt,
+                reason: "max output tokens above model limit",
+              });
+              requestMaxTokens = 8192;
               attempt -= 1;
               continue;
             }
@@ -520,12 +549,17 @@ export class AiService {
         }
         if (lastCode === "PROVIDER_TRUNCATED" || lastError.startsWith("模型输出达到 Anthropic max_tokens")) {
           try {
-            this.database.finishAiJob(jobId, "", lastError, telemetry("失败"));
+            this.database.finishAiJob(
+              jobId,
+              "",
+              `${lastError}；请降低本章目标字数，或改用输出上限更大的模型。`,
+              telemetry("失败"),
+            );
           } finally {
             this.activeRequests.delete(jobId);
             this.cancelledJobs.delete(jobId);
           }
-          throw new Error(lastError);
+          throw new Error(`${lastError}；请降低本章目标字数，或改用输出上限更大的模型。`);
         }
         if ((lastCode === "PROVIDER_UNAVAILABLE" || lastError.startsWith("模型服务暂时不可用")) && attempt < 2) {
           try {
@@ -818,7 +852,7 @@ export class AiService {
       taskType: "generate-concepts",
       inputSummary: `${project.summary.title} 三案立项`,
       system:
-        "你是原创中国商业网文策划。你只能使用输入中的抽象市场洞察，不得假定、复原或模仿任何样本作品。三个方案必须在主角身份、核心矛盾和长篇发动机上明显不同，并能持续制造逐级升级的期待与回报。",
+        "你是原创中国商业网文策划。你只能使用输入中的抽象市场洞察，方案必须原创，不复原也不模仿任何样本作品。三个方案要在主角身份、核心矛盾和长篇发动机上明显不同，并能持续制造逐级升级的期待与回报。",
       user: `项目题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n商业知识：${compileCommercialGuidance(project.summary.genre, 1, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, fanqieCategoryKey: project.contract.fanqieCategoryKey, secondaryGenres: project.contract.secondaryGenres, genreElements: project.contract.genreElements, customGenreDirection: project.contract.customGenreDirection })}\n番茄市场机会（仅作证据，不得机械追热点）：${JSON.stringify(marketOpportunities)}\n脱敏洞察：${JSON.stringify(insights)}\n输出 candidates 数组，每项包含 title、oneLinePitch、audience、coreConflict、differentiation、longFormCapacity、originalityRisk。longFormCapacity 必须说明冲突、资源/关系/地图或规则如何至少三轮升级；每个方案要说明如何借鉴市场机会的读者需求但避开同质化。`,
       schema: CandidateSchema,
     });
@@ -831,7 +865,7 @@ export class AiService {
     const defaultMotifBoundary = allowDebtAccounting
       ? "作者已明确选择债务或账目相关内容，可以据此创作，但仍需避免重复套路。"
       : "作者没有选择债务或账目题材。不得把债务、欠款、欠薪、讨债、催收、还债、清账、旧账、账本或清算作为人物困境、开局钩子、能力隐喻、冲突主线或成长载体；请从身份、生存、竞争、关系、规则、探索、技艺、责任或外部危机中选择更贴合题材的压力。";
-    const system = `你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案不得共享同一套升级换皮结构：主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机至少有四项实质不同。genreSubtype 必须分别概括三条不同路线，不得使用近义词伪装差异。书名应清楚传达题材、身份反差或核心看点，禁止照搬已有作品、热榜书名或独特设定。结局必须明确主线如何收束，不能只写开放式占位语。${defaultMotifBoundary}`;
+    const system = `你是面向番茄小说的原创商业网文总编。为没有书名和完整创意的作者提供三套可立项方案。三案要在主角身份、核心矛盾、关系结构、开局触发、成长载体、主要回报和长篇发动机中至少有四项实质不同，避免共享同一套升级换皮结构。genreSubtype 分别概括三条不同路线，用词差异要对应真实差异。书名应清楚传达题材、身份反差或核心看点，并避开已有作品、热榜书名和独特设定。结局要明确主线如何收束，而不是开放式占位语。${defaultMotifBoundary}`;
     const baseUser = `平台主题材：${input.genre}\n复合叙事类型：${input.secondaryGenres?.join(" + ") || `未指定。三个方案必须从这些叙事主轴中选择互不相同的主轴：${NARRATIVE_GENRES.join("、")}`}\n题材元素：${input.genreElements?.join("、") || "未指定；不得默认使用系统、重生、血脉、退婚或宗门等常见开局"}\n自定义创作方向：${input.customGenreDirection?.trim() || "未指定"}\n目标字数：${input.targetWords}\n更新节奏：${input.updateCadence}\n作者灵感（可为空）：${input.seed.trim() || "无，请从题材规则独立原创"}\n可参考子类型（只作素材，不是固定答案；genreSubtype 可以原创）：${plugin.subtypes.map((item) => item.name).join("、")}\n可选题材母题（不得默认全部采用，也不得直接复述为方案卖点）：${plugin.coreFantasies.join("；")}\n目标读者：${plugin.targetAudience.join("；")}\n题材禁忌：${plugin.tabooBoundaries.join("；")}\n商业规则：${compileCommercialGuidance(input.genre, 1, { currentWords: 0, targetWords: input.targetWords, secondaryGenres: input.secondaryGenres, genreElements: input.genreElements, customGenreDirection: input.customGenreDirection })}\n输出 candidates，严格三项。先在内部为三案分别确定叙事主轴、开局机制、成长载体和主要回报，确认至少三项互不相同后再输出；不要把内部检查过程写入结果。若作者指定了复合类型，每个方案的 secondaryGenres 都必须包含作者所选类型，但三案仍须采用不同的冲突切入和长篇扩张方式。每项包含 title、premise、genreSubtype、secondaryGenres、genreElements、openingMechanism、growthCarrier、primaryPayoff、protagonistDesire、readerPromise、coreEmotion、ending、immutableRules、prohibitedPatterns、audience、commercialHook、longFormEngine。secondaryGenres 必须使用给定的叙事主轴枚举。长篇发动机需说明至少三轮冲突与回报升级；所有方案是原创草案，不引用或模仿具体作品。`;
     const run = (retryIssues?: string[]) =>
       this.runJson({
@@ -882,7 +916,7 @@ export class AiService {
       inputSummary: `${concept.title} 人物与世界骨架`,
       system: [
         "你是中文长篇小说的故事架构师。作者已经选定立项方案，现在只扩展这一本书的人物与世界骨架。",
-        "不得更换主角、核心矛盾、开局机制、成长载体、主要回报、长篇发动机或终局，不得偷偷加入系统、重生、血脉等未选择元素。",
+        "保持已确定的主角、核心矛盾、开局机制、成长载体、主要回报、长篇发动机和终局；系统、重生、血脉等元素只有在作者已经选择时才加入。",
         defaultMotifBoundary,
         "主角弧光必须写清起点认知、阶段转变、关键代价和终局状态。关键关系必须说明双方、初始张力、各自目标和不可替代作用。",
         "世界规则必须是会影响人物选择的职业、社会、能力、资源或超自然规则，并写清边界或代价。主要势力必须说明目标、资源和与主线的冲突位置。",
@@ -911,7 +945,7 @@ export class AiService {
         taskType: "generate-story-structure",
         inputSummary: `${project.summary.title} 自适应阶段与分卷`,
         system:
-          "你是中国商业网文总编。根据已审批契约规划作品自己的宏观阶段和分卷，只细化结构，不写正文。阶段数量与功能必须由核心矛盾、叙事主轴和长篇发动机决定，不得机械套用开篇、追读、扩张、中期、高潮、收束六阶段。每次阶段切换必须由不可逆状态变化触发，终局必须兑现契约。",
+          "你是中国商业网文总编。根据已审批契约规划作品自己的宏观阶段和分卷，只细化结构，不写正文。阶段数量与功能由核心矛盾、叙事主轴和长篇发动机决定，每个阶段用本书自己的事件命名和驱动；阶段切换绑定不可逆的状态变化，终局兑现契约。",
         user: `${shared}\n输出 stages（4至8项）和 volumes（3至6项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。阶段标题必须是本书专属事件或状态，不得直接使用“开篇、追读、扩张、中期、高潮、收束”。各阶段目标字数之和应接近项目目标。`,
         schema: StructurePlanningSchema,
         longTask: true,
@@ -966,7 +1000,7 @@ export class AiService {
         taskType: "generate-chapter-plans",
         inputSummary: `${project.summary.title} 第${batchStart}-${batchStart + batchCount - 1}章章纲`,
         system:
-          "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。先判断每章承担行动、调查、关系、经营、训练、生存、群像、氛围、过渡、揭秘或高潮中的哪种主要功能，再决定节奏。章节必须承接上一章，但关系、调查、氛围和过渡章可以通过认知、情绪、证据、关系或气氛积累推进，不得强塞打斗、反转或即时胜利。相邻章节的功能、场景数量和回报形态应有变化。",
+          "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。先判断每章承担行动、调查、关系、经营、训练、生存、群像、氛围、过渡、揭秘或高潮中的哪种主要功能，再决定节奏。章节要承接上一章的状态与悬念；关系、调查、氛围和过渡章可以通过认知、情绪、证据、关系或气氛积累推进，推进方式贴合本章功能。相邻章节在功能、场景数量和回报形态上保持变化。",
         user: `${shared}\n本次任务前面刚生成且必须承接的章纲：${JSON.stringify(priorChapters)}\n从第${batchStart}章开始，严格输出${batchCount}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterFunction、targetWords、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter 和 scenes。chapterFunction 必须使用规定枚举；targetWords 在 1400–3500 之间，按内容密度决定，不要全都相同；scenes 为 1–5 个真正需要的场景，每个包含 title、goal、conflict、outcome、targetWords，标题必须是本章具体事件，不得使用“入场、对抗、转向”等通用功能名。关系或氛围章可以只有 1–2 场，高潮章可以 4–5 场。各场景目标字数之和应接近本章 targetWords。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
         schema: ChapterPlanningSchema,
         longTask: true,
@@ -1068,8 +1102,8 @@ export class AiService {
         "你是中文长篇小说的规划审稿总编。审核规划能否在不依赖作者脑补的情况下连续执行，并给出最小必要修复。",
         "逐项检查：宏观阶段与分卷是否覆盖契约；上下级目标是否一致；事件是否有原因、行动、反作用与结果；人物行动是否符合欲望和已知信息；设定与事实是否冲突；相邻章节是否重复同一功能和解法；期待是否有兑现位置；场景与篇幅是否匹配。",
         "关系、调查、氛围和过渡章不要求强冲突或即时胜利，但必须有可识别的认知、关系、证据、情绪或环境推进。不得用商业节奏名义把所有章节改成同一种结构。",
-        "只依据输入指出问题。evidence 必须引用输入中的具体文字或编号，禁止编造缺失设定。没有证据的问题不要输出。",
-        "修复必须保留 targetId，只改真正有问题的字段；不得改变核心契约、擅自新增关键设定或重写本来合理的节点。对全局问题可以只给 issue，不得伪造 targetId。",
+        "只依据输入指出问题。evidence 引用输入中的具体文字或编号，让每条结论可复核；没有证据的推测不要输出。",
+        "修复要保留 targetId，只改真正有问题的字段，保持核心契约和本来合理的节点不变；全局性问题只给 issue，不要伪造 targetId。",
       ].join("\n"),
       user: `审核范围：第${input.fromChapter}-${toChapter}章\n创作契约：${JSON.stringify(project.contract)}\n规划节点：${JSON.stringify(reviewedPlans)}\n章节章纲：${JSON.stringify(reviewedChapters.map((chapter) => ({ id: chapter.id, number: chapter.number, title: chapter.title, outline: chapter.outline, chapterFunction: chapter.chapterFunction, targetWords: chapter.targetWords, chapterPromise: chapter.chapterPromise, expectedPayoff: chapter.expectedPayoff, crisis: chapter.crisis, endingExpectation: chapter.endingExpectation, expectationTargetChapter: chapter.expectationTargetChapter, status: chapter.status })))}\n已确认事实：${JSON.stringify(project.facts.slice(-100))}\n期待账本：${JSON.stringify(project.expectations.filter((item) => item.status === "待兑现" || item.status === "部分兑现" || (item.sourceChapter >= input.fromChapter && item.sourceChapter <= toChapter)).slice(0, 100))}\n输出 summary、verdict、issues、planRepairs、chapterRepairs。修复对象必须来自输入 ID；每个 after 提供该对象修复后的完整可编辑字段。`,
       schema: PlanningReviewSchema,
@@ -1344,19 +1378,41 @@ export class AiService {
   ): Promise<Chapter> {
     let currentAttempt = 0;
     const targetCharacters = Math.min(3500, Math.max(1400, chapter.targetWords ?? 2300));
-    const minimumCharacters = Math.max(900, Math.round(targetCharacters * 0.68));
-    const maximumCharacters = Math.min(4800, Math.round(targetCharacters * 1.35));
+    const characterWindow = guidanceCharacterWindow(targetCharacters, context.guidanceMode);
     const chapterFunction = chapter.chapterFunction ?? "行动";
+    const level = resolveGuidanceLevel(context.guidanceMode);
     let result: z.infer<ReturnType<typeof chapterDraftSchema>>;
     try {
       result = await this.runJson({
         projectId,
         taskType: "draft-chapter",
         inputSummary: `第${chapter.number}章 ${chapter.title || "未命名"}`,
-        system:
-          "你是中文长篇商业网文协作写作者。严格遵守已审批创作契约、项目审美、章纲和事实账本，不自行改纲，不引入上下文之外的关键设定，不泄露角色尚未知晓的信息。商业知识用于明确目标、压力、行动、回报影响和续读问题，不能凌驾于人物逻辑、契约或本书审美。项目审美是本书唯一的文风基准：冷峻、克制、均衡、热烈都可能是正确答案，不得默认采用清冷克制风，也不得把任一温度写成所有作品共用的模板。",
-        user: `本章主要功能：${chapterFunction}\n本章章纲：${chapter.outline}\n上下文包：${JSON.stringify(contextForModel(context))}\n请输出 title 和 content。正文目标约 ${targetCharacters} 个非空白字符，完整结果必须落在 ${minimumCharacters}-${maximumCharacters} 个非空白字符内。按本章功能完成有效推进：行动、生存、经营或高潮章应产生可观察的局势变化；调查、关系、群像、氛围或过渡章可以通过证据重排、认知变化、关系位移、情绪积累或环境信息完成推进。每个主要场景先明确角色当下目标，再让选择带来可见的收益、代价或新风险；不要用连续概述替代关键选择、冲突和关系变化。不得为了显得刺激而强塞冲突、打脸或反转。若本章承担回报，展示其实际影响；若只承担蓄势，不要提前透支回报。把上下文中的叙事距离、情绪温度、文字质地、对话风格、情绪表达和标志手法落实到具体句段。遵守审美避用项，并以符合本章功能的自然余波结束。`,
-        schema: chapterDraftSchema(minimumCharacters, maximumCharacters),
+        system: [
+          "你是这本书的协作写作者，和作者共同完成一部长篇网文。",
+          "首要任务是让本章读起来像这本书的一部分：延续已定稿正文的语感、节奏和人物声音，完成本章承诺，让读者愿意读下一章。",
+          "以人物逻辑为先：角色的选择要能追溯到他的目标、处境和已知信息。",
+          "契约、事实账本和知识边界是硬边界，只在冲突时让步；题材惯例、商业工具和密度统计都是参考，不构成必须逐条满足的清单。",
+          "文风由本书的审美设定和已定稿正文决定；冷峻、克制、均衡、热烈都可能正确，取决于这本书选择了什么。",
+          compileGuidanceModeInstruction(context.guidanceMode),
+        ].join("\n"),
+        user: [
+          "【本章】",
+          `第${chapter.number}章 · 功能：${chapterFunction}`,
+          `章纲：${chapter.outline}`,
+          "",
+          "【推进建议】",
+          ...(level.beatSuggestion ? [compileBeatSuggestion(chapterFunction)] : []),
+          compileIntensityHint(chapter.isKeyChapter),
+          "",
+          "【写作上下文】",
+          renderContextForPrompt(context),
+          "",
+          "【长度参考】",
+          `约 ${targetCharacters} 字（参考区间 ${characterWindow.minimum}-${characterWindow.maximum} 字），以完成本章任务为准，不必凑数。`,
+          "输出 title 和 content。",
+        ].join("\n"),
+        schema: chapterDraftSchema(800, 6000),
+        guidanceMode: context.guidanceMode,
         retryContext: options.retryContext,
         timeoutMs: 300_000,
         stream: true,
@@ -1448,21 +1504,38 @@ export class AiService {
       });
   }
 
-  async reviewChapter(project: ProjectDetail, chapter: Chapter, context: ContextPackage): Promise<QualityIssue[]> {
+  async reviewChapter(
+    project: ProjectDetail,
+    chapter: Chapter,
+    context: ContextPackage,
+  ): Promise<ChapterQualityReview> {
+    const fanqieCategory = getFanqieCategoryProfile(project.contract?.fanqieCategoryKey);
     const result = await this.runJson({
       projectId: project.summary.id,
       taskType: "quality-review",
       inputSummary: `第${chapter.number}章语义质检`,
       system: [
-        "你是中文长篇网络小说的严格审校员。只报告能够引用本章证据的问题，不做文风偏好式改写。",
-        "检查：章纲兑现、人物动机、事件因果、设定与状态一致性、角色知识边界、重复信息、节奏停滞、读者承诺、具体压力、主动行动、情绪回报、回报实际影响与章末推动力。每个主要场景都应至少改变一项可追踪状态（目标、关系、资源、认知或风险）；如果叙述用概述跳过了本应呈现的关键选择、代价或关系位移，也要报告。",
+        "你是这本书的审校伙伴。目标不是挑出尽可能多的问题，而是找出真正会伤害阅读体验或破坏连续性的地方。",
+        "必须报告（有可验证证据才报）：违反契约不可破坏规则、与事实账本矛盾、角色使用尚未获得的信息、与研究样本重合。",
+        "可以报告（仅当明显影响阅读时才报，最多 5 条）：节奏停滞、重复信息、动机断裂、回报落空、章末缺乏推动力。",
         `项目审美设定：${compileAestheticGuidance(project.contract?.aestheticProfile)}`,
-        "审美质检必须以本项目设定为标准，不得把某一种叙事温度或人物表达方式当成通用优点。只有正文与明确设定冲突，或在未设专项审美时出现严重影响可读性的失衡，才标记审美类问题并引用证据。",
+        "审美类问题只在本项目设定被明确违反时报告，不要把某一种叙事温度当成通用优点。",
         `题材专项检查：${GENRE_PLUGINS[project.summary.genre].qualityChecks.join("；")}。`,
-        "只有正文明确违反已审批契约、事实账本或知识边界时才标记为硬性；可以优化但不构成矛盾的问题标记为警告或建议。",
-        "evidence 必须是本章中的简短原文或明确的契约/事实条目。没有可验证问题时返回空数组。",
+        ...(fanqieCategory ? [`分类专属检查：${fanqieCategory.qualityChecks.join("；")}。`] : []),
+        "不要报告：文风偏好、可以更好但不算错的写法、把统计值当缺陷。",
+        "统计观察（字数、情绪温度、感官密度、对话密度、重复短语）写入 observations，不要放进 issues。",
+        "evidence 必须是本章中的简短原文或明确的契约/事实条目。没有可验证问题时 issues 返回空数组。",
       ].join("\n"),
-      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(contextForModel(context))}\n正文：\n${chapter.content.slice(0, 16000)}\n输出 issues 数组，每项包含 severity、category、message、evidence。优先报告可通过正文原句或上下文条目复核的问题，避免把个人偏好当成缺陷。`,
+      user: [
+        `题材：${project.summary.genre}`,
+        `章节：第${chapter.number}章 ${chapter.title}`,
+        `章纲：${chapter.outline}`,
+        "上下文：",
+        renderContextForPrompt(context),
+        "正文：",
+        chapter.content.slice(0, 16000),
+        "输出 issues 与 observations。issues 每项包含 severity、category、message、evidence；observations 只写观察到的数据或现象，不写建议动作。",
+      ].join("\n"),
       schema: QualityReviewSchema,
       longTask: true,
       stream: true,
@@ -1478,20 +1551,23 @@ export class AiService {
     ]
       .join("\n")
       .replace(/\s+/g, "");
-    return result.issues.map((issue) => {
-      const evidence = issue.evidence.trim();
-      const supported = evidence.length >= 4 && evidenceSource.includes(evidence.replace(/\s+/g, ""));
-      return {
-        ...issue,
-        severity: issue.severity === "硬性" && !supported ? ("警告" as const) : issue.severity,
-        evidence,
-        id: randomUUID(),
-        projectId: project.summary.id,
-        chapterId: chapter.id,
-        status: "待处理" as const,
-        createdAt: now(),
-      };
-    });
+    return {
+      issues: result.issues.map((issue) => {
+        const evidence = issue.evidence.trim();
+        const supported = evidence.length >= 4 && evidenceSource.includes(evidence.replace(/\s+/g, ""));
+        return {
+          ...issue,
+          severity: issue.severity === "硬性" && !supported ? ("警告" as const) : issue.severity,
+          evidence,
+          id: randomUUID(),
+          projectId: project.summary.id,
+          chapterId: chapter.id,
+          status: "待处理" as const,
+          createdAt: now(),
+        };
+      }),
+      observations: result.observations.map((item) => item.trim()).filter(Boolean),
+    };
   }
 
   async reviseChapter(
@@ -1502,18 +1578,37 @@ export class AiService {
   ): Promise<Chapter> {
     const pending = issues.filter((issue) => issue.status === "待处理");
     if (!pending.length) throw new Error("本章没有可供 AI 修订的待处理问题");
+    const hasHard = pending.some((issue) => issue.severity === "硬性");
+    const scope = hasHard
+      ? "允许跨场景修改，只要不引入新的硬性冲突。"
+      : pending.length >= 3
+        ? "允许适度重组场景顺序或合并场景，不必只做局部替换。"
+        : "以最小改动为主，保留原章已经成立的写法。";
     const result = await this.runJson({
       projectId: project.summary.id,
       taskType: "revise-chapter-quality",
       inputSummary: `第${chapter.number}章按质检修订`,
       system: [
-        "你是中文长篇商业网文修订编辑。只修复列出的质检问题，保留原章目标、事件结果、人物动机、叙事视角和未被指出的有效内容。",
-        "不得改纲、增加上下文之外的关键设定、改变已确认事实或泄露角色未知秘密。硬性问题必须修复；警告和建议在不破坏原意时修复。",
+        "你是这本书的修订编辑，和作者一起把这一章改好。",
+        "先判断每个问题属于哪一层：硬性问题必须修复，改动可以跨场景；引导性问题以最小代价解决，但如果问题根源在结构（例如节奏停滞来自场景功能重复），可以重组场景顺序、合并或替换场景。",
+        "修复时不要引入新的硬性冲突：契约、事实账本和知识边界是硬边界。",
+        "保留原章中未被指出且有效的部分，也保留本章已经成立的人物声音和有效细节。",
         `项目审美设定：${compileAestheticGuidance(project.contract?.aestheticProfile)}`,
-        "若问题涉及审美或叙事温度，只按本项目设定修复，不得擅自把人物改得更克制、更热烈、更幽默或更煽情。",
+        "涉及审美或叙事温度时只按本项目设定修复，不要擅自把人物改得更克制、更热烈、更幽默或更煽情。",
         "输出完整修订稿，不输出修改说明。title 没有必要时保持不变。",
       ].join("\n"),
-      user: `题材：${project.summary.genre}\n章节：第${chapter.number}章 ${chapter.title}\n章纲：${chapter.outline}\n上下文：${JSON.stringify(contextForModel(context))}\n待处理问题：${JSON.stringify(pending.map((issue) => ({ severity: issue.severity, category: issue.category, message: issue.message, evidence: issue.evidence })))}\n原正文：\n${chapter.content.slice(0, 16000)}\n输出 title 和完整 content。`,
+      user: [
+        `题材：${project.summary.genre}`,
+        `章节：第${chapter.number}章 ${chapter.title}`,
+        `章纲：${chapter.outline}`,
+        "上下文：",
+        renderContextForPrompt(context),
+        `待处理问题：${JSON.stringify(pending.map((issue) => ({ severity: issue.severity, category: issue.category, message: issue.message, evidence: issue.evidence })))}`,
+        `改写幅度：${scope}`,
+        "原正文：",
+        chapter.content.slice(0, 16000),
+        "输出 title 和完整 content。",
+      ].join("\n"),
       schema: DraftSchema,
       longTask: true,
       stream: true,

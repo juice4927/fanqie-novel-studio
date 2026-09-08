@@ -34,6 +34,7 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
   const [issueScope, setIssueScope] = useState<"待处理" | "全部">("待处理");
   const [issueSeverity, setIssueSeverity] = useState<"全部" | "硬性" | "警告" | "建议">("全部");
   const [chapterAction, setChapterAction] = useState<{ id: string; kind: "质检" | "修订" } | null>(null);
+  const [observations, setObservations] = useState<{ chapterId: string; items: string[] } | null>(null);
   const [change, setChange] = useState<ChangeRequest>({
     id: "",
     targetKind: "创作契约",
@@ -126,8 +127,10 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
     setChapterAction({ id: chapter.id, kind });
     try {
       if (kind === "质检") {
-        await api.runQualityCheck(project.summary.id, chapter.id);
-        notify(`第${chapter.number}章质检已更新`);
+        const review = await api.runQualityCheck(project.summary.id, chapter.id);
+        setObservations({ chapterId: chapter.id, items: review.observations });
+        const observationNote = review.observations.length ? `，${review.observations.length} 条观察` : "";
+        notify(`第${chapter.number}章质检已更新（${review.issues.length} 项问题${observationNote}）`);
       } else {
         const revised = await api.reviseChapterFromQuality(project.summary.id, chapter.id);
         notify(`第${chapter.number}章 AI 修订已保存为 v${revised.revision}，请重新质检`);
@@ -333,6 +336,18 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
                 onUpdate={updateIssue}
                 emptyMessage={issueScope === "待处理" ? "这一章没有待处理问题" : "这一章还没有质检记录"}
               />
+              {observations?.chapterId === selectedReview?.chapter.id && observations.items.length > 0 && (
+                <div style={{ marginTop: 12, opacity: 0.85 }}>
+                  <h3 style={{ fontSize: 13, marginBottom: 6 }}>观察（不构成问题，也不要求处理）</h3>
+                  <ul style={{ paddingLeft: 18 }}>
+                    {observations.items.map((item) => (
+                      <li key={item} style={{ marginBottom: 4 }}>
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </section>
         ) : (

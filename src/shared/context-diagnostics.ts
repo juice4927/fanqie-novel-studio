@@ -11,7 +11,7 @@ export interface ContextSectionMetadata {
 
 export const CONTEXT_SECTION_LABELS: Record<ContextContentKey, string> = {
   contract: "创作契约",
-  commercialGuidance: "商业写作知识",
+  commercialGuidance: "题材引导",
   chapterIntent: "本章商业意图",
   expectationLedger: "期待兑现账本",
   longTermMemory: "长期摘要",
@@ -21,11 +21,12 @@ export const CONTEXT_SECTION_LABELS: Record<ContextContentKey, string> = {
   relevantFacts: "相关事实",
   forbiddenKnowledge: "禁止泄露信息",
   authorStyle: "作者自身文风统计",
+  guidanceMode: "引导档位",
 };
 
 const DEFAULT_METADATA: Record<ContextContentKey, ContextSectionMetadata> = {
   contract: { source: "已审批创作契约", reason: "约束故事前提、读者承诺和不可破坏规则" },
-  commercialGuidance: { source: "题材插件与当前阶段", reason: "提供当前题材阶段的冲突、回报和禁忌规则" },
+  commercialGuidance: { source: "题材插件与当前阶段", reason: "提供当前题材阶段的承诺、正向边界与按需工具" },
   chapterIntent: { source: "当前章纲", reason: "明确本章承诺、回报、危机和结尾期待" },
   expectationLedger: { source: "期待兑现账本", reason: "优先加载本章承接和仍待兑现的跨章期待" },
   longTermMemory: { source: "章节、阶段、分卷和全书摘要", reason: "保留超出近期章节窗口的长期因果" },
@@ -35,6 +36,7 @@ const DEFAULT_METADATA: Record<ContextContentKey, ContextSectionMetadata> = {
   relevantFacts: { source: "当前有效且已确认的状态事实", reason: "约束人物、关系、能力、资源、地点和时间线" },
   forbiddenKnowledge: { source: "当前有效秘密与知情范围", reason: "防止角色使用尚未获得的信息" },
   authorStyle: { source: "本项目最近二十章已定稿正文统计", reason: "保持作者自身叙事密度，不加载研究样本文风" },
+  guidanceMode: { source: "作品自由度档位", reason: "决定提示词注入量与写作采样温度" },
 };
 
 const EMPTY_MARKERS = /^(?:无|暂无|未填写|尚无|尚未)/;
@@ -50,7 +52,8 @@ export function buildContextDiagnostics(
   warnings: string[] = [],
 ): ContextDiagnostics {
   const sections = (Object.keys(CONTEXT_SECTION_LABELS) as ContextContentKey[]).map((key): ContextSectionDiagnostic => {
-    const value = context[key];
+    const raw = context[key];
+    const value = typeof raw === "string" ? raw : raw === undefined || raw === null ? "" : String(raw);
     const defaults = DEFAULT_METADATA[key];
     const details = { ...defaults, ...metadata[key] };
     const includedItems = details.includedItems ?? (value.trim() ? value.split(/\n+/).length : 0);

@@ -292,7 +292,8 @@ export const QualityReviewSchema = z.object({
         evidence: z.string().max(500),
       }),
     )
-    .max(12),
+    .max(8),
+  observations: z.array(z.string().min(1).max(300)).max(12).default([]),
 });
 
 export const FactCandidateSchema = z.object({
