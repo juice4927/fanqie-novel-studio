@@ -619,6 +619,11 @@ export class AiService {
               reason: lastError,
             });
             await abortableDelay(delayMs, controller.signal);
+            // 退避已经吃掉全部剩余预算时不再发起下一次请求（避免定时器提前触发导致多发一次）。
+            if (delayMs >= remainingMs) {
+              lastError = `模型请求超时：超过总时长上限（${Math.ceil(timeoutMs / 1000)} 秒）`;
+              break;
+            }
           } catch {
             lastError = "任务已取消";
             try {
