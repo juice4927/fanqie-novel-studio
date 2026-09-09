@@ -438,7 +438,7 @@ export function createBrowserApi(): AppApi {
     async getCategoryTags(categoryKey) {
       const profile = getFanqieCategoryProfile(categoryKey);
       if (!profile) return [];
-      return aggregateCategoryTags(state.rankings, profile.name);
+      return aggregateCategoryTags(state.rankings, profile.name, profile.channel);
     },
     async generateLaunchPack(projectId, options) {
       const project = getProject(state, projectId);

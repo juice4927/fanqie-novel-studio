@@ -28,6 +28,8 @@ describe("story constraints", () => {
     expect(parseStoryNumber("3.5万")).toBe(35000);
     expect(parseStoryNumber("三亿")).toBe(300_000_000);
     expect(parseStoryNumber("一亿三千万")).toBe(130_000_000);
+    expect(parseStoryNumber("2万5")).toBe(25_000);
+    expect(parseStoryNumber("5亿3")).toBe(530_000_000);
     expect(parseStoryNumber("两千三")).toBe(2300);
     expect(parseStoryNumber("一百二")).toBe(120);
     expect(parseStoryNumber("一万零三")).toBe(10_003);
@@ -68,6 +70,29 @@ describe("story constraints", () => {
         expect.objectContaining({ category: "资源守恒", severity: "硬性" }),
         expect.objectContaining({ category: "知识边界", severity: "警告" }),
       ]),
+    );
+  });
+
+  it("does not attribute an unnamed spend to every resource fact", () => {
+    const findings = evaluateStoryConstraints(
+      [
+        fact({ id: "money", kind: "资源", subject: "沈砚", predicate: "灵石余额", value: "两万枚灵石" }),
+        fact({ id: "pills", kind: "资源", subject: "沈砚", predicate: "丹药数量", value: "三枚" }),
+      ],
+      { number: 8, outline: "沈砚消耗了三万五，众人震惊。" },
+    );
+
+    expect(findings.filter((item) => item.category === "资源守恒")).toEqual([]);
+  });
+
+  it("still blocks an overspend when the outline names the resource", () => {
+    const findings = evaluateStoryConstraints(
+      [fact({ id: "money", kind: "资源", subject: "沈砚", predicate: "灵石余额", value: "两万枚灵石" })],
+      { number: 8, outline: "沈砚消耗了三万五千枚灵石，众人震惊。" },
+    );
+
+    expect(findings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ category: "资源守恒", severity: "硬性" })]),
     );
   });
 

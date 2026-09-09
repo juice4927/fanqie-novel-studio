@@ -254,7 +254,12 @@ export function qualityCheck(payload: QualityPayload): LocalQualityResult {
       `匿名研究引用 ${match.researchRef} / 指纹 ${match.fingerprint}`,
     );
   }
-  if (previousChapter && chapter.content.slice(0, 80) === previousChapter.content.slice(0, 80))
+  // 两章都还没写正文时 "" === "" 会误报；只有两侧都有正文才比较开头。
+  if (
+    previousChapter?.content.trim() &&
+    chapter.content.trim() &&
+    chapter.content.slice(0, 80) === previousChapter.content.slice(0, 80)
+  )
     add("硬性", "重复章节", "本章开头与上一章完全相同");
   const genreHints: Record<Genre, string[]> = {
     都市脑洞: ["反馈", "能力", "现实"],

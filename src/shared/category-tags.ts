@@ -23,10 +23,21 @@ const bookIdentity = (title: string, author: string) => `${title}::${author}`;
 /**
  * 聚合某个番茄分类在已采集榜单快照里的标签分布。
  * 只使用本地已采集的公开榜单数据，不发起任何网络请求。
+ * 传 channel 时按「频道 + 分类名」双重匹配，避免同名分类或子串
+ * （如"都市种田"命中"种田"）把别的频道数据混进来。
  */
-export function aggregateCategoryTags(snapshots: readonly RankingSnapshot[], categoryName: string): CategoryTagStat[] {
+export function aggregateCategoryTags(
+  snapshots: readonly RankingSnapshot[],
+  categoryName: string,
+  channel?: string,
+): CategoryTagStat[] {
   const matched = snapshots
-    .filter((snapshot) => snapshot.status === "成功" && snapshot.listName.includes(categoryName))
+    .filter(
+      (snapshot) =>
+        snapshot.status === "成功" &&
+        snapshot.listName.includes(categoryName) &&
+        (!channel || snapshot.listName.includes(channel)),
+    )
     .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt));
   if (!matched.length) return [];
   const latest = matched.at(-1)!;

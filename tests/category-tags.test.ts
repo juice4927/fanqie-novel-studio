@@ -52,4 +52,26 @@ describe("category tag aggregation", () => {
   it("exposes the top tags for the evidence panel", () => {
     expect(topCategoryTags(aggregateCategoryTags(snapshots, "都市脑洞"), 2)).toEqual(["系统流", "脑洞"]);
   });
+
+  it("does not mix snapshots from another channel or a longer category name", () => {
+    const mixed = [
+      ...snapshots,
+      {
+        ...snapshot("2026-09-09T00:00:00.000Z", [
+          entry({ id: "x", title: "女频种田书", author: "丁", rank: 1, tags: ["宅斗"] }),
+        ]),
+        listName: "番茄女频阅读榜·种田",
+      },
+      {
+        ...snapshot("2026-09-09T00:00:00.000Z", [
+          entry({ id: "y", title: "男频都市种田书", author: "戊", rank: 2, tags: ["经商"] }),
+        ]),
+        listName: "番茄男频阅读榜·都市种田",
+      },
+    ];
+
+    expect(aggregateCategoryTags(mixed, "种田", "女频").map((item) => item.tag)).toEqual(["宅斗"]);
+    expect(aggregateCategoryTags(mixed, "都市种田", "女频")).toEqual([]);
+    expect(aggregateCategoryTags(mixed, "都市种田", "男频").map((item) => item.tag)).toEqual(["经商"]);
+  });
 });

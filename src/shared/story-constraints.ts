@@ -40,7 +40,14 @@ export function parseStoryNumber(value: string): number | null {
   const arabic = value.match(/\d+(?:\.\d+)?\s*([十百千万亿])?/);
   if (arabic) {
     const multiplier = CHINESE_UNITS[arabic[1] ?? ""] ?? 1;
-    return Number(arabic[0].match(/\d+(?:\.\d+)?/)![0]) * multiplier;
+    const base = Number(arabic[0].match(/\d+(?:\.\d+)?/)![0]) * multiplier;
+    // “2万5”这类省略尾数：数字与单位后紧跟一位中文或阿拉伯数字时，按上一级单位补足。
+    const tailChar = multiplier > 10 ? value[(arabic.index ?? 0) + arabic[0].length] : undefined;
+    const tailDigit =
+      tailChar === undefined
+        ? undefined
+        : (CHINESE_DIGITS[tailChar] ?? (/^\d$/.test(tailChar) ? Number(tailChar) : undefined));
+    return tailDigit === undefined ? base : base + tailDigit * (multiplier / 10);
   }
   const text = value.match(/[零〇一二两三四五六七八九十百千万亿]+/)?.[0];
   if (!text) return null;
@@ -147,12 +154,9 @@ export function evaluateStoryConstraints(
     for (const spend of spends) {
       const amount = parseStoryNumber(spend[1]);
       const describedResource = compact(`${spend[2] ?? ""}${spend[3] ?? ""}`);
-      if (
-        amount === null ||
-        amount <= available ||
-        (!describedResource.includes(label) && !label.includes(describedResource))
-      )
-        continue;
+      if (amount === null || amount <= available) continue;
+      // 只写了金额（"消耗了三万五"）时无法判断花的是哪项资源，不能算到每一条资源账上。
+      if (!describedResource || (!describedResource.includes(label) && !label.includes(describedResource))) continue;
       add({
         id: `resource:${fact.id}:${spend.index}`,
         severity: "硬性",

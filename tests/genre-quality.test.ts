@@ -31,6 +31,41 @@ const contract: StoryContract = {
 };
 
 describe("genre-specific local quality checks", () => {
+  it("does not flag two chapters that are both still empty", () => {
+    const current = { ...chapter(3, ""), content: "" };
+    const previous = { ...chapter(2, ""), content: "" };
+    const { issues } = qualityCheck({
+      projectId: "project",
+      chapter: current,
+      previousChapter: previous,
+      recentChapters: [],
+      facts: [],
+      contract,
+      genre: "都市脑洞",
+      originalityMatches: [],
+    });
+
+    expect(issues.some((issue) => issue.category === "重复章节")).toBe(false);
+  });
+
+  it("flags identical openings when both chapters have content", () => {
+    const body = "主角推开旧城门，听见远处钟声在雨里回荡。".repeat(10);
+    const current = { ...chapter(3, ""), content: body };
+    const previous = { ...chapter(2, ""), content: body };
+    const { issues } = qualityCheck({
+      projectId: "project",
+      chapter: current,
+      previousChapter: previous,
+      recentChapters: [],
+      facts: [],
+      contract,
+      genre: "都市脑洞",
+      originalityMatches: [],
+    });
+
+    expect(issues.some((issue) => issue.category === "重复章节")).toBe(true);
+  });
+
   it("detects repeated genre payoff mechanisms across recent chapters", () => {
     const current = chapter(4, "围观震惊并打脸");
     const { issues } = qualityCheck({
