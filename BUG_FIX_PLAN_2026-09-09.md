@@ -237,5 +237,5 @@ fix(quality): ... (C1)
 
 **清理**：删除了审计子代理遗留的临时复现文件 `tests/_tmp-ui-review-repro.test.tsx`（未跟踪，断言的是修复前的旧行为）。
 
-**未做**：未提交、未推送（等你确认后可分批提交，提交信息见第八节）。
+**发布**：已提交为 7 个 commit（AI 接线 / 数据层 / 质量规则 / 写作台 / 前端状态 / 文档 / `chore(release): 0.6.1`），推送到 `main` 并打标签 `v0.6.1`；CI `release` 工作流（run 34300205298）verify 与 release-windows 全部通过，GitHub Release v0.6.1 为单个 Release、三件资产齐全（`fanqie-novel-studio-setup-0.6.1.exe` / `.blockmap` / `latest.yml`），`releases/latest` 指向 v0.6.1。
 
