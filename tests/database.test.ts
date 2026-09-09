@@ -549,7 +549,10 @@ describe("per-book isolation and gates", () => {
     databases.splice(databases.indexOf(database), 1);
 
     const legacy = new DatabaseSync(path.join(projectPath, "project.sqlite"));
-    legacy.exec("DROP TABLE chapter_contents; DROP TABLE chapters; PRAGMA user_version = 1;");
+    // 模拟只带 user_version 的历史库：同时清掉稳定 id 记账表，走历史播种路径。
+    legacy.exec(
+      "DROP TABLE chapter_contents; DROP TABLE chapters; DROP TABLE schema_migrations; PRAGMA user_version = 1;",
+    );
     const chapter = { ...createChapter(3, "迁移后仍需保留的正文"), id: crypto.randomUUID(), wordCount: 10 };
     legacy
       .prepare("INSERT INTO records(collection, id, payload, updated_at) VALUES('chapters', ?, ?, ?)")
@@ -1781,5 +1784,43 @@ describe("transaction rollback for batch writes", () => {
     ).toThrow("power loss");
     delete process.env.NOVEL_STUDIO_FAULTS;
     expect(database.listRankings()).toHaveLength(0);
+  });
+});
+
+describe("legacy catalog repair", () => {
+  it("补齐被版本记账跳过的 incubations 表与 projects.words_per_chapter 列", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "novel-studio-legacy-"));
+    roots.push(root);
+    // 复现线上工作区：迁移数组中间插入过条目，user_version 已到 9，
+    // 但 incubations 表与 words_per_chapter 列从未创建。
+    const legacy = new DatabaseSync(path.join(root, "catalog.sqlite"));
+    legacy.exec(`
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, genre TEXT NOT NULL, status TEXT NOT NULL,
+        target_words INTEGER NOT NULL, update_cadence TEXT NOT NULL,
+        safe_stock_line INTEGER NOT NULL DEFAULT 10,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE ai_jobs (
+        id TEXT PRIMARY KEY, project_id TEXT, task_type TEXT NOT NULL, input_hash TEXT NOT NULL,
+        prompt_version TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL,
+        input_summary TEXT NOT NULL, output TEXT, estimated_cost REAL NOT NULL DEFAULT 0,
+        error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+    `);
+    legacy.exec("PRAGMA user_version = 9");
+    legacy.close();
+
+    const database = new WorkspaceDatabase(root);
+    databases.push(database);
+    expect(database.listIncubations()).toEqual([]);
+    const project = database.createProject({
+      title: "旧库修复验证",
+      genre: "都市脑洞",
+      targetWords: 100000,
+      updateCadence: "每日1章",
+    });
+    expect(database.getProject(project.id).summary.wordsPerChapter).toBe(2500);
   });
 });

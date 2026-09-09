@@ -67,7 +67,7 @@ import type {
 } from "../src/shared/types";
 import { type ChapterGenerationGuard, chapterGenerationFingerprint } from "./ai-retry";
 import { injectFault } from "./fault-injection";
-import { hasColumn, runMigrations } from "./migration-runner";
+import { ensureStructure, hasColumn, runMigrations, type StructureSpec } from "./migration-runner";
 import type { AiJobCompletion } from "./repositories/ai-audit-repository";
 import { AiAuditRepository } from "./repositories/ai-audit-repository";
 import { AiProfileRepository } from "./repositories/ai-profile-repository";
@@ -120,6 +120,105 @@ interface CatalogRow {
   updated_at: string;
 }
 
+/**
+ * catalog 的权威结构：迁移与启动自检共用同一份定义。
+ * 启动自检负责兜底修复「迁移记账跳过了某条迁移」的历史工作区（见 migration-runner.ts）。
+ */
+const CATALOG_TABLES = {
+  projects: `CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        genre TEXT NOT NULL,
+        status TEXT NOT NULL,
+        target_words INTEGER NOT NULL,
+        words_per_chapter INTEGER NOT NULL DEFAULT 2500,
+        update_cadence TEXT NOT NULL,
+        safe_stock_line INTEGER NOT NULL DEFAULT 10,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );`,
+  settings: `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  ai_jobs: `CREATE TABLE IF NOT EXISTS ai_jobs (
+        id TEXT PRIMARY KEY, project_id TEXT, task_type TEXT NOT NULL, input_hash TEXT NOT NULL,
+        prompt_version TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL,
+        input_summary TEXT NOT NULL, output TEXT, estimated_cost REAL NOT NULL DEFAULT 0,
+        error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );`,
+  incubations: `CREATE TABLE IF NOT EXISTS incubations (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        step TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        project_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );`,
+  ai_profiles: `CREATE TABLE IF NOT EXISTS ai_profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            api_surface TEXT NOT NULL DEFAULT 'auto',
+            base_url TEXT NOT NULL,
+            default_model TEXT NOT NULL DEFAULT '',
+            auth_scheme TEXT NOT NULL DEFAULT 'bearer',
+            extra_headers TEXT NOT NULL DEFAULT '{}',
+            extra_query TEXT NOT NULL DEFAULT '{}',
+            local_endpoint INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            last_used_at TEXT,
+            last_test_at TEXT,
+            last_test_ok INTEGER,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );`,
+  ai_role_routes: `CREATE TABLE IF NOT EXISTS ai_role_routes (
+            role TEXT PRIMARY KEY,
+            profile_id TEXT,
+            model_id TEXT,
+            updated_at TEXT NOT NULL
+          );`,
+  model_capabilities: `CREATE TABLE IF NOT EXISTS model_capabilities (
+            profile_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            api_surface TEXT NOT NULL,
+            supports_json_schema INTEGER,
+            supports_json_mode INTEGER,
+            supports_streaming INTEGER,
+            supports_stream_usage INTEGER,
+            supports_reasoning INTEGER,
+            max_output_tokens INTEGER,
+            context_window INTEGER,
+            probed_at TEXT NOT NULL,
+            source TEXT NOT NULL,
+            PRIMARY KEY (profile_id, model_id, api_surface)
+          );`,
+} as const;
+
+const CATALOG_COLUMNS = {
+  projects: {
+    safe_stock_line: "INTEGER NOT NULL DEFAULT 10",
+    words_per_chapter: "INTEGER NOT NULL DEFAULT 2500",
+  },
+  ai_jobs: {
+    input_tokens: "INTEGER NOT NULL DEFAULT 0",
+    output_tokens: "INTEGER NOT NULL DEFAULT 0",
+    actual_cost: "REAL NOT NULL DEFAULT 0",
+    duration_ms: "INTEGER NOT NULL DEFAULT 0",
+    retry_context: "TEXT",
+    headers_at: "TEXT",
+    first_token_at: "TEXT",
+    completed_at: "TEXT",
+    chunk_count: "INTEGER NOT NULL DEFAULT 0",
+    attempt_count: "INTEGER NOT NULL DEFAULT 0",
+    profile_id: "TEXT",
+    role: "TEXT",
+  },
+} as const;
+
+const CATALOG_STRUCTURE: StructureSpec = { tables: CATALOG_TABLES, columns: CATALOG_COLUMNS };
+
 export class WorkspaceDatabase {
   readonly root: string;
   readonly projectsRoot: string;
@@ -162,141 +261,107 @@ export class WorkspaceDatabase {
 
   private initCatalog() {
     runMigrations(this.catalog, [
-      (db) =>
-        db.exec(`
-      CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        genre TEXT NOT NULL,
-        status TEXT NOT NULL,
-        target_words INTEGER NOT NULL,
-        words_per_chapter INTEGER NOT NULL DEFAULT 2500,
-        update_cadence TEXT NOT NULL,
-        safe_stock_line INTEGER NOT NULL DEFAULT 10,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS ai_jobs (
-        id TEXT PRIMARY KEY, project_id TEXT, task_type TEXT NOT NULL, input_hash TEXT NOT NULL,
-        prompt_version TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL,
-        input_summary TEXT NOT NULL, output TEXT, estimated_cost REAL NOT NULL DEFAULT 0,
-        error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_global_ai_jobs_dedupe ON ai_jobs(task_type, input_hash, prompt_version, model);
-      `),
-      (db) => {
-        if (!hasColumn(db, "projects", "safe_stock_line"))
-          db.exec("ALTER TABLE projects ADD COLUMN safe_stock_line INTEGER NOT NULL DEFAULT 10");
+      {
+        id: "catalog-0001-initial",
+        run: (db) =>
+          db.exec(
+            [
+              CATALOG_TABLES.projects,
+              CATALOG_TABLES.settings,
+              CATALOG_TABLES.ai_jobs,
+              "CREATE UNIQUE INDEX IF NOT EXISTS idx_global_ai_jobs_dedupe ON ai_jobs(task_type, input_hash, prompt_version, model);",
+            ].join("\n"),
+          ),
       },
-      (db) => {
-        if (!hasColumn(db, "projects", "words_per_chapter"))
-          db.exec("ALTER TABLE projects ADD COLUMN words_per_chapter INTEGER NOT NULL DEFAULT 2500");
+      {
+        id: "catalog-0002-safe-stock-line",
+        run: (db) => {
+          if (!hasColumn(db, "projects", "safe_stock_line"))
+            db.exec("ALTER TABLE projects ADD COLUMN safe_stock_line INTEGER NOT NULL DEFAULT 10");
+        },
       },
-      (db) =>
-        db.exec(`
-      CREATE TABLE IF NOT EXISTS incubations (
-        id TEXT PRIMARY KEY,
-        status TEXT NOT NULL,
-        step TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        project_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      `),
-      (db) => {
-        for (const column of [
-          "input_tokens INTEGER NOT NULL DEFAULT 0",
-          "output_tokens INTEGER NOT NULL DEFAULT 0",
-          "actual_cost REAL NOT NULL DEFAULT 0",
-          "duration_ms INTEGER NOT NULL DEFAULT 0",
-        ]) {
-          const name = column.split(" ")[0];
-          if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
-        }
+      {
+        id: "catalog-0003-words-per-chapter",
+        run: (db) => {
+          if (!hasColumn(db, "projects", "words_per_chapter"))
+            db.exec("ALTER TABLE projects ADD COLUMN words_per_chapter INTEGER NOT NULL DEFAULT 2500");
+        },
       },
-      (db) => {
-        db.exec("DROP INDEX IF EXISTS idx_global_ai_jobs_dedupe");
-        if (!hasColumn(db, "ai_jobs", "retry_context")) db.exec("ALTER TABLE ai_jobs ADD COLUMN retry_context TEXT");
-        db.exec(
-          "CREATE INDEX IF NOT EXISTS idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, model, status, updated_at)",
-        );
+      {
+        id: "catalog-0004-incubations",
+        run: (db) => db.exec(CATALOG_TABLES.incubations),
       },
-      (db) => {
-        db.exec("DROP INDEX IF EXISTS idx_global_ai_jobs_cache");
-        db.exec(
-          "CREATE INDEX idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, provider, model, status, updated_at)",
-        );
+      {
+        id: "catalog-0005-ai-job-tokens",
+        run: (db) => {
+          for (const column of [
+            "input_tokens INTEGER NOT NULL DEFAULT 0",
+            "output_tokens INTEGER NOT NULL DEFAULT 0",
+            "actual_cost REAL NOT NULL DEFAULT 0",
+            "duration_ms INTEGER NOT NULL DEFAULT 0",
+          ]) {
+            const name = column.split(" ")[0];
+            if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
+          }
+        },
       },
-      (db) => {
-        for (const column of [
-          "headers_at TEXT",
-          "first_token_at TEXT",
-          "completed_at TEXT",
-          "chunk_count INTEGER NOT NULL DEFAULT 0",
-          "attempt_count INTEGER NOT NULL DEFAULT 0",
-        ]) {
-          const name = column.split(" ")[0];
-          if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
-        }
-      },
-      (db) => {
-        db.exec(`
-          CREATE TABLE IF NOT EXISTS ai_profiles (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            api_surface TEXT NOT NULL DEFAULT 'auto',
-            base_url TEXT NOT NULL,
-            default_model TEXT NOT NULL DEFAULT '',
-            auth_scheme TEXT NOT NULL DEFAULT 'bearer',
-            extra_headers TEXT NOT NULL DEFAULT '{}',
-            extra_query TEXT NOT NULL DEFAULT '{}',
-            local_endpoint INTEGER NOT NULL DEFAULT 0,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            notes TEXT NOT NULL DEFAULT '',
-            last_used_at TEXT,
-            last_test_at TEXT,
-            last_test_ok INTEGER,
-            last_error TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+      {
+        id: "catalog-0006-ai-job-cache-index",
+        run: (db) => {
+          db.exec("DROP INDEX IF EXISTS idx_global_ai_jobs_dedupe");
+          if (!hasColumn(db, "ai_jobs", "retry_context")) db.exec("ALTER TABLE ai_jobs ADD COLUMN retry_context TEXT");
+          db.exec(
+            "CREATE INDEX IF NOT EXISTS idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, model, status, updated_at)",
           );
-          CREATE TABLE IF NOT EXISTS ai_role_routes (
-            role TEXT PRIMARY KEY,
-            profile_id TEXT,
-            model_id TEXT,
-            updated_at TEXT NOT NULL
+        },
+      },
+      {
+        id: "catalog-0007-ai-job-cache-provider",
+        run: (db) => {
+          db.exec("DROP INDEX IF EXISTS idx_global_ai_jobs_cache");
+          db.exec(
+            "CREATE INDEX idx_global_ai_jobs_cache ON ai_jobs(task_type, input_hash, prompt_version, provider, model, status, updated_at)",
           );
-          CREATE TABLE IF NOT EXISTS model_capabilities (
-            profile_id TEXT NOT NULL,
-            model_id TEXT NOT NULL,
-            api_surface TEXT NOT NULL,
-            supports_json_schema INTEGER,
-            supports_json_mode INTEGER,
-            supports_streaming INTEGER,
-            supports_stream_usage INTEGER,
-            supports_reasoning INTEGER,
-            max_output_tokens INTEGER,
-            context_window INTEGER,
-            probed_at TEXT NOT NULL,
-            source TEXT NOT NULL,
-            PRIMARY KEY (profile_id, model_id, api_surface)
+        },
+      },
+      {
+        id: "catalog-0008-ai-job-telemetry",
+        run: (db) => {
+          for (const column of [
+            "headers_at TEXT",
+            "first_token_at TEXT",
+            "completed_at TEXT",
+            "chunk_count INTEGER NOT NULL DEFAULT 0",
+            "attempt_count INTEGER NOT NULL DEFAULT 0",
+          ]) {
+            const name = column.split(" ")[0];
+            if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
+          }
+        },
+      },
+      {
+        id: "catalog-0009-ai-profiles",
+        run: (db) => {
+          db.exec(
+            [CATALOG_TABLES.ai_profiles, CATALOG_TABLES.ai_role_routes, CATALOG_TABLES.model_capabilities].join("\n"),
           );
-        `);
-        for (const column of ["profile_id TEXT", "role TEXT"]) {
-          const name = column.split(" ")[0];
-          if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
-        }
+          for (const column of ["profile_id TEXT", "role TEXT"]) {
+            const name = column.split(" ")[0];
+            if (!hasColumn(db, "ai_jobs", name)) db.exec(`ALTER TABLE ai_jobs ADD COLUMN ${column}`);
+          }
+        },
       },
     ]);
+    // 兜底修复历史上被版本记账跳过的结构（incubations 表、projects.words_per_chapter 等）。
+    ensureStructure(this.catalog, CATALOG_STRUCTURE);
   }
 
   private initResearch() {
     runMigrations(this.research, [
-      (db) =>
-        db.exec(`
+      {
+        id: "research-0001-initial",
+        run: (db) =>
+          db.exec(`
       CREATE TABLE IF NOT EXISTS ranking_snapshots (
         id TEXT PRIMARY KEY, source TEXT NOT NULL, list_name TEXT NOT NULL,
         captured_at TEXT NOT NULL, status TEXT NOT NULL, error TEXT
@@ -330,18 +395,24 @@ export class WorkspaceDatabase {
       );
       CREATE INDEX IF NOT EXISTS idx_research_fingerprints_hash ON research_fingerprints(hash);
       `),
-      (db) => {
-        for (const column of ["synopsis", "official_reader_url", "platform"])
-          if (!hasColumn(db, "ranking_entries", column))
-            db.exec(`ALTER TABLE ranking_entries ADD COLUMN ${column} TEXT`);
+      },
+      {
+        id: "research-0002-ranking-columns",
+        run: (db) => {
+          for (const column of ["synopsis", "official_reader_url", "platform"])
+            if (!hasColumn(db, "ranking_entries", column))
+              db.exec(`ALTER TABLE ranking_entries ADD COLUMN ${column} TEXT`);
+        },
       },
     ]);
   }
 
   private initProject(db: DatabaseSync) {
     runMigrations(db, [
-      (database) =>
-        database.exec(`
+      {
+        id: "project-0001-initial",
+        run: (database) =>
+          database.exec(`
       CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS records (
         collection TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -367,8 +438,11 @@ export class WorkspaceDatabase {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_jobs_dedupe ON ai_jobs(task_type, input_hash, prompt_version, model);
       `),
-      (database) =>
-        database.exec(`
+      },
+      {
+        id: "project-0002-chapter-tables",
+        run: (database) =>
+          database.exec(`
       CREATE TABLE chapters (
         id TEXT PRIMARY KEY,
         number INTEGER NOT NULL,
@@ -413,16 +487,20 @@ export class WorkspaceDatabase {
       INSERT INTO chapter_fts_tri(id, title, content)
       SELECT c.id, c.title, COALESCE(b.content, '') FROM chapters c LEFT JOIN chapter_contents b ON b.chapter_id = c.id;
       `),
-      (database) => {
-        if (!hasColumn(database, "embeddings", "provider_id"))
+      },
+      {
+        id: "project-0003-embedding-provider",
+        run: (database) => {
+          if (!hasColumn(database, "embeddings", "provider_id"))
+            database.exec(
+              `ALTER TABLE embeddings ADD COLUMN provider_id TEXT NOT NULL DEFAULT '${HASH_BIGRAM_PROVIDER_ID}'`,
+            );
+          if (!hasColumn(database, "embeddings", "dimensions"))
+            database.exec("ALTER TABLE embeddings ADD COLUMN dimensions INTEGER NOT NULL DEFAULT 192");
           database.exec(
-            `ALTER TABLE embeddings ADD COLUMN provider_id TEXT NOT NULL DEFAULT '${HASH_BIGRAM_PROVIDER_ID}'`,
+            "CREATE INDEX IF NOT EXISTS idx_embeddings_provider ON embeddings(source_type, provider_id, dimensions)",
           );
-        if (!hasColumn(database, "embeddings", "dimensions"))
-          database.exec("ALTER TABLE embeddings ADD COLUMN dimensions INTEGER NOT NULL DEFAULT 192");
-        database.exec(
-          "CREATE INDEX IF NOT EXISTS idx_embeddings_provider ON embeddings(source_type, provider_id, dimensions)",
-        );
+        },
       },
     ]);
   }
