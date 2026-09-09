@@ -122,6 +122,70 @@ describe("AI 来源路由", () => {
     expect(resolve("draft")).toMatchObject({ apiSurface: "openai-chat" });
   });
 
+  it("ignores a learned surface whose probe failed", () => {
+    const failed = {
+      profileId: "p-auto",
+      modelId: "deepseek-chat",
+      apiSurface: "openai-responses" as const,
+      supportsJsonSchema: false,
+      supportsJsonMode: false,
+      supportsStreaming: null,
+      supportsStreamUsage: null,
+      supportsReasoning: null,
+      maxOutputTokens: null,
+      contextWindow: null,
+      probedAt: "2026-09-08T00:00:00.000Z",
+      source: "probe" as const,
+    };
+    const resolve = createAiRouteResolver({
+      database: fakeDatabase({
+        profiles: [profile({ id: "p-auto", apiSurface: "auto" })],
+        defaultId: "p-auto",
+        capabilities: [
+          failed,
+          {
+            ...failed,
+            apiSurface: "openai-chat",
+            supportsJsonSchema: null,
+            supportsJsonMode: true,
+            probedAt: "2026-09-08T01:00:00.000Z",
+          },
+        ],
+      }),
+      getCredential: () => "k",
+    });
+
+    expect(resolve("draft")).toMatchObject({ apiSurface: "openai-chat" });
+  });
+
+  it("keeps auto when every learned row failed", () => {
+    const resolve = createAiRouteResolver({
+      database: fakeDatabase({
+        profiles: [profile({ id: "p-auto", apiSurface: "auto" })],
+        defaultId: "p-auto",
+        capabilities: [
+          {
+            profileId: "p-auto",
+            modelId: "deepseek-chat",
+            apiSurface: "openai-responses",
+            supportsJsonSchema: false,
+            supportsJsonMode: false,
+            supportsStreaming: null,
+            supportsStreamUsage: null,
+            supportsReasoning: null,
+            maxOutputTokens: null,
+            contextWindow: null,
+            probedAt: "2026-09-08T00:00:00.000Z",
+            source: "probe",
+          },
+        ],
+      }),
+      getCredential: () => "k",
+    });
+
+    expect(resolve("draft")).toMatchObject({ apiSurface: "auto" });
+  });
+
   it("单次覆盖到别的来源时不沿用原来源的模型名", () => {
     const resolve = createAiRouteResolver({
       database: fakeDatabase({
@@ -149,5 +213,35 @@ describe("AI 来源路由", () => {
       apiKey: "",
       authHeaders: {},
     });
+  });
+
+  it("本地端点来源的 http 地址在解析阶段放行", () => {
+    const local = profile({
+      id: "p-local",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      authScheme: "none",
+      localEndpoint: true,
+      defaultModel: "qwen2.5",
+    });
+    const resolve = createAiRouteResolver({
+      database: fakeDatabase({ profiles: [local], defaultId: "p-local" }),
+      getCredential: () => "",
+    });
+
+    expect(resolve("draft")).toMatchObject({
+      baseUrl: "http://127.0.0.1:11434/v1",
+      localEndpoint: true,
+      model: "qwen2.5",
+    });
+  });
+
+  it("非本地来源的 http 地址仍然被拒绝", () => {
+    const remote = profile({ id: "p-http", baseUrl: "http://api.example.com/v1" });
+    const resolve = createAiRouteResolver({
+      database: fakeDatabase({ profiles: [remote], defaultId: "p-http" }),
+      getCredential: () => "k",
+    });
+
+    expect(() => resolve("draft")).toThrow(/HTTPS/);
   });
 });

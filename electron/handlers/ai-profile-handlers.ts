@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertNoSecretHeaders, resolveAuthHeaders } from "../../src/shared/ai/auth";
-import { canonicalizeProviderUrl } from "../../src/shared/ai/provider-url";
+import { canonicalizeProviderUrl, withQuery } from "../../src/shared/ai/provider-url";
 import type {
   AiProfile,
   AiProfileHealth,
@@ -123,14 +123,6 @@ function sanitizeProfile(input: AiProfile): AiProfile {
 
 function authHeadersFor(profile: AiProfile, secret: string) {
   return resolveAuthHeaders(profile.authScheme, secret);
-}
-
-function withQuery(baseUrl: string, query: Record<string, string>) {
-  const entries = Object.entries(query);
-  if (!entries.length) return baseUrl;
-  const url = new URL(baseUrl);
-  for (const [key, value] of entries) url.searchParams.set(key, value);
-  return url.toString();
 }
 
 /** 按声明的协议面（auto 时依次协商）做一次最小结构化调用，并回写探测结果。 */

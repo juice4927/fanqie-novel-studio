@@ -1,3 +1,4 @@
+import { withQuery } from "../../../src/shared/ai/provider-url";
 import { createAsyncQueue } from "../async-queue";
 import { readProviderError, sendProviderRequest } from "../transport";
 import { normalizeSseText, parseSseData } from "./sse";
@@ -15,15 +16,21 @@ export async function readChatCompletionStream(
   let buffer = "";
   let content = "";
   let usage: ProviderUsage = { inputTokens: 0, outputTokens: 0 };
+  let finishReason: DriverFinishReason = "stop";
   const consume = (event: string) => {
     for (const value of parseSseData(event)) {
       const chunk = value as {
-        choices?: Array<{ delta?: { content?: string | null }; message?: { content?: string | null } }>;
+        choices?: Array<{
+          delta?: { content?: string | null };
+          message?: { content?: string | null };
+          finish_reason?: string | null;
+        }>;
         usage?: Record<string, unknown>;
       };
       const delta = chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.message?.content ?? "";
       content += delta;
       if (delta) onContent(delta);
+      if (chunk.choices?.[0]?.finish_reason === "length") finishReason = "length";
       if (chunk.usage) usage = parseProviderUsage(chunk);
     }
   };
@@ -38,7 +45,7 @@ export async function readChatCompletionStream(
   }
   buffer += decoder.decode();
   if (buffer.trim()) consume(buffer);
-  return { content, usage };
+  return { content, usage, finishReason };
 }
 
 function buildChatBody(request: DriverRequest, stream: boolean) {
@@ -66,7 +73,7 @@ function parseChatBody(body: unknown) {
 }
 
 export function createOpenAiChatDriver(config: DriverConfig): ModelDriver {
-  const endpoint = `${config.baseUrl}/chat/completions`;
+  const endpoint = withQuery(`${config.baseUrl}/chat/completions`, config.extraQuery);
   const headers = { ...(config.authHeaders ?? { Authorization: `Bearer ${config.apiKey}` }), ...config.extraHeaders };
   return {
     apiSurface: "openai-chat",
@@ -103,8 +110,8 @@ export function createOpenAiChatDriver(config: DriverConfig): ModelDriver {
               (text) => queue.push({ type: "text-delta", text }),
             );
             queue.push({ type: "usage", usage: streamed.usage });
-            queue.push({ type: "finish", reason: "stop" });
-            return { text: streamed.content, usage: streamed.usage, finishReason: "stop" };
+            queue.push({ type: "finish", reason: streamed.finishReason });
+            return { text: streamed.content, usage: streamed.usage, finishReason: streamed.finishReason };
           }
           const body = await response.json();
           const { text, finishReason } = parseChatBody(body);

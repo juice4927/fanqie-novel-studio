@@ -11,6 +11,7 @@ import {
   sameRevisionSnapshot,
 } from "../src/shared/novel-revision";
 import type { Chapter, ChapterFactsExtractionEvent, NovelRevisionProposal } from "../src/shared/types";
+import { hasUsableAiCredential as hasUsableCredential } from "./ai/credential-presence";
 import { createProfileRuntime } from "./ai/profile-runtime";
 import { createAiRouteResolver } from "./ai/route-resolver";
 import { AiService } from "./ai-service";
@@ -116,6 +117,20 @@ else if (!singleInstanceLockDisabled)
 
 function getApiKey() {
   return apiCredential;
+}
+
+/**
+ * AI 任务门禁：有来源时按来源判断（默认来源 → 任一启用来源），
+ * 没有任何来源时回退旧版单密钥。只用于「是否已配置」的判断，
+ * 真正的密钥仍由路由解析按角色取。
+ */
+function hasUsableAiCredential() {
+  return hasUsableCredential({
+    profiles: database.listAiProfiles(),
+    defaultProfileId: database.getDefaultAiProfileId(),
+    legacyApiKey: apiCredential,
+    credentialFor: (id) => profileCredentials.get(id) ?? "",
+  });
 }
 
 /** 旧版单密钥迁移到“默认来源”：只在默认来源还没有密钥时移动一次，失败不阻塞启动。 */
@@ -338,6 +353,7 @@ function registerHandlers() {
     markGenerationActive: chapterGeneration.markActive,
     markGenerationIdle: chapterGeneration.markIdle,
     getApiKey,
+    hasAiCredential: hasUsableAiCredential,
     saveApiKey: async (apiKey) => {
       await writeApiCredential(apiKey);
       apiCredential = apiKey;
@@ -589,11 +605,12 @@ if (hasSingleInstanceLock)
         }
       },
       profileRuntime,
+      hasUsableAiCredential,
     );
     chapterGeneration = createChapterGenerationCoordinator({
       database,
       ai,
-      getApiKey,
+      hasAiCredential: hasUsableAiCredential,
       compileContext: compileProjectChapterContext,
     });
     updateService = createUpdateService({

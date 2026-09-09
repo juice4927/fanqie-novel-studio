@@ -140,6 +140,8 @@ export class AiService {
     }) => void,
     /** 来源熔断与并发控制（仅注入时生效）。 */
     private readonly profileRuntime?: ProfileRuntime,
+    /** 是否已配置可用凭据（来源或旧版单密钥）；未注入时按旧版单密钥判断。 */
+    private readonly hasAiCredential?: () => boolean,
   ) {}
 
   cancelJob(id: string) {
@@ -192,7 +194,9 @@ export class AiService {
         ? "anthropic-messages"
         : "openai-compatible"
       : (settings.protocol ?? "openai-compatible");
-    const providerBase = normalizeProviderUrl(route?.baseUrl ?? settings.baseUrl);
+    const providerBase = normalizeProviderUrl(route?.baseUrl ?? settings.baseUrl, {
+      allowInsecure: route?.localEndpoint === true,
+    });
     const provider = route?.profileId
       ? `profile:${route.profileId}:${providerBase}`
       : protocol === "anthropic-messages"
@@ -406,7 +410,7 @@ export class AiService {
             signal: controller.signal,
           };
           let raw = "";
-          let anthropicStopReason: string | null = null;
+          let truncated = false;
           if (useStreaming) {
             const streamed = await driver.stream(request);
             markHeadersReceived();
@@ -424,20 +428,19 @@ export class AiService {
             const finished = await streamed.result;
             raw = finished.text;
             if (finished.usage.inputTokens || finished.usage.outputTokens) attemptUsage = finished.usage;
-            if (useAnthropic && finished.finishReason === "length") anthropicStopReason = "max_tokens";
+            if (finished.finishReason === "length") truncated = true;
           } else {
             const finished = await driver.generate(request);
             markHeadersReceived();
             raw = finished.text;
             attemptUsage = finished.usage;
-            if (useAnthropic && finished.finishReason === "length") anthropicStopReason = "max_tokens";
+            if (finished.finishReason === "length") truncated = true;
           }
           cumulativeUsage = {
             inputTokens: cumulativeUsage.inputTokens + attemptUsage.inputTokens,
             outputTokens: cumulativeUsage.outputTokens + attemptUsage.outputTokens,
           };
-          if (anthropicStopReason === "max_tokens")
-            throw new Error("模型输出达到 Anthropic max_tokens 上限，结果已截断");
+          if (truncated) throw new Error("模型输出达到输出上限，结果已截断");
           if (!raw) throw new Error("模型没有返回内容");
           const parsed = options.schema.parse(JSON.parse(stripCodeFence(raw)));
           try {
@@ -594,7 +597,11 @@ export class AiService {
           }
           throw new Error(lastError);
         }
-        if (lastCode === "PROVIDER_TRUNCATED" || lastError.startsWith("模型输出达到 Anthropic max_tokens")) {
+        if (
+          lastCode === "PROVIDER_TRUNCATED" ||
+          lastError.startsWith("模型输出达到输出上限") ||
+          lastError.startsWith("模型输出达到 Anthropic max_tokens")
+        ) {
           try {
             this.database.finishAiJob(
               jobId,
@@ -676,7 +683,8 @@ export class AiService {
     book: ResearchBook,
     chapters: Array<{ ordinal: number; title: string; content: string; wordCount: number }>,
   ): Promise<{ insight: InsightPack; analyses: ResearchAnalysisRecord[] }> {
-    if (!book.cloudConsent || !this.getApiKey()) return this.localInsight(book, chapters);
+    if (!book.cloudConsent || !(this.hasAiCredential?.() ?? Boolean(this.getApiKey())))
+      return this.localInsight(book, chapters);
     const partials: Array<{ fromChapter: number; toChapter: number; insight: InsightResult }> = [];
     const analyses: ResearchAnalysisRecord[] = [];
     for (let start = 0; start < chapters.length; start += DECONSTRUCT_BATCH_SIZE) {
@@ -1480,8 +1488,14 @@ export class AiService {
     retryContext?: string,
     onStream?: (event: ChapterDraftStreamEvent) => void,
     override?: TaskModelOverride,
+    lifecycle?: { onJobStarted?: (jobId: string) => void },
   ): Promise<Chapter> {
-    return this.startDraftChapter(projectId, chapter, context, { retryContext, onStream, override }).completion;
+    return this.startDraftChapter(projectId, chapter, context, {
+      retryContext,
+      onStream,
+      override,
+      ...lifecycle,
+    }).completion;
   }
 
   startDraftChapter(
@@ -1717,6 +1731,7 @@ export class AiService {
     chapter: Chapter,
     context: ContextPackage,
     issues: readonly QualityIssue[],
+    lifecycle?: { onJobStarted?: (jobId: string) => void },
   ): Promise<Chapter> {
     const pending = issues.filter((issue) => issue.status === "待处理");
     if (!pending.length) throw new Error("本章没有可供 AI 修订的待处理问题");
@@ -1730,6 +1745,7 @@ export class AiService {
       projectId: project.summary.id,
       taskType: "revise-chapter-quality",
       inputSummary: `第${chapter.number}章按质检修订`,
+      onJobStarted: lifecycle?.onJobStarted,
       system: [
         "你是这本书的修订编辑，和作者一起把这一章改好。",
         "先判断每个问题属于哪一层：硬性问题必须修复，改动可以跨场景；引导性问题以最小代价解决，但如果问题根源在结构（例如节奏停滞来自场景功能重复），可以重组场景顺序、合并或替换场景。",

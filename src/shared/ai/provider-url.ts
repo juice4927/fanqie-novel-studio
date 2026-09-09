@@ -1,10 +1,25 @@
 /** 已知的完整端点后缀；粘贴整条端点时自动截回基础地址。 */
 const ENDPOINT_SUFFIXES = ["/chat/completions", "/responses", "/messages", "/completions"];
 
-export function normalizeProviderUrl(baseUrl: string) {
+export interface NormalizeProviderUrlOptions {
+  /** 仅本地端点豁免允许 http，与 canonicalizeProviderUrl 同一口径。 */
+  allowInsecure?: boolean;
+}
+
+/** 把来源的附加查询参数（如 Azure 的 api-version）拼到请求地址上。 */
+export function withQuery(baseUrl: string, query: Record<string, string> = {}) {
+  const entries = Object.entries(query);
+  if (!entries.length) return baseUrl;
+  const url = new URL(baseUrl);
+  for (const [key, value] of entries) url.searchParams.set(key, value);
+  return url.toString();
+}
+
+export function normalizeProviderUrl(baseUrl: string, options: NormalizeProviderUrlOptions = {}) {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
   const url = new URL(trimmed);
-  if (url.protocol !== "https:") throw new Error("模型 API 地址必须使用 HTTPS");
+  if (url.protocol !== "https:" && !(options.allowInsecure && url.protocol === "http:"))
+    throw new Error("模型 API 地址必须使用 HTTPS");
   if (url.username || url.password) throw new Error("模型 API 地址不能包含用户名或密码");
   if (url.search || url.hash) throw new Error("模型 API 基础地址不能包含查询参数或片段");
   url.hostname = url.hostname.toLowerCase();

@@ -210,6 +210,7 @@ function createDependencies(completion: Promise<Chapter> = new Promise(() => {})
     getProjectOverview: vi.fn(() => planningProject),
     listAiJobs: vi.fn(() => [sourceJob]),
     listRankings: vi.fn(() => rankings),
+    markAiJobApplicationFailed: vi.fn(),
     saveChapter: vi.fn((_id, next: Chapter) => next),
     saveFact: vi.fn((_id, fact: LedgerFact) => fact),
     saveGeneratedChapter: vi.fn((_id, next: Chapter) => next),
@@ -293,6 +294,7 @@ function createDependencies(completion: Promise<Chapter> = new Promise(() => {})
     markGenerationActive,
     markGenerationIdle,
     getApiKey: () => apiKey,
+    hasAiCredential: () => Boolean(apiKey),
     saveApiKey,
     clearApiKey,
     queueFinalizedFactExtraction,
@@ -427,6 +429,28 @@ describe("AI handlers", () => {
     expect(markGenerationIdle).toHaveBeenCalledWith("project-1");
     expect(markGenerationActive.mock.invocationCallOrder[0]).toBeLessThan(
       markGenerationIdle.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("marks the revision job failed when the revised chapter cannot be saved", async () => {
+    const { dependencies, handlers, database, ai } = createDependencies();
+    database.getProject.mockReturnValue(qualityProject);
+    const revised = { ...qualityChapter, content: "修订后的正文" };
+    ai.reviseChapter.mockImplementation(async (_project, _chapter, _context, _issues, lifecycle) => {
+      lifecycle?.onJobStarted?.("job-revise");
+      return revised;
+    });
+    database.saveGeneratedChapter.mockImplementationOnce(() => {
+      throw new Error("章节在 AI 生成期间已被修改，旧生成结果未保存");
+    });
+    registerAiHandlers(dependencies);
+
+    await expect(handlers.get("reviseChapterFromQuality")!("project-1", qualityChapter.id)).rejects.toThrow(
+      "旧生成结果未保存",
+    );
+    expect(database.markAiJobApplicationFailed).toHaveBeenCalledWith(
+      "job-revise",
+      expect.stringContaining("模型输出未应用"),
     );
   });
 

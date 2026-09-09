@@ -13,6 +13,11 @@ describe("SSE 解析", () => {
     expect(parsed).toEqual([{ content: "abcdef" }]);
   });
 
+  it("被切开的 JSON 中间的空格不会被吞掉", () => {
+    const parsed = parseSseData('data: {"content":"a \ndata: b"}');
+    expect(parsed).toEqual([{ content: "a b" }]);
+  });
+
   it("多行 JSON 退回归并换行解析", () => {
     const parsed = parseSseData('data: {\ndata: "a": 1\ndata: }');
     expect(parsed).toEqual([{ a: 1 }]);

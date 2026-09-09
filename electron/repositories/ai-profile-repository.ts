@@ -224,7 +224,7 @@ export class AiProfileRepository {
 
   listCapabilities(profileId: string): StoredModelCapability[] {
     const rows = this.db
-      .prepare("SELECT * FROM model_capabilities WHERE profile_id = ?")
+      .prepare("SELECT * FROM model_capabilities WHERE profile_id = ? ORDER BY probed_at DESC")
       .all(profileId) as unknown as CapabilityRow[];
     return rows.map((row) => ({
       profileId: row.profile_id,

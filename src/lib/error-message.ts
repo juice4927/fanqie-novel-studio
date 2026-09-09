@@ -11,7 +11,10 @@ const HINTS: ReadonlyArray<{ match: RegExp; hint: string }> = [
     hint: "等当前任务结束，或到“系统设置 → AI 任务中心”取消后再试。",
   },
   { match: /未解决的硬性问题/, hint: "到“质检中心”处理硬性问题后才能继续。" },
-  { match: /输出达到 Anthropic max_tokens|输出被截断/, hint: "可缩短章节目标字数，或更换输出上限更高的模型。" },
+  {
+    match: /输出达到输出上限|输出达到 Anthropic max_tokens|输出被截断/,
+    hint: "可缩短章节目标字数，或更换输出上限更高的模型。",
+  },
   { match: /超时|timed out|ETIMEDOUT|ECONNRESET/i, hint: "模型服务响应超时，可稍后重试或更换模型。" },
   {
     match: /无法连接|fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN/i,

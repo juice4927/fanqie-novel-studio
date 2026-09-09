@@ -1,3 +1,4 @@
+import { withQuery } from "../../../src/shared/ai/provider-url";
 import { createAsyncQueue } from "../async-queue";
 import { readProviderError, sendProviderRequest } from "../transport";
 import { normalizeSseText, parseSseData } from "./sse";
@@ -93,7 +94,7 @@ function anthropicFinishReason(stopReason: string | null | undefined): DriverRes
 }
 
 export function createAnthropicMessagesDriver(config: DriverConfig): ModelDriver {
-  const endpoint = anthropicEndpoint(config.baseUrl);
+  const endpoint = withQuery(anthropicEndpoint(config.baseUrl), config.extraQuery);
   const headers = {
     ...(config.authHeaders ?? { "x-api-key": config.apiKey }),
     "anthropic-version": "2023-06-01",

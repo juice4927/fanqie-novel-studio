@@ -27,6 +27,7 @@ type AiDatabase = Pick<
   | "getProjectOverview"
   | "listAiJobs"
   | "listRankings"
+  | "markAiJobApplicationFailed"
   | "saveChapter"
   | "saveAiSettings"
   | "savePlan"
@@ -93,6 +94,8 @@ export interface AiHandlerDependencies {
   markGenerationActive: (projectId: string) => void;
   markGenerationIdle: (projectId: string) => void;
   getApiKey: () => string;
+  /** 是否已配置可用的 AI 凭据（来源或旧版单密钥），用于任务门禁与展示。 */
+  hasAiCredential: () => boolean;
   saveApiKey: (apiKey: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
   queueFinalizedFactExtraction: (projectId: string, chapter: Chapter) => void;
@@ -116,6 +119,7 @@ export function registerAiHandlers({
   markGenerationActive,
   markGenerationIdle,
   getApiKey,
+  hasAiCredential,
   saveApiKey,
   clearApiKey,
   queueFinalizedFactExtraction,
@@ -181,7 +185,7 @@ export function registerAiHandlers({
       }));
     let semanticIssues: QualityIssue[] = [];
     let observations = [...local.observations];
-    if (getApiKey()) {
+    if (hasAiCredential()) {
       try {
         const review = await ai.reviewChapter(
           { ...project, facts },
@@ -241,13 +245,24 @@ export function registerAiHandlers({
     try {
       // 与正文生成一致：请求期间的编辑必须让旧修订稿保存失败，而不是静默覆盖新内容。
       const generationGuard = createChapterGenerationGuard(chapter);
+      let jobId: string | null = null;
       const revised = await ai.reviseChapter(
         { ...project, facts },
         chapter,
         compileContext(project, chapter, facts),
         issues,
+        { onJobStarted: (started) => (jobId = started) },
       );
-      return database.saveGeneratedChapter(id, revised, generationGuard);
+      try {
+        return database.saveGeneratedChapter(id, revised, generationGuard);
+      } catch (error) {
+        // 保存失败时任务不能停留在"成功"，否则缓存会把这份未应用的输出当成可用结果。
+        if (jobId) {
+          const message = error instanceof Error ? error.message : String(error);
+          database.markAiJobApplicationFailed?.(jobId, `模型输出未应用：${message}`);
+        }
+        throw error;
+      }
     } finally {
       markGenerationIdle(id);
     }
@@ -272,7 +287,7 @@ export function registerAiHandlers({
         ledgerExtraction: { status: "不适用", candidateCount: 0 },
       };
     }
-    if (!getApiKey()) {
+    if (!hasAiCredential()) {
       return {
         chapter: saved,
         ledgerExtraction: { status: "未配置", candidateCount: 0 },
@@ -425,7 +440,7 @@ export function registerAiHandlers({
   });
   register("getAiSettings", () => ({
     ...database.getAiSettings(),
-    hasApiKey: Boolean(getApiKey()),
+    hasApiKey: hasAiCredential(),
   }));
   register("testAiConnection", (override) => ai.testConnection(override));
   register("saveAiSettings", async (settings, apiKey) => {
@@ -437,7 +452,7 @@ export function registerAiHandlers({
       await clearApiKey();
     return {
       ...database.saveAiSettings(settings),
-      hasApiKey: Boolean(getApiKey()),
+      hasApiKey: hasAiCredential(),
     };
   });
   register("listAiJobs", (projectId) => database.listAiJobs(projectId));

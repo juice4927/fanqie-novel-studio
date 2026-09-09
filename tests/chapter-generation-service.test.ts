@@ -150,11 +150,24 @@ function createHarness(options: { project?: ProjectDetail; apiKey?: string; star
     source: "network" as const,
     completion: options.startCompletion ?? Promise.resolve(generatedChapter),
   }));
-  const draftChapter = vi.fn(async (_projectId: string, chapter: Chapter) => ({
-    ...chapter,
-    content: `AI 正文 ${chapter.number}`,
-    wordCount: 7,
-  }));
+  const draftChapter = vi.fn(
+    async (
+      _projectId: string,
+      chapter: Chapter,
+      _context?: ContextPackage,
+      _retryContext?: string,
+      _onStream?: unknown,
+      _override?: unknown,
+      lifecycle?: { onJobStarted?: (jobId: string) => void },
+    ) => {
+      lifecycle?.onJobStarted?.(`job-${chapter.number}`);
+      return {
+        ...chapter,
+        content: `AI 正文 ${chapter.number}`,
+        wordCount: 7,
+      };
+    },
+  );
   const compileContext = vi.fn(() => context);
   const database: ChapterGenerationDatabase = {
     getProject,
@@ -170,7 +183,7 @@ function createHarness(options: { project?: ProjectDetail; apiKey?: string; star
   const coordinator = createChapterGenerationCoordinator({
     database,
     ai,
-    getApiKey: () => apiKey,
+    hasAiCredential: () => Boolean(apiKey),
     compileContext,
   });
   return {
@@ -340,6 +353,17 @@ describe("chapter generation coordinator", () => {
     expect(harness.saveGeneratedChapter).toHaveBeenCalledTimes(4);
     expect(harness.compileContext).toHaveBeenCalledWith(project, project.chapters[0], harness.relevantFacts);
     expect(harness.draftChapter.mock.calls[0][3]).toContain('"kind":"batch"');
+    expect(harness.coordinator.isActive("project-1")).toBe(false);
+  });
+
+  it("marks the batch job failed when the generated chapter cannot be saved", async () => {
+    const harness = createHarness();
+    harness.saveGeneratedChapter.mockImplementationOnce(() => {
+      throw new Error("章节在 AI 生成期间已被修改，旧生成结果未保存");
+    });
+
+    await expect(harness.coordinator.generateBatch("project-1", "chapter-1")).rejects.toThrow("旧生成结果未保存");
+    expect(harness.markAiJobApplicationFailed).toHaveBeenCalledWith("job-1", expect.stringContaining("模型输出未应用"));
     expect(harness.coordinator.isActive("project-1")).toBe(false);
   });
 

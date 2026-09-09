@@ -37,4 +37,14 @@ describe("模型地址规范化", () => {
     expect(() => normalizeProviderUrl("http://api.openai.com/v1")).toThrow(/HTTPS/);
     expect(() => normalizeProviderUrl("https://api.openai.com/v1?x=1")).toThrow(/查询参数/);
   });
+
+  it("normalizeProviderUrl 仅在本地端点豁免下放行 http", () => {
+    expect(normalizeProviderUrl("http://127.0.0.1:11434/v1/", { allowInsecure: true })).toBe(
+      "http://127.0.0.1:11434/v1",
+    );
+    expect(() => normalizeProviderUrl("http://127.0.0.1:11434/v1", { allowInsecure: false })).toThrow(/HTTPS/);
+    expect(() => normalizeProviderUrl("http://user:pass@127.0.0.1:11434/v1", { allowInsecure: true })).toThrow(
+      /用户名或密码/,
+    );
+  });
 });

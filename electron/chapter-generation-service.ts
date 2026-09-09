@@ -23,7 +23,8 @@ export type ChapterGenerationAi = Pick<AiService, "draftChapter" | "startDraftCh
 export interface ChapterGenerationDependencies {
   database: ChapterGenerationDatabase;
   ai: ChapterGenerationAi;
-  getApiKey: () => string;
+  /** 是否已配置可用的 AI 凭据（来源或旧版单密钥）。 */
+  hasAiCredential: () => boolean;
   compileContext: (
     project: ProjectDetail,
     chapter: Chapter,
@@ -59,7 +60,7 @@ export interface ChapterGenerationCoordinator {
 export function createChapterGenerationCoordinator({
   database,
   ai,
-  getApiKey,
+  hasAiCredential,
   compileContext,
 }: ChapterGenerationDependencies): ChapterGenerationCoordinator {
   const activeProjects = new Set<string>();
@@ -96,7 +97,7 @@ export function createChapterGenerationCoordinator({
     if (["已定稿", "待发布", "已发布"].includes(chapter.status))
       throw new Error("已定稿或进入发布流程的章节不能由 AI 覆写");
     assertNoHardStoryConstraint(evaluateStoryConstraints(project.facts, chapter));
-    if (!getApiKey()) throw new Error("尚未配置 AI API 密钥");
+    if (!hasAiCredential()) throw new Error("尚未配置 AI API 密钥");
 
     markActive(projectId);
     try {
@@ -152,6 +153,7 @@ export function createChapterGenerationCoordinator({
         assertNoHardStoryConstraint(evaluateStoryConstraints(project.facts, chapter));
         const facts = database.searchRelevantFacts(projectId, `${chapter.title} ${chapter.outline}`, chapter.number);
         const generationGuard = createChapterGenerationGuard(chapter);
+        let jobId: string | null = null;
         const draft = await ai.draftChapter(
           projectId,
           chapter,
@@ -159,8 +161,18 @@ export function createChapterGenerationCoordinator({
           serializeChapterAiRetryContext("batch", projectId, chapter),
           undefined,
           override,
+          { onJobStarted: (started) => (jobId = started) },
         );
-        generated.push(database.saveGeneratedChapter(projectId, draft, generationGuard));
+        try {
+          generated.push(database.saveGeneratedChapter(projectId, draft, generationGuard));
+        } catch (error) {
+          // 与单章路径一致：保存失败要把任务改记失败，否则付费输出既没落盘又留着"成功"缓存。
+          if (jobId) {
+            const message = error instanceof Error ? error.message : String(error);
+            database.markAiJobApplicationFailed?.(jobId, `模型输出未应用：${message}`);
+          }
+          throw error;
+        }
       }
       return generated;
     } finally {

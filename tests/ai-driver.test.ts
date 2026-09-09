@@ -38,6 +38,75 @@ describe("协议驱动", () => {
     expect(result).toMatchObject({ text: "ok", usage: { inputTokens: 3, outputTokens: 2 }, finishReason: "stop" });
   });
 
+  it("把来源的附加查询参数拼到各协议面的请求地址上", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] }), {
+          status: 200,
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chat = createDriver("openai-chat", {
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "k",
+      extraQuery: { "api-version": "2024-10-21" },
+    });
+    await chat.generate(baseRequest);
+
+    expect(chat.endpoint).toBe("https://api.example.com/v1/chat/completions?api-version=2024-10-21");
+    expect(fetchMock.mock.calls[0][0]).toBe(chat.endpoint);
+    expect(
+      createDriver("openai-responses", {
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "k",
+        extraQuery: { "api-version": "1" },
+      }).endpoint,
+    ).toBe("https://api.example.com/v1/responses?api-version=1");
+    expect(
+      createDriver("anthropic-messages", {
+        baseUrl: "https://api.anthropic.com/v1",
+        apiKey: "k",
+        extraQuery: { "api-version": "1" },
+      }).endpoint,
+    ).toBe("https://api.anthropic.com/v1/messages?api-version=1");
+    expect(createDriver("openai-chat", { baseUrl: "https://api.example.com/v1", apiKey: "k" }).endpoint).toBe(
+      "https://api.example.com/v1/chat/completions",
+    );
+  });
+
+  it("chat 流式把 finish_reason=length 透传给上层", async () => {
+    const sse = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "半截" } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join("");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } })),
+    );
+
+    const driver = createDriver("openai-chat", { baseUrl: "https://api.example.com/v1", apiKey: "k" });
+    const streamed = await driver.stream({ ...baseRequest, stream: true });
+
+    await expect(streamed.result).resolves.toMatchObject({ text: "半截", finishReason: "length" });
+  });
+
+  it("responses 非流式 incomplete 报截断而不是结构错误", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }), {
+            status: 200,
+          }),
+      ),
+    );
+    const driver = createDriver("openai-responses", { baseUrl: "https://api.example.com/v1", apiKey: "k" });
+
+    await expect(driver.generate(baseRequest)).rejects.toThrow("输出达到输出上限");
+  });
+
   it("供应商返回非 2xx 时抛出带状态码的 ProviderHttpError", async () => {
     vi.stubGlobal(
       "fetch",

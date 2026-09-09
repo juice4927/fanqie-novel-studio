@@ -527,6 +527,25 @@ describe("AI provider routing", () => {
     expect(second.max_tokens).toBe(8192);
   });
 
+  it("treats an OpenAI truncation as terminal instead of repairing the output", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"issues": [' }, finish_reason: "length" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new AiService(databaseFor("deepseek-chat"), () => "secret").reviewChapter(project, chapter, context),
+    ).rejects.toThrow(/输出达到输出上限/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("does not retry a paid model response when AI audit persistence fails", async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -885,7 +904,7 @@ describe("AI provider routing", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(new AiService(database, () => "secret").reviewChapter(project, chapter, context)).rejects.toThrow(
-      "max_tokens",
+      /输出达到输出上限|已截断/,
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

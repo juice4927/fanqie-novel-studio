@@ -16,8 +16,9 @@ export function parseSseData(event: string) {
   const values = event
     .split(/\r?\n/)
     .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).trim())
-    .filter((value) => value && value !== "[DONE]");
+    // 只按 SSE 规范去掉冒号后的一个空格；整体 trim 会吞掉被切开的 JSON 中间的空格。
+    .map((line) => line.slice(5).replace(/^ /, ""))
+    .filter((value) => value.trim() && value.trim() !== "[DONE]");
   if (!values.length) return [];
   const independentlyParsed: unknown[] = [];
   try {

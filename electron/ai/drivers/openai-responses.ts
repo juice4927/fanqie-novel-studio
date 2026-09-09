@@ -1,8 +1,15 @@
+import { withQuery } from "../../../src/shared/ai/provider-url";
 import { createAsyncQueue } from "../async-queue";
 import { readProviderError, sendProviderRequest } from "../transport";
 import { normalizeSseText, parseSseData } from "./sse";
 import type { DriverConfig, DriverRequest, DriverResult, ModelDriver, StreamPart } from "./types";
 import { type ProviderUsage, parseProviderUsage } from "./usage";
+
+/** 输出触顶时统一成可识别的截断文案，避免被当成结构错误重试。 */
+function incompleteReasonMessage(reason: string | undefined) {
+  if (reason === "max_output_tokens") return "模型输出达到输出上限，结果已截断";
+  return reason ?? "Responses API 未完成输出";
+}
 
 export function parseResponsesOutput(body: unknown) {
   const response = body as {
@@ -100,7 +107,7 @@ export async function readResponsesStream(
       }
       if (chunk.type === "response.incomplete") {
         terminal = "incomplete";
-        throw new Error(chunk.response?.incomplete_details?.reason ?? "Responses API 未完成输出");
+        throw new Error(incompleteReasonMessage(chunk.response?.incomplete_details?.reason));
       }
     }
   };
@@ -143,11 +150,14 @@ function buildResponsesBody(request: DriverRequest, stream: boolean) {
 }
 
 export function createOpenAiResponsesDriver(config: DriverConfig): ModelDriver {
-  const endpoint = `${config.baseUrl}/responses`;
+  const endpoint = withQuery(`${config.baseUrl}/responses`, config.extraQuery);
   const headers = { ...(config.authHeaders ?? { Authorization: `Bearer ${config.apiKey}` }), ...config.extraHeaders };
   const parseBody = (body: unknown): DriverResult => {
     const refusal = parseResponsesRefusal(body);
     if (refusal) throw new Error(`模型拒绝生成内容：${refusal}`);
+    const incomplete = body as { status?: string; incomplete_details?: { reason?: string } };
+    if (incomplete.status === "incomplete")
+      throw new Error(incompleteReasonMessage(incomplete.incomplete_details?.reason));
     return { text: parseResponsesOutput(body), usage: parseProviderUsage(body), finishReason: "stop" };
   };
   return {

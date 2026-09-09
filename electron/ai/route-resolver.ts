@@ -71,15 +71,18 @@ export function createAiRouteResolver(deps: { database: RouteDatabase; getCreden
     // 单次覆盖到别的来源时，不能沿用角色路由里属于原来源的模型名。
     const roleModel = !overrideProfileId || overrideProfileId === roleRoute?.profileId ? roleRoute?.modelId : null;
     const model = override?.model?.trim() || roleModel?.trim() || profile.defaultModel.trim() || settings.model;
-    const baseUrl = normalizeProviderUrl(profile.baseUrl);
+    const baseUrl = normalizeProviderUrl(profile.baseUrl, { allowInsecure: profile.localEndpoint === true });
     const requiresKey = profile.authScheme !== "none";
     const apiKey = requiresKey ? deps.getCredential(profile.id) : "";
 
     let apiSurface = profile.apiSurface;
     if (apiSurface === "auto") {
+      // 探测失败的能力行两个支持位都是 false；不要因为它的插入顺序靠前就选中它，
+      // 否则每个任务都会先打一次注定失败的协议面。
       const learned = deps.database
         .listModelCapabilities(profile.id)
-        .find((item) => item.modelId === model && (item.source === "probe" || item.source === "user"));
+        .filter((item) => item.modelId === model && (item.source === "probe" || item.source === "user"))
+        .find((item) => item.supportsJsonSchema !== false || item.supportsJsonMode !== false);
       if (learned) apiSurface = learned.apiSurface as ApiSurface;
     }
 

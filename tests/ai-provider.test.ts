@@ -44,7 +44,11 @@ describe("OpenAI-compatible streaming", () => {
 
     const result = await readChatCompletionStream(response, activity);
 
-    expect(result).toEqual({ content: '{"value":1}', usage: { inputTokens: 7, outputTokens: 3 } });
+    expect(result).toEqual({
+      content: '{"value":1}',
+      usage: { inputTokens: 7, outputTokens: 3 },
+      finishReason: "stop",
+    });
     expect(activity).toHaveBeenCalledTimes(3);
   });
 
