@@ -1395,6 +1395,248 @@ describe("approval gates", () => {
     expect(detail.changes.find((item) => item.id === request.id)?.status).toBe("已应用");
   });
 
+  it("keeps quality results on a protected chapter without touching status or schedule", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "质检门禁",
+      genre: "都市脑洞",
+      targetWords: 1000000,
+      updateCadence: "每日1章",
+    });
+    let chapter = database.saveChapter(project.id, {
+      ...createChapter(1, "已定稿的正文内容，用于验证质检不会回退状态。".repeat(20)),
+      batchMode: "五章批次",
+    });
+    chapter = database.transitionChapter(project.id, chapter.id, "待质检");
+    chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
+    chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    const scheduled = database.saveSchedule(project.id, {
+      id: "",
+      projectId: project.id,
+      projectTitle: project.title,
+      chapterId: chapter.id,
+      chapterNumber: chapter.number,
+      chapterTitle: chapter.title,
+      publishAt: "2026-08-05T08:00:00.000Z",
+      status: "待发布",
+    });
+    const issue: QualityIssue = {
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      chapterId: chapter.id,
+      severity: "硬性",
+      category: "状态冲突",
+      message: "状态账本存在冲突",
+      evidence: "第1章",
+      status: "待处理",
+      createdAt: now(),
+    };
+    expect(() => database.saveIssues(project.id, chapter.id, [issue])).not.toThrow();
+    const detail = database.getProject(project.id);
+    expect(detail.issues.find((item) => item.id === issue.id)).toBeTruthy();
+    expect(detail.chapters[0]).toMatchObject({ status: "待发布", batchMode: "逐章" });
+    expect(detail.schedule.find((item) => item.id === scheduled.id)?.status).toBe("待发布");
+  });
+
+  it("does not consume an approved change request when a quality run forces sequential review", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "质检不变更单",
+      genre: "都市脑洞",
+      targetWords: 1000000,
+      updateCadence: "每日1章",
+    });
+    let chapter = database.saveChapter(project.id, {
+      ...createChapter(1, "已定稿的正文内容，用于验证变更单不会被质检消耗。".repeat(20)),
+      batchMode: "五章批次",
+    });
+    chapter = database.transitionChapter(project.id, chapter.id, "待质检");
+    chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
+    chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    database.saveSchedule(project.id, {
+      id: "",
+      projectId: project.id,
+      projectTitle: project.title,
+      chapterId: chapter.id,
+      chapterNumber: chapter.number,
+      chapterTitle: chapter.title,
+      publishAt: "2026-08-06T08:00:00.000Z",
+      status: "待发布",
+    });
+    const current = database.getChapter(project.id, chapter.id);
+    const request = database.saveChangeRequest(project.id, {
+      id: "",
+      targetKind: "章节",
+      targetId: chapter.id,
+      baseVersion: current.revision,
+      title: "修改定稿",
+      reason: "复核",
+      beforeValue: current.content,
+      afterValue: "修订正文",
+      impact: "本章排期",
+      rollback: "恢复正文",
+      status: "待审批",
+      createdAt: now(),
+    });
+    database.decideChangeRequest(project.id, request.id, "批准");
+    const issue: QualityIssue = {
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      chapterId: chapter.id,
+      severity: "硬性",
+      category: "状态冲突",
+      message: "状态账本存在冲突",
+      evidence: "第1章",
+      status: "待处理",
+      createdAt: now(),
+    };
+    database.saveIssues(project.id, chapter.id, [issue]);
+    const detail = database.getProject(project.id);
+    expect(detail.changes.find((item) => item.id === request.id)?.status).toBe("已批准");
+    expect(detail.chapters[0]).toMatchObject({ status: "待发布", batchMode: "逐章" });
+    expect(detail.schedule[0].status).toBe("待发布");
+  });
+
+  it("refuses to restore a change request from history", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "账本回写",
+      genre: "都市脑洞",
+      targetWords: 1000000,
+      updateCadence: "每日1章",
+    });
+    const chapter = database.saveChapter(project.id, createChapter(1));
+    const change = database.saveChangeRequest(project.id, {
+      id: "",
+      targetKind: "章节",
+      targetId: chapter.id,
+      baseVersion: chapter.revision,
+      title: "改正文",
+      reason: "复核",
+      beforeValue: chapter.content,
+      afterValue: "新正文",
+      impact: "",
+      rollback: "",
+      status: "待审批",
+      createdAt: now(),
+    });
+    database.decideChangeRequest(project.id, change.id, "批准");
+    const revisions = database.listRevisions(project.id, "changes", change.id);
+    expect(revisions.length).toBeGreaterThan(0);
+
+    expect(() => database.restoreRevision(project.id, revisions[0].id)).toThrow("审计账本");
+    expect(database.getProject(project.id).changes.find((item) => item.id === change.id)?.status).toBe("已批准");
+  });
+
+  it("consumes only the restore change request when restoring a protected chapter", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "恢复消耗",
+      genre: "都市脑洞",
+      targetWords: 1000000,
+      updateCadence: "每日1章",
+    });
+    let chapter = database.saveChapter(project.id, createChapter(1, "初稿正文".repeat(40)));
+    chapter = database.saveChapter(project.id, { ...chapter, content: "第二稿正文".repeat(40) });
+    chapter = database.transitionChapter(project.id, chapter.id, "待质检");
+    chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
+    chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    database.saveSchedule(project.id, {
+      id: "",
+      projectId: project.id,
+      projectTitle: project.title,
+      chapterId: chapter.id,
+      chapterNumber: chapter.number,
+      chapterTitle: chapter.title,
+      publishAt: "2026-08-07T08:00:00.000Z",
+      status: "待发布",
+    });
+    const current = database.getChapter(project.id, chapter.id);
+    const userChange = database.saveChangeRequest(project.id, {
+      id: "",
+      targetKind: "章节",
+      targetId: chapter.id,
+      baseVersion: current.revision,
+      title: "用户改纲",
+      reason: "复核",
+      beforeValue: current.content,
+      afterValue: "用户修订正文",
+      impact: "",
+      rollback: "",
+      status: "待审批",
+      createdAt: now(),
+    });
+    database.decideChangeRequest(project.id, userChange.id, "批准");
+    const firstDraftRevision = database
+      .listRevisions(project.id, "chapters", chapter.id)
+      .find((item) => (item.payload as Chapter).content.startsWith("初稿正文"));
+    expect(firstDraftRevision).toBeTruthy();
+
+    database.restoreRevision(project.id, firstDraftRevision!.id);
+
+    const detail = database.getProject(project.id);
+    expect(detail.chapters[0].content.startsWith("初稿正文")).toBe(true);
+    expect(detail.changes.find((item) => item.id === userChange.id)?.status).toBe("已批准");
+    expect(detail.changes.find((item) => item.title === "恢复历史版本")?.status).toBe("已应用");
+  });
+
+  it("rebuilds summaries when an approved change reverts a finalized chapter", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "摘要回退",
+      genre: "都市脑洞",
+      targetWords: 1000000,
+      updateCadence: "每日1章",
+    });
+    let chapter = database.saveChapter(project.id, createChapter(1, "主角发现了旧城的秘密。".repeat(20)));
+    chapter = database.transitionChapter(project.id, chapter.id, "待质检");
+    chapter = database.transitionChapter(project.id, chapter.id, "待定稿");
+    chapter = database.transitionChapter(project.id, chapter.id, "已定稿");
+    const before = database.getProject(project.id).summaries.find((item) => item.id === `chapter:${chapter.id}`);
+    expect(before?.content).toContain("发现");
+
+    const current = database.getChapter(project.id, chapter.id);
+    const request = database.saveChangeRequest(project.id, {
+      id: "",
+      targetKind: "章节",
+      targetId: chapter.id,
+      baseVersion: current.revision,
+      title: "改正文",
+      reason: "复核",
+      beforeValue: current.content,
+      afterValue: "新正文",
+      impact: "",
+      rollback: "",
+      status: "待审批",
+      createdAt: now(),
+    });
+    database.decideChangeRequest(project.id, request.id, "批准");
+    database.saveChapter(project.id, { ...current, content: "主角揭露了旧城的秘密。".repeat(20) });
+
+    const detail = database.getProject(project.id);
+    expect(detail.chapters[0].status).toBe("待质检");
+    const after = detail.summaries.find((item) => item.id === `chapter:${chapter.id}`);
+    expect(after?.content).toContain("揭露");
+    expect(after?.content).not.toContain("发现");
+  });
+
+  it("matches a two-character query case-insensitively with a readable excerpt", () => {
+    const database = createDatabase();
+    const project = database.createProject({
+      title: "搜索大小写",
+      genre: "都市脑洞",
+      targetWords: 1000000,
+      updateCadence: "每日1章",
+    });
+    database.saveChapter(project.id, createChapter(1, "这里只有小写 ai 出现，后面还有更多线索。".repeat(10)));
+
+    const hits = database.searchProject(project.id, "AI");
+
+    expect(hits).toHaveLength(1);
+    expect(hits[0].excerpt).toContain("【AI】");
+    expect(hits[0].excerpt).toContain("出现");
+  });
+
   it("rejects approval when the long-form narrative engine is incomplete", () => {
     const database = createDatabase();
     const project = database.createProject({

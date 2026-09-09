@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
-import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
 import type { AutoBackupFrequency } from "../src/shared/types";
@@ -101,6 +101,9 @@ export async function createEncryptedBackup(workspaceRoot: string, destination: 
 }
 
 async function readVerifiedArchive(source: string, password: string) {
+  // 先看源文件大小，避免把超大包整个读进内存之后才拒绝。
+  const info = await stat(source);
+  if (!info.isFile() || info.size > MAX_RESTORE_BYTES) throw new Error("备份文件超过 2GB 安全限制");
   const payload = await readFile(source);
   const header = payload.subarray(0, MAGIC.length);
   const legacy = header.equals(MAGIC_V1);
@@ -142,6 +145,11 @@ async function readVerifiedArchive(source: string, password: string) {
     if (path.isAbsolute(normalized) || normalized.startsWith("..")) throw new Error("备份包含不安全路径");
     const entry = zip.file(item.path);
     if (!entry) throw new Error(`备份缺少文件：${item.path}`);
+    // 先比对压缩包头声明的解压体积，再解压，避免"声明 1 字节、实际数 GB"的包被完整解出来。
+    const declaredUncompressed = (entry as unknown as { _data?: { uncompressedSize?: number } })._data
+      ?.uncompressedSize;
+    if (typeof declaredUncompressed === "number" && declaredUncompressed > item.bytes)
+      throw new Error(`文件声明大小异常：${item.path}`);
     const data = await entry.async("nodebuffer");
     if (data.byteLength !== item.bytes) throw new Error(`文件校验失败：${item.path}`);
   }

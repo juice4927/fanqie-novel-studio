@@ -12,6 +12,7 @@ import {
   assertChapterTransition,
   deriveChapterBatchMode,
   isProtectedChapterEdit,
+  PROTECTED_CHAPTER_STATUSES,
   prepareChapterSave,
 } from "../src/shared/chapter-lifecycle";
 import { approveContractDraft, prepareContractUpdate } from "../src/shared/contract-service";
@@ -778,7 +779,7 @@ export class WorkspaceDatabase {
     return chapter;
   }
 
-  saveContract(id: string, contract: StoryContract) {
+  saveContract(id: string, contract: StoryContract, changeRequestId?: string) {
     const db = this.projectDb(id);
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -788,7 +789,10 @@ export class WorkspaceDatabase {
         db.exec("COMMIT");
         return previous;
       }
-      if (previous.approved && !this.consumeApprovedChange(db, "创作契约", "contract", previous.version))
+      if (
+        previous.approved &&
+        !this.consumeApprovedChange(db, "创作契约", "contract", previous.version, changeRequestId)
+      )
         throw new Error("已审批创作契约只能通过已批准的改纲变更单修改");
       const next = update.contract;
       this.addRevision(db, "state", "contract", previous.version, previous);
@@ -838,7 +842,7 @@ export class WorkspaceDatabase {
     this.touchProject(id);
   }
 
-  savePlan(id: string, plan: PlanNode) {
+  savePlan(id: string, plan: PlanNode, changeRequestId?: string) {
     const db = this.projectDb(id);
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -850,7 +854,13 @@ export class WorkspaceDatabase {
       }
       if (
         prepared.protectedEdit &&
-        !this.consumeApprovedChange(db, "规划", previous!.id, this.entityVersion(db, "plans", previous!.id))
+        !this.consumeApprovedChange(
+          db,
+          "规划",
+          previous!.id,
+          this.entityVersion(db, "plans", previous!.id),
+          changeRequestId,
+        )
       ) {
         throw new Error("已批准规划只能通过已批准的改纲变更单修改");
       }
@@ -877,8 +887,8 @@ export class WorkspaceDatabase {
     this.touchProject(id);
   }
 
-  saveChapter(id: string, chapter: Chapter, mode: ChapterSaveMode = "version") {
-    return this.persistChapter(id, chapter, undefined, mode === "version");
+  saveChapter(id: string, chapter: Chapter, mode: ChapterSaveMode = "version", changeRequestId?: string) {
+    return this.persistChapter(id, chapter, undefined, mode === "version", undefined, changeRequestId);
   }
 
   saveGeneratedChapter(id: string, chapter: Chapter, expected?: ChapterGenerationGuard) {
@@ -892,14 +902,31 @@ export class WorkspaceDatabase {
     forcedStatus?: ChapterStatus,
     createRevision = true,
     expected?: ChapterGenerationGuard,
+    changeRequestId?: string,
   ) {
     const db = this.projectDb(id);
+    const previous = chapter.id ? this.projects.getChapter(db, chapter.id) : undefined;
     db.exec("BEGIN IMMEDIATE");
     try {
-      const saved = this.persistChapterInTransaction(db, id, chapter, forcedStatus, createRevision, expected);
+      const saved = this.persistChapterInTransaction(
+        db,
+        id,
+        chapter,
+        forcedStatus,
+        createRevision,
+        expected,
+        changeRequestId,
+      );
       injectFault("power-loss-before-commit");
       db.exec("COMMIT");
       this.touchProject(id);
+      // 章节被变更单拉出定稿集后，旧正文的摘要会继续进入生成上下文；这里按新正文重建。
+      if (
+        previous &&
+        PROTECTED_CHAPTER_STATUSES.includes(previous.status) &&
+        !PROTECTED_CHAPTER_STATUSES.includes(saved.status)
+      )
+        this.updateSummaries(id, saved);
       return saved;
     } catch (error) {
       try {
@@ -918,6 +945,7 @@ export class WorkspaceDatabase {
     forcedStatus?: ChapterStatus,
     createRevision = true,
     expected?: ChapterGenerationGuard,
+    changeRequestId?: string,
   ) {
     const previous = chapter.id ? this.projects.getChapter(db, chapter.id) : undefined;
     if (
@@ -929,7 +957,7 @@ export class WorkspaceDatabase {
       throw new Error("章节在 AI 生成期间已被修改，旧生成结果未保存");
     }
     const protectedEdit = isProtectedChapterEdit(previous, chapter);
-    if (protectedEdit && !this.consumeApprovedChange(db, "章节", previous!.id, previous!.revision)) {
+    if (protectedEdit && !this.consumeApprovedChange(db, "章节", previous!.id, previous!.revision, changeRequestId)) {
       throw new Error("已定稿或进入发布流程的章节只能通过匹配的已批准变更单修改");
     }
     const facts = this.listRecords<LedgerFact>(db, "facts");
@@ -1157,6 +1185,8 @@ export class WorkspaceDatabase {
     const db = this.projectDb(id);
     const row = this.revisions.get(db, revisionId);
     if (!row) throw new Error("历史版本不存在");
+    // 变更单是审批与消耗的审计账本，回写历史状态会让"已应用"重新变回"已批准"。
+    if (row.collection === "changes") throw new Error("变更单是审计账本，不支持恢复历史版本");
     const payload = parseJson<unknown>(row.payload);
     const authorizeRestore = (
       targetKind: ChangeRequest["targetKind"],
@@ -1179,21 +1209,36 @@ export class WorkspaceDatabase {
         createdAt: now(),
       };
       this.saveRecord(db, "changes", change.id, change);
+      return change.id;
+    };
+    // 保存链路按 id 精确消耗恢复变更单，避免误耗用户自己同目标、同版本的合法变更单；
+    // 保存失败时删除恢复变更单，避免留下一条永远用不上的"已批准"。
+    const saveWithRestoreChange = (changeId: string | null, save: () => unknown) => {
+      try {
+        save();
+      } catch (error) {
+        if (changeId) db.prepare("DELETE FROM records WHERE collection = ? AND id = ?").run("changes", changeId);
+        throw error;
+      }
     };
     if (row.collection === "chapters") {
       const current = this.projects.getChapter(db, row.entity_id);
-      if (current && isProtectedChapterEdit(current, payload as Chapter))
-        authorizeRestore("章节", current.id, current.revision, current);
-      this.saveChapter(id, payload as Chapter);
+      const changeId =
+        current && isProtectedChapterEdit(current, payload as Chapter)
+          ? authorizeRestore("章节", current.id, current.revision, current)
+          : null;
+      saveWithRestoreChange(changeId, () => this.saveChapter(id, payload as Chapter, "version", changeId ?? undefined));
     } else if (row.collection === "plans") {
       const current = this.getRecord<PlanNode>(db, "plans", row.entity_id);
-      if (current?.status === "已批准")
-        authorizeRestore("规划", current.id, this.entityVersion(db, "plans", current.id), current);
-      this.savePlan(id, payload as PlanNode);
+      const changeId =
+        current?.status === "已批准"
+          ? authorizeRestore("规划", current.id, this.entityVersion(db, "plans", current.id), current)
+          : null;
+      saveWithRestoreChange(changeId, () => this.savePlan(id, payload as PlanNode, changeId ?? undefined));
     } else if (row.collection === "state" && row.entity_id === "contract") {
       const current = this.getState<StoryContract>(db, "contract");
-      if (current.approved) authorizeRestore("创作契约", "contract", current.version, current);
-      this.saveContract(id, payload as StoryContract);
+      const changeId = current.approved ? authorizeRestore("创作契约", "contract", current.version, current) : null;
+      saveWithRestoreChange(changeId, () => this.saveContract(id, payload as StoryContract, changeId ?? undefined));
     } else this.saveRecord(db, row.collection, row.entity_id, payload);
     this.touchProject(id);
   }
@@ -1205,9 +1250,11 @@ export class WorkspaceDatabase {
       const plan = prepareQualityIssueSave(this.listRecords<QualityIssue>(db, "issues"), chapterId, issues);
       for (const issue of plan.upserts) this.saveRecord(db, "issues", issue.id, issue);
       if (plan.forceSequentialReview) {
+        // 逐章复核是工作流派生标记，不是用户内容修改：直接改列，
+        // 不走受保护内容门禁（否则一次质检会消耗变更单，或整批质检结果回滚）。
         const chapter = this.projects.getChapter(db, chapterId);
         if (chapter && chapter.batchMode !== "逐章")
-          this.persistChapterInTransaction(db, id, { ...chapter, batchMode: "逐章" });
+          db.prepare("UPDATE chapters SET batch_mode = ? WHERE id = ?").run("逐章", chapterId);
       }
       injectFault("power-loss-before-commit");
       db.exec("COMMIT");
@@ -1906,16 +1953,18 @@ export class WorkspaceDatabase {
     targetKind: ChangeRequest["targetKind"],
     targetId: string,
     baseVersion: number,
+    changeRequestId?: string,
   ) {
-    const change = this.listRecords<ChangeRequest>(db, "changes")
-      .filter(
-        (item) =>
-          item.status === "已批准" &&
-          item.targetKind === targetKind &&
-          item.targetId === targetId &&
-          item.baseVersion === baseVersion,
-      )
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
+    const matches = (item: ChangeRequest) =>
+      item.status === "已批准" &&
+      item.targetKind === targetKind &&
+      item.targetId === targetId &&
+      item.baseVersion === baseVersion;
+    const change = changeRequestId
+      ? this.listRecords<ChangeRequest>(db, "changes").find((item) => item.id === changeRequestId && matches(item))
+      : this.listRecords<ChangeRequest>(db, "changes")
+          .filter(matches)
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
     if (!change) return false;
     this.saveRecord(db, "changes", change.id, { ...change, status: "已应用" });
     return true;
@@ -2015,9 +2064,20 @@ export class WorkspaceDatabase {
       chapter,
       now(),
     );
-    for (const summary of updates) {
-      const previous = this.getRecord<StorySummary>(db, "summaries", summary.id);
-      this.saveRecord(db, "summaries", summary.id, summary, previous?.version);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const summary of updates) {
+        const previous = this.getRecord<StorySummary>(db, "summaries", summary.id);
+        this.saveRecord(db, "summaries", summary.id, summary, previous?.version);
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
+      throw error;
     }
   }
 }

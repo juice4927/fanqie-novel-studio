@@ -15,8 +15,8 @@ export class SearchRepository {
         .prepare(`
         SELECT c.id, c.title,
           CASE
-            WHEN instr(COALESCE(b.content, ''), ?) > 0
-              THEN substr(b.content, max(1, instr(b.content, ?) - 20), length(?) + 40)
+            WHEN instr(lower(COALESCE(b.content, '')), lower(?)) > 0
+              THEN substr(b.content, max(1, instr(lower(b.content), lower(?)) - 20), length(?) + 40)
             ELSE c.title
           END AS excerpt
         FROM chapters c
@@ -34,7 +34,18 @@ export class SearchRepository {
         const chapter = byId.get(hit.id);
         if (!chapter) return [];
         const source = hit.excerpt || hit.title;
-        const index = source.indexOf(normalized);
+        // SQLite LIKE 对 ASCII 大小写不敏感，这里也要用同口径定位，否则 index=-1 会拼出错乱片段。
+        const index = source.toLowerCase().indexOf(normalized.toLowerCase());
+        if (index < 0)
+          return [
+            {
+              id: chapter.id,
+              type: "章节" as const,
+              title: `第${chapter.number}章 ${chapter.title}`,
+              excerpt: hit.title,
+              chapterNumber: chapter.number,
+            },
+          ];
         const from = Math.max(0, index - 20);
         const to = Math.min(source.length, index + normalized.length + 20);
         const excerpt = `${from ? "…" : ""}${source.slice(from, index)}【${normalized}】${source.slice(index + normalized.length, to)}${to < source.length ? "…" : ""}`;
