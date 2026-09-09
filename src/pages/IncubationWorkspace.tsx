@@ -44,6 +44,9 @@ export function IncubationWorkspace({
   const [busy, setBusy] = useState(false);
   const [busyMessage, setBusyMessage] = useState("正在处理…");
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
+  // 采用方案必须有本地状态：只写库不更新 prop 会让界面停留在旧方案，
+  // 随后 promote 的 persist 又会用旧值把库里的切换覆盖回去。
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [signatures, setSignatures] = useState<Array<{ title: string; premise: string; openingMechanism: string }>>([]);
 
   useEffect(() => {
@@ -64,6 +67,7 @@ export function IncubationWorkspace({
   const draft = drafts.find((item) => item.id === selectedId) ?? drafts[0] ?? null;
   useEffect(() => {
     setAcknowledged(draft?.review.acknowledged ?? []);
+    setSelectedCandidateId(draft?.selectedCandidateId ?? draft?.candidates[0]?.id ?? null);
   }, [draft]);
   useEffect(() => {
     if (!draft && drafts.length) setSelectedId(drafts[0].id);
@@ -81,7 +85,9 @@ export function IncubationWorkspace({
     [draft],
   );
   const selectedCandidate =
-    draft?.candidates.find((item) => item.id === draft.selectedCandidateId) ?? draft?.candidates[0] ?? null;
+    draft?.candidates.find((item) => item.id === (selectedCandidateId ?? draft.selectedCandidateId)) ??
+    draft?.candidates[0] ??
+    null;
   const findings = useMemo(
     () =>
       draft && selectedCandidate
@@ -103,12 +109,12 @@ export function IncubationWorkspace({
   const summary = summarizeFindings(findings);
   const blocking = blockingFindings(findings, acknowledged);
 
-  const persist = async (overrides: Partial<IncubationDraft>) => {
+  const persist = async (overrides: Partial<IncubationDraft>, acknowledgedOverride?: string[]) => {
     if (!draft) return null;
     return api.saveIncubation({
       ...draft,
-      selectedCandidateId: selectedCandidate?.id ?? draft.selectedCandidateId,
-      review: { acknowledged },
+      selectedCandidateId: selectedCandidateId ?? draft.selectedCandidateId,
+      review: { acknowledged: acknowledgedOverride ?? acknowledged },
       updatedAt: new Date().toISOString(),
       ...overrides,
     });
@@ -250,8 +256,9 @@ export function IncubationWorkspace({
                         key={candidate.id}
                         className={candidate.id === selectedCandidate?.id ? "selected" : ""}
                         onClick={() => {
+                          setSelectedCandidateId(candidate.id);
                           setAcknowledged([]);
-                          void persist({ selectedCandidateId: candidate.id });
+                          void persist({ selectedCandidateId: candidate.id }, []);
                         }}
                       >
                         {candidate.title}
@@ -338,7 +345,11 @@ export function IncubationWorkspace({
                             <Button
                               variant="secondary"
                               disabled={busy}
-                              onClick={() => setAcknowledged((current) => [...current, item.id])}
+                              onClick={() =>
+                                setAcknowledged((current) =>
+                                  current.includes(item.id) ? current : [...current, item.id],
+                                )
+                              }
                             >
                               {cleared ? "已确认" : "人工确认"}
                             </Button>

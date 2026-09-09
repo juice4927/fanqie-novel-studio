@@ -241,6 +241,10 @@ export function NewProjectModal({
     setSelectedId(null);
     setAcknowledged([]);
   };
+  /** 不影响方案生成的字段（如安全存稿线）：只改定位，保留已生成候选。 */
+  const patchMeta = (next: Partial<IncubationPositioning>) => {
+    setPositioning((current) => normalizePositioning({ ...current, ...next }));
+  };
 
   const selectCategory = (key: string) => {
     const profile = getFanqieCategoryProfile(key);
@@ -759,7 +763,7 @@ export function NewProjectModal({
                 min={0}
                 max={1000}
                 value={positioning.safeStockLine}
-                onChange={(event) => patch({ safeStockLine: Number(event.target.value) })}
+                onChange={(event) => patchMeta({ safeStockLine: Number(event.target.value) })}
                 disabled={busy}
               />
             </Field>

@@ -133,11 +133,15 @@ export function registerProjectHandlers({
   register("getCategoryTags", (categoryKey) => {
     const profile = getFanqieCategoryProfile(categoryKey);
     if (!profile) return [];
-    return aggregateCategoryTags(database.listRankings(), profile.name);
+    return aggregateCategoryTags(database.listRankings(), profile.name, profile.channel);
   });
   register("generateLaunchPack", async (projectId, options) => {
     const project = database.getProjectOverview(projectId);
     if (!project.contract.approved) throw new Error("必须先审批创作契约，才能生成开书包");
+    // 开书包只产出草稿规划，无法靠状态判断"已生成过"；这里按存在性挡住重复生成，
+    // 否则第二次会用新章节 id 复制一整套章纲（库内无删除章节入口）。
+    if (project.plans.length || project.chapters.length)
+      throw new Error("该项目已有规划或章节，开书包只能生成一次；如需重做请先删除对应草稿");
     let plans = 0;
     let chapters = 0;
     if (options.withStructure) {

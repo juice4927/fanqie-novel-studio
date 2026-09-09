@@ -188,35 +188,38 @@ export function ProjectDashboard({
               </button>
             ))}
           </div>
-          {project.contract.approved && !approvedPlans.some((plan) => plan.kind === "分卷") && (
-            <div className="launch-pack">
-              <p>
-                契约已审批。可以一键生成开书包：4–8 个宏观阶段、3–6 个分卷骨架与前 10
-                章章纲，全部为草稿状态，仍需你逐项确认。
-              </p>
-              <Button
-                icon={launchBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-                disabled={launchBusy}
-                onClick={async () => {
-                  setLaunchBusy(true);
-                  try {
-                    const result = await api.generateLaunchPack(project.summary.id, {
-                      withStructure: true,
-                      withFirstChapters: true,
-                    });
-                    await reload();
-                    notify(`已生成 ${result.plans} 个规划草稿和 ${result.chapters} 章章纲，请到规划台逐项确认`);
-                  } catch (error) {
-                    notify(describeError(error), "error");
-                  } finally {
-                    setLaunchBusy(false);
-                  }
-                }}
-              >
-                {launchBusy ? "正在生成开书包…" : "生成开书包"}
-              </Button>
-            </div>
-          )}
+          {project.contract.approved &&
+            !approvedPlans.some((plan) => plan.kind === "分卷") &&
+            !project.plans.length &&
+            !project.chapters.length && (
+              <div className="launch-pack">
+                <p>
+                  契约已审批。可以一键生成开书包：4–8 个宏观阶段、3–6 个分卷骨架与前 10
+                  章章纲，全部为草稿状态，仍需你逐项确认。
+                </p>
+                <Button
+                  icon={launchBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                  disabled={launchBusy}
+                  onClick={async () => {
+                    setLaunchBusy(true);
+                    try {
+                      const result = await api.generateLaunchPack(project.summary.id, {
+                        withStructure: true,
+                        withFirstChapters: true,
+                      });
+                      await reload();
+                      notify(`已生成 ${result.plans} 个规划草稿和 ${result.chapters} 章章纲，请到规划台逐项确认`);
+                    } catch (error) {
+                      notify(describeError(error), "error");
+                    } finally {
+                      setLaunchBusy(false);
+                    }
+                  }}
+                >
+                  {launchBusy ? "正在生成开书包…" : "生成开书包"}
+                </Button>
+              </div>
+            )}
         </div>
         <div className="section-band compact-band">
           <div className="section-heading">
@@ -330,7 +333,10 @@ export function ProjectDashboard({
                 <footer>
                   <Button
                     variant="secondary"
-                    disabled={concept.originalityRisk === "高"}
+                    disabled={concept.originalityRisk === "高" || project.contract.approved}
+                    title={
+                      project.contract.approved ? "契约已审批：如需调整方向，请到故事圣经提交改纲变更单" : undefined
+                    }
                     onClick={async () => {
                       try {
                         await api.saveContract(project.summary.id, {

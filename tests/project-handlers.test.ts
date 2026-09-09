@@ -294,10 +294,10 @@ describe("project handlers", () => {
     );
   });
 
-  it("generates the launch pack only after the contract is approved", async () => {
+  it("generates the launch pack only once, and only after the contract is approved", async () => {
     const { dependencies, handlers, database, ai } = createDependencies();
     registerProjectHandlers(dependencies);
-    const approved = { summary: project, contract: { approved: true }, metrics: [] };
+    const approved = { summary: project, contract: { approved: true }, metrics: [], plans: [], chapters: [] };
     database.getProjectOverview = vi.fn(() => approved);
     const structure = {
       startChapter: 1,
@@ -323,7 +323,24 @@ describe("project handlers", () => {
     expect(database.savePlan).toHaveBeenCalledTimes(2);
     expect(database.saveChapter).toHaveBeenCalledWith(project.id, chapters.chapters[0], "autosave");
 
-    database.getProjectOverview = vi.fn(() => ({ summary: project, contract: { approved: false }, metrics: [] }));
+    // 开书包产出的都是草稿规划，不能靠状态判断"已生成过"：已有规划或章节时必须拒绝重复生成。
+    database.getProjectOverview = vi.fn(() => ({
+      ...approved,
+      plans: structure.plans,
+      chapters: chapters.chapters,
+    }));
+    await expect(
+      handlers.get("generateLaunchPack")!(project.id, { withStructure: true, withFirstChapters: true }),
+    ).rejects.toThrow("只能生成一次");
+    expect(database.saveChapter).toHaveBeenCalledTimes(1);
+
+    database.getProjectOverview = vi.fn(() => ({
+      summary: project,
+      contract: { approved: false },
+      metrics: [],
+      plans: [],
+      chapters: [],
+    }));
     await expect(
       handlers.get("generateLaunchPack")!(project.id, { withStructure: true, withFirstChapters: false }),
     ).rejects.toThrow("必须先审批创作契约");

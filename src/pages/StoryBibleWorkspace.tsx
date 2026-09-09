@@ -1,5 +1,5 @@
 import { Check, LoaderCircle, LockKeyhole, Save, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Button, Field, Input, Select, Textarea } from "../components/UI";
 import { describeError } from "../lib/error-message";
 import { normalizeAestheticProfile } from "../shared/aesthetic-profile";
@@ -59,7 +59,21 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
   const [contract, setContract] = useState<StoryContract>(() => normalizeContract(project.contract));
   const [aestheticSuggestion, setAestheticSuggestion] = useState<AestheticProfileSuggestion | null>(null);
   const [optimizingAesthetic, setOptimizingAesthetic] = useState(false);
-  useEffect(() => setContract(normalizeContract(project.contract)), [project.contract]);
+  const baselineRef = useRef(JSON.stringify(normalizeContract(project.contract)));
+  const [serverUpdated, setServerUpdated] = useState(false);
+  useEffect(() => {
+    const next = normalizeContract(project.contract);
+    const nextSignature = JSON.stringify(next);
+    if (nextSignature === baselineRef.current) return;
+    // 后台 reload 会换掉整个 project 对象；本地有未保存修改时不要静默覆盖表单。
+    if (JSON.stringify(contract) !== baselineRef.current) {
+      setServerUpdated(true);
+      return;
+    }
+    baselineRef.current = nextSignature;
+    setContract(next);
+    setServerUpdated(false);
+  }, [project.contract, contract]);
   const set = (key: keyof StoryContract, value: string | string[]) =>
     setContract((current) => ({ ...current, [key]: value }));
   const setAesthetic = <K extends keyof AestheticProfile>(key: K, value: AestheticProfile[K]) =>
@@ -74,7 +88,10 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
     try {
       const previousVersion = contract.version;
       const saved = await api.saveContract(project.summary.id, contract);
-      setContract(saved);
+      const normalized = normalizeContract(saved);
+      baselineRef.current = JSON.stringify(normalized);
+      setContract(normalized);
+      setServerUpdated(false);
       setAestheticSuggestion(null);
       await reload();
       notify(saved.version === previousVersion ? "创作契约内容未变" : `创作契约已保存为 v${saved.version}`);
@@ -132,6 +149,22 @@ export function StoryBiblePage({ project, api, reload, notify }: StoryBiblePageP
           </Button>
         </div>
       </header>
+      {serverUpdated && (
+        <div role="alert" className="inline-warning">
+          <span>服务器上的创作契约已更新，当前表单保留你的未保存修改。</span>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const next = normalizeContract(project.contract);
+              baselineRef.current = JSON.stringify(next);
+              setContract(next);
+              setServerUpdated(false);
+            }}
+          >
+            载入服务器版本
+          </Button>
+        </div>
+      )}
       <section className="section-band bible-form">
         <Field label="番茄目标分类" hint="把番茄官方细分类映射到本项目的生成、规划与质检规则">
           <Select
