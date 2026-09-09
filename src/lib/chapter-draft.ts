@@ -18,9 +18,17 @@ export function readRecoveredChapter(
     const recovered = storage.getItem(chapterRecoveryKey(projectId, chapter));
     if (!recovered) return chapter;
     const parsed = JSON.parse(recovered) as Chapter;
-    if (parsed.id !== chapter.id || parsed.revision < chapter.revision) return chapter;
-    if (parsed.revision === chapter.revision && Date.parse(parsed.updatedAt) < Date.parse(chapter.updatedAt))
-      return chapter;
+    if (parsed.id !== chapter.id) return chapter;
+    // 尚未落库的新章没有服务端版本可比较：恢复稿只要有内容就采用。
+    // 否则 EMPTY_CHAPTER 每次生成的当前时间戳会让恢复稿永远"过期"。
+    if (!chapter.id) return parsed.content.trim() || parsed.outline.trim() ? parsed : chapter;
+    if (parsed.revision < chapter.revision) return chapter;
+    if (parsed.revision === chapter.revision) {
+      const recoveredAt = Date.parse(parsed.updatedAt);
+      const currentAt = Date.parse(chapter.updatedAt);
+      // 时间戳非法时视为无效恢复稿，避免用陈旧内容覆盖服务端同版本内容。
+      if (!Number.isFinite(recoveredAt) || !Number.isFinite(currentAt) || recoveredAt < currentAt) return chapter;
+    }
     return parsed;
   } catch {
     return chapter;
@@ -33,7 +41,12 @@ export function writeRecoveredChapter(
   storage: Pick<Storage, "setItem"> = localStorage,
 ) {
   try {
-    storage.setItem(chapterRecoveryKey(projectId, chapter), JSON.stringify(chapter));
+    // 恢复稿代表本地尚未落盘的最新编辑，写入时补上时间戳，
+    // 避免保存后继续输入的内容因草稿对象仍持有旧 updatedAt 而被判定过期。
+    storage.setItem(
+      chapterRecoveryKey(projectId, chapter),
+      JSON.stringify({ ...chapter, updatedAt: new Date().toISOString() }),
+    );
     return true;
   } catch {
     return false;
@@ -85,6 +98,10 @@ export class AutosaveCoordinator {
   saveLatest(chapter: Chapter, save: (chapter: Chapter) => Promise<Chapter> = this.save) {
     if (this.stopped) return Promise.reject(new Error("自动保存已停止"));
     const snapshot = { ...chapter };
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
     this.pending = { chapter: snapshot, save, explicit: true };
     this.pendingAutosave = null;
     const signature = chapterDraftSignature(snapshot);

@@ -360,6 +360,7 @@ export function WritingPage({
   };
   const save = async () => {
     const snapshot = draftRef.current;
+    const snapshotChapterId = snapshot.id;
     const snapshotSignature = chapterDraftSignature(snapshot);
     setSaveStatus("saving");
     try {
@@ -368,13 +369,16 @@ export function WritingPage({
         ? await coordinator.saveLatest(snapshot, (value) => api.saveChapter(project.summary.id, value))
         : await api.saveChapter(project.summary.id, snapshot);
       clearRecoveredChapter(project.summary.id, snapshot);
-      lastSavedSignature.current = snapshotSignature;
-      setSelectedId(saved.id);
-      if (chapterDraftSignature(draftRef.current) === snapshotSignature) {
-        draftRef.current = saved;
-        setDraft(saved);
-        setSaveStatus("saved");
-      } else setSaveStatus("dirty");
+      // 保存期间用户可能已切到别的章节：只有仍在本章时才更新签名与选中项，避免被拉回旧章。
+      if (draftRef.current.id === snapshotChapterId) {
+        lastSavedSignature.current = snapshotSignature;
+        setSelectedId(saved.id);
+        if (chapterDraftSignature(draftRef.current) === snapshotSignature) {
+          draftRef.current = saved;
+          setDraft(saved);
+          setSaveStatus("saved");
+        } else setSaveStatus("dirty");
+      }
       await reload();
       notify("章节已保存并建立新版本");
     } catch (error) {
@@ -1744,7 +1748,9 @@ export function WritingPage({
                       </Button>
                       <Button
                         variant="secondary"
+                        disabled={busy}
                         onClick={async () => {
+                          setBusy(true);
                           try {
                             await api.restoreRevision(project.summary.id, revision.id);
                             await reload();
@@ -1758,6 +1764,8 @@ export function WritingPage({
                             notify(`已从 v${revision.revision} 建立新的当前版本`);
                           } catch (error) {
                             notify(describeError(error), "error");
+                          } finally {
+                            setBusy(false);
                           }
                         }}
                       >

@@ -107,6 +107,47 @@ describe("chapter draft reliability", () => {
     expect(readRecoveredChapter("project", empty, storage).content).toBe("新章草稿");
   });
 
+  it("keeps a new chapter recovery draft even when the placeholder timestamp is newer", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    // 真实路径里 EMPTY_CHAPTER 每次都用当前时间，恢复稿必然显得"更旧"。
+    const empty: Chapter = { ...chapter(""), id: "", number: 3, revision: 0, updatedAt: new Date().toISOString() };
+    const recovered: Chapter = {
+      ...empty,
+      content: "上次会话未保存的新章正文",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    };
+    values.set(chapterRecoveryKey("project", empty), JSON.stringify(recovered));
+
+    expect(readRecoveredChapter("project", empty, storage).content).toBe("上次会话未保存的新章正文");
+  });
+
+  it("stamps recovery writes so post-save local edits are not treated as stale", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const server = chapter("服务端已保存正文", "chapter-1", "2026-08-01T10:00:00.000Z");
+    const local = chapter("保存后继续输入的内容", "chapter-1", "2026-08-01T09:00:00.000Z");
+
+    writeRecoveredChapter("project", local, storage);
+
+    expect(readRecoveredChapter("project", server, storage).content).toBe("保存后继续输入的内容");
+  });
+
+  it("drops a recovery copy whose timestamp is invalid", () => {
+    const values = new Map<string, string>();
+    const server = chapter("服务端新稿", "chapter-1", "2026-08-01T00:00:00.000Z");
+    const invalid = { ...server, content: "时间戳非法的恢复稿", updatedAt: "not-a-date" };
+    values.set(chapterRecoveryKey("project", server), JSON.stringify(invalid));
+
+    expect(readRecoveredChapter("project", server, { getItem: (key) => values.get(key) ?? null })).toBe(server);
+  });
+
   it("reports when the local recovery copy cannot be written", () => {
     const storage = {
       setItem: () => {
