@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { compileAestheticGuidance } from "../src/shared/aesthetic-profile";
+import { toStrictJsonSchema } from "../src/shared/ai/strict-json-schema";
 import type { ApiSurface, ModelRole, TaskModelOverride } from "../src/shared/ai/types";
 import {
   compileCommercialGuidance,
@@ -259,7 +260,8 @@ export class AiService {
     const deadline = startedAt + timeoutMs;
     const jsonSchema = (() => {
       const { $schema: _metaSchema, ...schema } = z.toJSONSchema(options.schema) as Record<string, unknown>;
-      return schema;
+      // 原生结构化输出走严格模式，required 必须覆盖全部属性，否则接口直接 400。
+      return toStrictJsonSchema(schema);
     })();
     const schemaName = options.taskType.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "structured_response";
     // A saved setting is the author's global preference; task defaults only

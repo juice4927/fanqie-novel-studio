@@ -431,6 +431,44 @@ describe("AI provider routing", () => {
     expect(body).not.toHaveProperty("response_format");
   });
 
+  it("把含可选字段的 schema 归一化成严格模式可接受的形态", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output: [{ content: [{ type: "output_text", text: "{}" }] }],
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const issue = {
+      id: "issue-strict",
+      projectId: project.summary.id,
+      chapterId: chapter.id,
+      severity: "硬性",
+      category: "知识边界",
+      message: "角色使用了尚未知晓的信息",
+      evidence: "林舟直接说出未知密码",
+      status: "待处理",
+      createdAt: new Date().toISOString(),
+    } satisfies QualityIssue;
+
+    await expect(
+      new AiService(databaseFor("gpt-5.1"), () => "secret").reviseChapter(project, chapter, context, [issue]),
+    ).rejects.toThrow();
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const schema = body.text.format.schema as {
+      required: string[];
+      properties: Record<string, unknown>;
+      additionalProperties: boolean;
+    };
+    expect(schema.required).toEqual(Object.keys(schema.properties));
+    expect(schema.additionalProperties).toBe(false);
+  });
+
   it("lets an explicit global reasoning effort override the task default", async () => {
     const fetchMock = vi.fn(
       async () =>
