@@ -16,6 +16,7 @@ export {
   parseResponsesOutput,
   parseResponsesRefusal,
   readResponsesStream,
+  rejectsNativeStructuredOutput,
   rejectsResponsesApi,
 } from "./ai/drivers/openai-responses";
 export { type ProviderUsage, parseProviderUsage } from "./ai/drivers/usage";
@@ -47,6 +48,14 @@ export function rejectsStreaming(status: number, detail: string) {
 /** 输出上限被供应商拒绝：请求的 max_tokens / max_output_tokens 超过模型能力。 */
 export function rejectsOutputTokenLimit(status: number, detail: string) {
   return status === 400 && /max[_\s-]?(?:output[_\s-]?)?tokens?/i.test(detail);
+}
+
+/** 输入超长：窗口未知或估算偏差时，调用方应降低预算重试一次。 */
+export function rejectsContextLength(status: number, detail: string) {
+  if (status !== 400 && status !== 413) return false;
+  return /(?:context length|context_length|maximum context|too many tokens|prompt is too long|input is too long|exceeds? (?:the )?(?:maximum )?(?:context|token)|上下文长度|超出.{0,10}(?:长度|上限))/i.test(
+    detail,
+  );
 }
 
 export function usesResponsesApi(model: string) {

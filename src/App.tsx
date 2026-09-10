@@ -239,7 +239,7 @@ function Workbench() {
             setCreateModal(null);
             await reload();
             openProject(created.id);
-            notify("作品与创作契约草案已创建，请先在故事圣经中审核");
+            notify("作品已创建，完整创作包已开始生成");
           }}
         />
       )}

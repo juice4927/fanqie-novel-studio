@@ -35,6 +35,21 @@ function createContract(overrides: Partial<StoryContract> = {}): StoryContract {
 }
 
 describe("contract workflow rules", () => {
+  it("requires a new approval when detailed bible sections change", () => {
+    const previous = createContract();
+    const update = prepareContractUpdate(
+      previous,
+      {
+        ...previous,
+        genreSpecificSections: [{ label: "人物档案", items: ["调查搭档隐瞒了事故现场的真实身份"] }],
+      },
+      timestamp,
+    );
+    expect(update.changed).toBe(true);
+    expect(update.contract.approved).toBe(false);
+    expect(update.contract.version).toBe(previous.version + 1);
+  });
+
   it("treats omitted optional defaults and normalized defaults as unchanged", () => {
     const previous = createContract({
       aestheticProfile: undefined,

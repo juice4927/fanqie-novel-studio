@@ -342,6 +342,7 @@ describe("AI handlers", () => {
       "generateConcepts",
       "generatePlanningDraft",
       "getAiSettings",
+      "judgeChapterDrafts",
       "listAiJobs",
       "previewChapterBatch",
       "retryAiJob",

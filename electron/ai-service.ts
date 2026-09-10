@@ -8,7 +8,8 @@ import {
   compileDeconstructionFramework,
   resolveStoryStage,
 } from "../src/shared/commercial-knowledge";
-import { renderContextForPrompt } from "../src/shared/context-compiler";
+import { contextBudgetTokens, resolveContextWindow, scaledCap } from "../src/shared/context-budget";
+import { renderContextForPrompt, renderStableBookContext } from "../src/shared/context-compiler";
 import { compilePositioningCard } from "../src/shared/creation-options";
 import { resolveStructurePreset } from "../src/shared/creation-presets";
 import { AppError, isAppError } from "../src/shared/error-codes";
@@ -25,14 +26,23 @@ import {
   resolveGuidanceLevel,
 } from "../src/shared/guidance-mode";
 import { chapterRevisionSnapshot, contractFieldText, planRevisionSnapshot } from "../src/shared/novel-revision";
+import { compareDrafts, type DraftCandidate } from "../src/shared/pairwise-review";
+import { COARSE_BLOCK_CHAPTERS, volumeRanges } from "../src/shared/planning";
+
+/** 规划批次里直接携带的前序章纲条数（更早的走近窗与摘要）。 */
+const PRIOR_CHAPTER_LIMIT = 20;
+
 import { PROMPT_VERSION } from "../src/shared/prompt-version";
 import { parseStoryNumber } from "../src/shared/story-constraints";
+import { buildLongTermMemory } from "../src/shared/summaries";
 import type {
   AestheticProfileSuggestion,
   BookConceptInput,
   BookConceptSkeleton,
   Chapter,
   ChapterDraftStreamEvent,
+  ChapterPairwiseInput,
+  ChapterPairwiseResult,
   ChapterQualityReview,
   ConceptCandidate,
   ContextPackage,
@@ -42,6 +52,7 @@ import type {
   MarketOpportunity,
   NovelRevisionInput,
   NovelRevisionProposal,
+  PlanNode,
   PlanningGenerationInput,
   PlanningGenerationResult,
   PlanningReviewInput,
@@ -73,6 +84,7 @@ import {
   CandidateSchema,
   CHAPTER_PLANNING_BATCH_SIZE,
   ChapterPlanningSchema,
+  CoarsePlanningSchema,
   chapterDraftSchema,
   conceptDefaultMotifIssues,
   conceptDiversityIssues,
@@ -84,6 +96,7 @@ import {
   InsightSchema,
   insightText,
   NovelRevisionSchema,
+  PairwiseJudgeSchema,
   PlanningReviewSchema,
   QualityReviewSchema,
   StructurePlanningSchema,
@@ -96,7 +109,9 @@ import {
   JsonPathStreamExtractor,
   normalizeProviderUrl,
   providerError,
+  rejectsContextLength,
   rejectsJsonMode,
+  rejectsNativeStructuredOutput,
   rejectsOutputTokenLimit,
   rejectsResponsesApi,
   rejectsStreaming,
@@ -151,6 +166,21 @@ export class AiService {
     this.cancelledJobs.add(id);
     controller.abort();
     return true;
+  }
+
+  /** 当前任务角色的上下文窗口与 token 预算；未知窗口按来源类型取默认值。 */
+  contextBudget(role: ModelRole = "draft"): { windowTokens: number; budgetTokens: number } {
+    const route = this.resolveRoute?.(role) ?? null;
+    const windowTokens = resolveContextWindow({
+      contextWindow: route?.contextWindow,
+      localEndpoint: route?.localEndpoint,
+    });
+    return {
+      windowTokens,
+      budgetTokens: contextBudgetTokens(windowTokens, {
+        ...(route?.maxOutputTokens ? { outputReserveTokens: route.maxOutputTokens } : {}),
+      }),
+    };
   }
 
   private async runJson<T>(options: {
@@ -244,6 +274,10 @@ export class AiService {
             ? "openai-responses"
             : "openai-chat";
     let useResponses = declaredSurface === "openai-responses";
+    // Some OpenAI-compatible Responses endpoints implement `/responses` but
+    // reject `text.format: json_schema`. Keep the usable endpoint and let Zod
+    // validation plus repair handle the prompt-only fallback.
+    let useNativeStructuredOutput = useResponses;
     let useJsonMode = !useAnthropic && !useResponses;
     let useStreaming = options.stream ?? false;
     let includeStreamUsage = useStreaming;
@@ -399,7 +433,7 @@ export class AiService {
             schemaName,
             structuredOutput: useAnthropic
               ? "prompt-only"
-              : useResponses
+              : useResponses && useNativeStructuredOutput
                 ? "native"
                 : useJsonMode
                   ? "json-mode"
@@ -495,6 +529,16 @@ export class AiService {
                   apiSurface: "openai-responses",
                   supported: false,
                 });
+              continue;
+            }
+            if (useResponses && useNativeStructuredOutput && rejectsNativeStructuredOutput(status, detail)) {
+              this.log("warn", "ai.request.compatibility_retry", {
+                jobId,
+                taskType: options.taskType,
+                attempt: httpAttempt,
+                reason: "native JSON Schema unsupported",
+              });
+              useNativeStructuredOutput = false;
               continue;
             }
             if (
@@ -1021,17 +1065,19 @@ export class AiService {
     return this.runJson({
       projectId: null,
       taskType: "expand-book-concept-skeleton",
-      inputSummary: `${concept.title} 人物与世界骨架`,
+      inputSummary: `${concept.title} 完整世界观与人物档案`,
       system: [
-        "你是中文长篇小说的故事架构师。作者已经选定立项方案，现在只扩展这一本书的人物与世界骨架。",
+        "你是中文长篇小说的故事架构师。作者已经选定方向，请替作者完成可直接支撑全书规划的世界观、人物档案、关系网络、势力和时间线。按本书篇幅与叙事需要充分展开，给出完整设定而非留待作者补填的骨架。",
         "保持已确定的主角、核心矛盾、开局机制、成长载体、主要回报、长篇发动机和终局；系统、重生、血脉等元素只有在作者已经选择时才加入。",
         defaultMotifBoundary,
         "主角弧光必须写清起点认知、阶段转变、关键代价和终局状态。关键关系必须说明双方、初始张力、各自目标和不可替代作用。",
+        "在 genreSpecificSections 中提供‘人物档案’：每位主要角色单独一条，给出姓名、年龄或人生阶段、身份、外貌辨识点、性格与说话方式、欲望与恐惧、能力与弱点、过去经历、秘密与知情范围、与主角的关系、初登场和全书弧光。为主要配角与对手安排各自独立的目标。",
+        "另设‘地理与日常秩序’和‘主线与伏笔’栏目，具体写清地点间的联系、生活生产和权力运行方式，以及伏笔的埋设、误读与兑现阶段。作者视角的秘密要标明谁已知、谁未知，供后续章纲维持人物知识边界。",
         "世界规则必须是会影响人物选择的职业、社会、能力、资源或超自然规则，并写清边界或代价。主要势力必须说明目标、资源和与主线的冲突位置。",
         "时间锚点必须覆盖开局前因、开局触发、至少一个中期不可逆节点和终局兑现，使用相对阶段，不要编造具体公历日期。",
         "各项要能直接进入故事圣经，不写空泛的‘关系逐渐加深、世界更加广阔、经历重重困难’。",
       ].join("\n"),
-      user: `平台主题材：${input.genre}\n复合叙事类型：${concept.secondaryGenres.join(" + ")}\n题材元素：${concept.genreElements.join("、") || "无固定元素"}\n自定义方向：${input.customGenreDirection?.trim() || "无"}\n已选开书方案：${JSON.stringify(concept)}\n输出 protagonistArc、keyRelationships、worldRules、majorForces、timelineAnchors，以及 genreSpecificSections。本书题材专属栏目：${sections.map((item) => `${item.label}（${item.hint}）`).join("；") || "无"}；若给出栏目，genreSpecificSections 的 label 必须与栏目名一致，每个栏目给 2–6 条具体条目。所有内容必须能由已选方案推出，并共同支撑 longFormEngine。`,
+      user: `平台主题材：${input.genre}\n目标字数：${input.targetWords}\n单章目标字数：${input.wordsPerChapter ?? 2500}\n作者完整定位与灵感：${JSON.stringify(input)}\n复合叙事类型：${concept.secondaryGenres.join(" + ")}\n题材元素：${concept.genreElements.join("、") || "无固定元素"}\n自定义方向：${input.customGenreDirection?.trim() || "无"}\n已选开书方案：${JSON.stringify(concept)}\n输出 protagonistArc、keyRelationships、worldRules、majorForces、timelineAnchors，以及 genreSpecificSections。通用栏目为人物档案、地理与日常秩序、主线与伏笔，并补充本书题材专属栏目：${sections.map((item) => `${item.label}（${item.hint}）`).join("；") || "无"}。条目数量按本书需要展开，人物、地点与势力统一命名，所有内容共同支撑从开篇到终局的 longFormEngine。`,
       schema: BookConceptSkeletonSchema,
       longTask: true,
       stream: true,
@@ -1046,13 +1092,165 @@ export class AiService {
     override?: TaskModelOverride,
   ): Promise<PlanningGenerationResult> {
     if (!project.contract.approved) throw new Error("必须先审批创作契约");
+    return this.generatePlanningContent(project, input, onChapterBatch, override);
+  }
+
+  async generateLaunchPlanning(
+    project: ProjectDetail,
+    input: Omit<PlanningGenerationInput, "chapterCount"> & { chapterCount?: number },
+    onChapterBatch?: (batch: PlanningGenerationResult) => void | Promise<void>,
+  ): Promise<PlanningGenerationResult> {
+    return this.generatePlanningContent(project, input, onChapterBatch, undefined, true);
+  }
+
+  /**
+   * 规划/开书包的共享上下文：结构层与当前卷全量，章纲只给近窗，更早内容走摘要。
+   * 不再把全书规划节点与全部章节写进每一批请求——那是平方级 token 消耗。
+   */
+  private planningContext(
+    project: ProjectDetail,
+    startChapter: number,
+    includeDraftPlans: boolean,
+    structure: ReturnType<typeof resolveStructurePreset>,
+    contextScale = 1,
+  ): string {
+    const { budgetTokens } = this.contextBudget("plan");
+    const effectiveBudget = Math.max(4_000, Math.round(budgetTokens * contextScale));
+    const chapterWindow = scaledCap(60, 10, effectiveBudget);
+    const summaryCharacters = scaledCap(8_000, 1_500, effectiveBudget);
+    const wordsPerChapter = project.summary.wordsPerChapter || 2500;
+    const targetChapters = Math.ceil(project.summary.targetWords / wordsPerChapter);
+    const visiblePlans = project.plans.filter((plan) => includeDraftPlans || plan.status === "已批准");
+    const structuralPlans = visiblePlans
+      .filter((plan) => plan.kind === "宏观阶段" || plan.kind === "分卷")
+      .sort((left, right) => left.ordinal - right.ordinal);
+    const ranges = volumeRanges(structuralPlans, wordsPerChapter, null);
+    const currentRange = ranges.find((range) => startChapter >= range.fromChapter && startChapter <= range.toChapter);
+    const coarsePlans = visiblePlans
+      .filter((plan) => plan.kind === "粗纲")
+      .filter(
+        (plan) => !currentRange || (plan.ordinal >= currentRange.fromChapter && plan.ordinal <= currentRange.toChapter),
+      )
+      .sort((left, right) => left.ordinal - right.ordinal);
+    const recentChapters = project.chapters
+      .filter((chapter) => chapter.number < startChapter)
+      .sort((left, right) => left.number - right.number)
+      .slice(-chapterWindow)
+      .map((chapter) => ({
+        number: chapter.number,
+        title: chapter.title,
+        outline: chapter.outline,
+        chapterPromise: chapter.chapterPromise,
+        expectedPayoff: chapter.expectedPayoff,
+        endingExpectation: chapter.endingExpectation,
+      }));
+    const memory = buildLongTermMemory(project.summaries ?? [], startChapter, summaryCharacters);
+    return [
+      `项目：${project.summary.title}`,
+      `题材：${project.summary.genre}`,
+      `目标字数：${project.summary.targetWords}`,
+      `预计全书章节：${targetChapters}`,
+      `创作契约${project.contract.approved ? "（已审批）" : "（待作者确认的草稿）"}：${JSON.stringify(project.contract)}`,
+      `商业规则：${compileCommercialGuidance(project.summary.genre, startChapter, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, subtype: project.contract.genreSubtype, fanqieCategoryKey: project.contract.fanqieCategoryKey, secondaryGenres: project.contract.secondaryGenres, genreElements: project.contract.genreElements, customGenreDirection: project.contract.customGenreDirection, storyStage: resolveStoryStage(project.plans, project.summary.currentWords) })}`,
+      `全书结构（宏观阶段与分卷${includeDraftPlans ? "，含待确认草稿" : ""}）：${JSON.stringify(structuralPlans.map((plan) => ({ kind: plan.kind, title: plan.title, ordinal: plan.ordinal, targetWords: plan.targetWords, goal: plan.goal, conflict: plan.conflict, outcome: plan.outcome })))}`,
+      currentRange
+        ? `当前卷（第${currentRange.fromChapter}–${currentRange.toChapter}章）：${JSON.stringify({ title: currentRange.plan.title, goal: currentRange.plan.goal, conflict: currentRange.plan.conflict, outcome: currentRange.plan.outcome, targetWords: currentRange.plan.targetWords })}`
+        : "",
+      coarsePlans.length
+        ? `本卷已完成粗纲：${JSON.stringify(coarsePlans.map((plan) => ({ ordinal: plan.ordinal, title: plan.title, goal: plan.goal, outcome: plan.outcome })))}`
+        : "",
+      `长期摘要：${memory}`,
+      `近期章纲（最近 ${recentChapters.length} 章，用于承接）：${JSON.stringify(recentChapters)}`,
+      `单章目标字数：${wordsPerChapter}`,
+      `结构参数：阶段 ${structure.stages[0]}–${structure.stages[1]} 个；分卷 ${structure.volumes[0]}–${structure.volumes[1]} 个；首个实质回报建议落在第 ${structure.firstPayoffWindow[0]}–${structure.firstPayoffWindow[1]} 章`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  /**
+   * 规划入口：输入超长时把上下文预算减半重试一次。
+   * 只有在还没有批次落盘时才重试，避免已保存的批次被重复生成。
+   */
+  private async generatePlanningContent(
+    project: ProjectDetail,
+    input: Omit<PlanningGenerationInput, "chapterCount"> & { chapterCount?: number },
+    onChapterBatch?: (batch: PlanningGenerationResult) => void | Promise<void>,
+    override?: TaskModelOverride,
+    includeDraftPlans = false,
+  ): Promise<PlanningGenerationResult> {
+    let delivered = false;
+    const tracked = onChapterBatch
+      ? async (batch: PlanningGenerationResult) => {
+          delivered = true;
+          await onChapterBatch(batch);
+        }
+      : undefined;
+    try {
+      return await this.runPlanningGeneration(project, input, tracked, override, includeDraftPlans, 1);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (delivered || !(rejectsContextLength(400, message) || rejectsContextLength(413, message))) throw error;
+      this.log("warn", "planning.context_budget_retry", {
+        projectId: project.summary.id,
+        reason: message.slice(0, 200),
+      });
+      return this.runPlanningGeneration(project, input, tracked, override, includeDraftPlans, 0.5);
+    }
+  }
+
+  private async runPlanningGeneration(
+    project: ProjectDetail,
+    input: Omit<PlanningGenerationInput, "chapterCount"> & { chapterCount?: number },
+    onChapterBatch?: (batch: PlanningGenerationResult) => void | Promise<void>,
+    override?: TaskModelOverride,
+    includeDraftPlans = false,
+    contextScale = 1,
+  ): Promise<PlanningGenerationResult> {
     const startChapter = input.fromChapter ?? Math.max(1, ...project.chapters.map((chapter) => chapter.number + 1));
     const structure = resolveStructurePreset({
       categoryKey: project.contract.fanqieCategoryKey,
       lengthShape: project.contract.lengthShape,
       wordsPerChapter: project.summary.wordsPerChapter,
     });
-    const shared = `项目：${project.summary.title}\n题材：${project.summary.genre}\n目标字数：${project.summary.targetWords}\n创作契约：${JSON.stringify(project.contract)}\n商业规则：${compileCommercialGuidance(project.summary.genre, startChapter, { currentWords: project.summary.currentWords, targetWords: project.summary.targetWords, subtype: project.contract.genreSubtype, fanqieCategoryKey: project.contract.fanqieCategoryKey, secondaryGenres: project.contract.secondaryGenres, genreElements: project.contract.genreElements, customGenreDirection: project.contract.customGenreDirection, storyStage: resolveStoryStage(project.plans, project.summary.currentWords) })}\n已批准规划：${JSON.stringify(project.plans.filter((plan) => plan.status === "已批准"))}\n已有章节：${JSON.stringify(project.chapters.slice(-20).map((chapter) => ({ number: chapter.number, title: chapter.title, outline: chapter.outline, endingExpectation: chapter.endingExpectation })))}\n单章目标字数：${project.summary.wordsPerChapter}\n结构参数：阶段 ${structure.stages[0]}–${structure.stages[1]} 个；分卷 ${structure.volumes[0]}–${structure.volumes[1]} 个；首个实质回报建议落在第 ${structure.firstPayoffWindow[0]}–${structure.firstPayoffWindow[1]} 章`;
+    const targetChapters = Math.ceil(project.summary.targetWords / (project.summary.wordsPerChapter || 2500));
+    const shared = this.planningContext(project, startChapter, includeDraftPlans, structure, contextScale);
+    if (input.mode === "全书粗纲") {
+      const chapterCount = Math.max(
+        1,
+        Math.min(input.chapterCount ?? COARSE_BLOCK_CHAPTERS, targetChapters - startChapter + 1),
+      );
+      const blockStarts: number[] = [];
+      for (let number = startChapter; number < startChapter + chapterCount; number += COARSE_BLOCK_CHAPTERS)
+        blockStarts.push(number);
+      const result = await this.runJson({
+        projectId: project.summary.id,
+        taskType: "generate-coarse-plan",
+        override,
+        inputSummary: `${project.summary.title} 第${startChapter}–${startChapter + chapterCount - 1}章粗纲`,
+        system:
+          "你是中国商业网文总编。按每十章一个批次给出全书粗纲，只写批次的推进目标、主要矛盾和结果变化，不写章节目录、不写场景。批次之间必须因果承接，并服务于当前分卷目标；结果变化要能成为下一批次的起点。",
+        user: `${shared}\n从第${startChapter}章开始，严格输出 ${blockStarts.length} 个 blocks，fromChapter 依次为 ${blockStarts.join("、")}，每个批次覆盖 10 章。`,
+        schema: CoarsePlanningSchema,
+        longTask: true,
+        stream: true,
+      });
+      const plans: PlanNode[] = result.blocks.map((block) => ({
+        id: randomUUID(),
+        kind: "粗纲" as const,
+        title: `第${block.fromChapter}–${block.fromChapter + COARSE_BLOCK_CHAPTERS - 1}章粗纲`,
+        ordinal: block.fromChapter,
+        goal: block.goal,
+        conflict: block.conflict,
+        outcome: block.outcome,
+        targetWords: COARSE_BLOCK_CHAPTERS * (project.summary.wordsPerChapter || 2500),
+        status: "草稿" as const,
+        parentId: null,
+      }));
+      const batch = { startChapter, plans, chapters: [] };
+      await onChapterBatch?.(batch);
+      return batch;
+    }
     if (input.mode === "全书结构") {
       const structureUser = `${shared}\n输出 stages（${structure.stages[0]}至${structure.stages[1]}项）和 volumes（${structure.volumes[0]}至${structure.volumes[1]}项）。每项包含 title、goal、conflict、outcome、targetWords；stage 额外包含 startChapter。阶段标题必须是本书专属事件或状态，不得直接使用“开篇、追读、扩张、中期、高潮、收束”。各阶段目标字数之和应接近项目目标。`;
       const rangeIssues = (value: { stages: unknown[]; volumes: unknown[] }) => [
@@ -1070,7 +1268,7 @@ export class AiService {
           override,
           inputSummary: `${project.summary.title} 自适应阶段与分卷`,
           system:
-            "你是中国商业网文总编。根据已审批契约规划作品自己的宏观阶段和分卷，只细化结构，不写正文。阶段数量与功能由核心矛盾、叙事主轴和长篇发动机决定，每个阶段用本书自己的事件命名和驱动；阶段切换绑定不可逆的状态变化，终局兑现契约。",
+            "你是中国商业网文总编。根据作者选定方向和提供的契约规划作品从开局到终局的宏观阶段和分卷，产出待作者确认的完整结构草稿。阶段数量与功能由核心矛盾、叙事主轴和长篇发动机决定，每个阶段用本书自己的事件命名和驱动；阶段切换绑定不可逆的状态变化，终局兑现契约。分卷按顺序完整覆盖目标字数，各卷说明主线推进、人物变化与伏笔兑现。",
           user: retryIssues
             ? `${structureUser}\n上一次输出未落在本书的结构区间：${retryIssues.join("；")}。请严格按区间数量重新输出。`
             : structureUser,
@@ -1085,44 +1283,49 @@ export class AiService {
         const retry = await generateStructure(issues);
         if (rangeIssues(retry).length < issues.length) result = retry;
       }
-      return {
-        startChapter: 1,
-        chapters: [],
-        plans: [
-          ...result.stages.map((item, index) => ({
-            id: randomUUID(),
-            kind: "宏观阶段" as const,
-            title: item.title,
-            ordinal: item.startChapter || index + 1,
-            goal: item.goal,
-            conflict: item.conflict,
-            outcome: item.outcome,
-            targetWords: item.targetWords,
-            status: "草稿" as const,
-            parentId: null,
-          })),
-          ...result.volumes.map((item, index) => ({
-            id: randomUUID(),
-            kind: "分卷" as const,
-            title: item.title,
-            ordinal: index + 1,
-            goal: item.goal,
-            conflict: item.conflict,
-            outcome: item.outcome,
-            targetWords: item.targetWords,
-            status: "草稿" as const,
-            parentId: null,
-          })),
-        ],
-      };
+      const stagePlans: PlanNode[] = result.stages.map((item, index) => ({
+        id: randomUUID(),
+        kind: "宏观阶段" as const,
+        title: item.title,
+        ordinal: item.startChapter || index + 1,
+        goal: item.goal,
+        conflict: item.conflict,
+        outcome: item.outcome,
+        targetWords: item.targetWords,
+        status: "草稿" as const,
+        parentId: null,
+      }));
+      let volumeStartWords = 0;
+      const volumePlans: PlanNode[] = result.volumes.map((item, index) => {
+        const firstChapter = Math.floor(volumeStartWords / (project.summary.wordsPerChapter || 2500)) + 1;
+        volumeStartWords += item.targetWords;
+        const parent = [...stagePlans].reverse().find((stage) => stage.ordinal <= firstChapter) ?? stagePlans[0];
+        return {
+          id: randomUUID(),
+          kind: "分卷" as const,
+          title: item.title,
+          ordinal: index + 1,
+          goal: item.goal,
+          conflict: item.conflict,
+          outcome: item.outcome,
+          targetWords: item.targetWords,
+          status: "草稿" as const,
+          parentId: parent?.id ?? null,
+        };
+      });
+      return { startChapter: 1, chapters: [], plans: [...stagePlans, ...volumePlans] };
     }
-    const count = input.chapterCount ?? 10;
+    // 普通滚动规划保留小批量默认值；完整开书包按目标字数覆盖全书，输出仍按批次请求。
+    const count = input.chapterCount ?? (includeDraftPlans ? targetChapters : 10);
     const batches: PlanningGenerationResult[] = [];
     for (let offset = 0; offset < count; offset += CHAPTER_PLANNING_BATCH_SIZE) {
       const batchStart = startChapter + offset;
       const batchCount = Math.min(CHAPTER_PLANNING_BATCH_SIZE, count - offset);
-      const priorChapters = batches
-        .flatMap((batch) => batch.chapters)
+      // 只带紧邻本批次的少量章纲；更早的承接由共享上下文里的近窗与摘要负责。
+      const priorChapters = [...project.chapters, ...batches.flatMap((batch) => batch.chapters)]
+        .filter((chapter) => chapter.number < batchStart)
+        .sort((left, right) => left.number - right.number)
+        .slice(-PRIOR_CHAPTER_LIMIT)
         .map((chapter) => ({
           number: chapter.number,
           title: chapter.title,
@@ -1136,7 +1339,7 @@ export class AiService {
         inputSummary: `${project.summary.title} 第${batchStart}-${batchStart + batchCount - 1}章章纲`,
         system:
           "你是中国商业网文连载编辑。生成可直接执行的连续章纲，不写正文。先判断每章承担行动、调查、关系、经营、训练、生存、群像、氛围、过渡、揭秘或高潮中的哪种主要功能，再决定节奏。章节要承接上一章的状态与悬念；关系、调查、氛围和过渡章可以通过认知、情绪、证据、关系或气氛积累推进，推进方式贴合本章功能。相邻章节在功能、场景数量和回报形态上保持变化。",
-        user: `${shared}\n本次任务前面刚生成且必须承接的章纲：${JSON.stringify(priorChapters)}\n从第${batchStart}章开始，严格输出${batchCount}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterFunction、targetWords、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter 和 scenes。chapterFunction 必须使用规定枚举；targetWords 在 ${structure.chapterWords[0]}–${structure.chapterWords[1]} 之间（本书单章目标 ${project.summary.wordsPerChapter} 字），按内容密度决定，不要全都相同；scenes 为 ${structure.scenesPerChapter[0]}–${structure.scenesPerChapter[1]} 个真正需要的场景，每个包含 title、goal、conflict、outcome、targetWords，标题必须是本章具体事件，不得使用“入场、对抗、转向”等通用功能名。关系或氛围章可以只有 1–2 场，高潮章可以取区间上限。各场景目标字数之和应接近本章 targetWords。payoffOffset 表示该章结尾期待预计在几章后兑现。`,
+        user: `${shared}\n本次任务前面刚生成且必须承接的章纲：${JSON.stringify(priorChapters)}\n从第${batchStart}章开始，严格输出${batchCount}个 chapters，并给出整个批次的 batchGoal、batchConflict、batchOutcome。每章填写 title、goal、conflict、outcome、chapterFunction、targetWords、chapterPromise、expectedPayoff、crisis、endingExpectation、payoffOffset、isKeyChapter 和 scenes。chapterFunction 必须使用规定枚举；targetWords 在 ${structure.chapterWords[0]}–${structure.chapterWords[1]} 之间（本书单章目标 ${project.summary.wordsPerChapter || 2500} 字），按内容密度决定，不要全都相同；scenes 为 ${structure.scenesPerChapter[0]}–${structure.scenesPerChapter[1]} 个真正需要的场景，每个包含 title、goal、conflict、outcome、targetWords，标题必须是本章具体事件，不得使用“入场、对抗、转向”等通用功能名。关系或氛围章可以只有 1–2 场，高潮章可以取区间上限。各场景目标字数之和应接近本章 targetWords。payoffOffset 表示该章结尾期待预计在几章后兑现。${includeDraftPlans ? `本次属于完整开书包的连续细化，沿已有宏观阶段和分卷推进，角色行动遵守人物档案中的知识边界，预计在第${targetChapters}章兑现终局；最后一批完成主要伏笔与人物弧光的收束。` : ""}`,
         schema: ChapterPlanningSchema,
         longTask: true,
         stream: true,
@@ -1151,6 +1354,13 @@ export class AiService {
           count: outOfRange.length,
           expected: structure.chapterWords,
         });
+      let coveredVolumeChapters = 0;
+      const volumePlans = project.plans.filter((plan) => plan.kind === "分卷").sort((a, b) => a.ordinal - b.ordinal);
+      const parentVolume =
+        volumePlans.find((volume) => {
+          coveredVolumeChapters += volume.targetWords / (project.summary.wordsPerChapter || 2500);
+          return batchStart <= Math.ceil(coveredVolumeChapters);
+        }) ?? volumePlans.at(-1);
       const roughPlan = {
         id: randomUUID(),
         kind: "粗纲" as const,
@@ -1161,7 +1371,7 @@ export class AiService {
         outcome: result.batchOutcome,
         targetWords: result.chapters.reduce((sum, item) => sum + item.targetWords, 0),
         status: "草稿" as const,
-        parentId: null,
+        parentId: parentVolume?.id ?? null,
       };
       const chapters = result.chapters.map((item, index) => {
         const number = batchStart + index;
@@ -1181,7 +1391,9 @@ export class AiService {
           expectedPayoff: item.expectedPayoff,
           crisis: item.crisis,
           endingExpectation: item.endingExpectation,
-          expectationTargetChapter: number + item.payoffOffset,
+          expectationTargetChapter: includeDraftPlans
+            ? Math.min(targetChapters, number + item.payoffOffset)
+            : number + item.payoffOffset,
           revision: 0,
           updatedAt: now(),
         };
@@ -1455,9 +1667,10 @@ export class AiService {
         conflict: plan.conflict,
         outcome: plan.outcome,
       }));
+    const sampleLimit = scaledCap(6, 2, this.contextBudget("utility").budgetTokens);
     const manuscriptSamples = project.chapters
       .filter((chapter) => ["已定稿", "待发布", "已发布"].includes(chapter.status) && chapter.content.trim())
-      .slice(-6)
+      .slice(-sampleLimit)
       .map((chapter) => ({
         chapter: chapter.number,
         title: chapter.title,
@@ -1544,6 +1757,7 @@ export class AiService {
           "契约、事实账本和知识边界是硬边界，只在冲突时让步；题材惯例、商业工具和密度统计都是参考，不构成必须逐条满足的清单。",
           "文风由本书的审美设定和已定稿正文决定；冷峻、克制、均衡、热烈都可能正确，取决于这本书选择了什么。",
           compileGuidanceModeInstruction(context.guidanceMode),
+          renderStableBookContext(context),
         ].join("\n"),
         user: [
           "【本章】",
@@ -1555,7 +1769,7 @@ export class AiService {
           compileIntensityHint(chapter.isKeyChapter),
           "",
           "【写作上下文】",
-          renderContextForPrompt(context),
+          renderContextForPrompt(context, { excludeStable: true }),
           "",
           "【长度参考】",
           `约 ${targetCharacters} 字（参考区间 ${characterWindow.minimum}-${characterWindow.maximum} 字），以完成本章任务为准，不必凑数。`,
@@ -1683,13 +1897,14 @@ export class AiService {
         "不要报告：文风偏好、可以更好但不算错的写法、把统计值当缺陷。",
         "统计观察（字数、情绪温度、感官密度、对话密度、重复短语）写入 observations，不要放进 issues。",
         "evidence 必须是本章中的简短原文或明确的契约/事实条目。没有可验证问题时 issues 返回空数组。",
+        renderStableBookContext(context),
       ].join("\n"),
       user: [
         `题材：${project.summary.genre}`,
         `章节：第${chapter.number}章 ${chapter.title}`,
         `章纲：${chapter.outline}`,
         "上下文：",
-        renderContextForPrompt(context),
+        renderContextForPrompt(context, { excludeStable: true }),
         "正文：",
         chapter.content.slice(0, 16000),
         "输出 issues 与 observations。issues 每项包含 severity、category、message、evidence；observations 只写观察到的数据或现象，不写建议动作。",
@@ -1728,6 +1943,76 @@ export class AiService {
     };
   }
 
+  /**
+   * 成对比较：同一裁判对 A/B 与 B/A 各判一次，换序一致才给结论。
+   * 位置偏差由换序抵消；两次都判持平属于一致结论，不算分歧。
+   */
+  async judgeChapterDrafts(
+    project: ProjectDetail,
+    input: ChapterPairwiseInput,
+    override?: TaskModelOverride,
+  ): Promise<ChapterPairwiseResult> {
+    const criteria = (input.criteria ?? []).map((item) => item.trim()).filter(Boolean);
+    const raw: Array<z.infer<typeof PairwiseJudgeSchema>> = [];
+    const judge = async (a: DraftCandidate, b: DraftCandidate) => {
+      const result = await this.runJson({
+        projectId: project.summary.id,
+        taskType: "judge",
+        override,
+        inputSummary: `第${input.chapterNumber}章版本对比`,
+        system: [
+          "你是这本书的资深审稿人，只比较两个版本，不重写、不解释写作理论。",
+          "判断依据：哪一版更符合本章目标、人物逻辑和这本书的语感，哪一版的问题更少。",
+          "不要因为版本出现的先后顺序改变判断，也不要因为某版更长就偏向它。",
+          `项目审美设定：${compileAestheticGuidance(project.contract?.aestheticProfile)}`,
+          "只输出 JSON：winner（A / B / 持平）、rationale（不超过 200 字）、confidence（0–100）。",
+        ].join("\n"),
+        user: [
+          `题材：${project.summary.genre}`,
+          `章节：第${input.chapterNumber}章`,
+          ...(criteria.length ? [`重点标准：${criteria.join("；")}`] : []),
+          `【版本 A · ${a.id}】${a.text.length} 字`,
+          a.text.slice(0, 16_000),
+          `【版本 B · ${b.id}】${b.text.length} 字`,
+          b.text.slice(0, 16_000),
+        ].join("\n"),
+        schema: PairwiseJudgeSchema,
+        longTask: true,
+        reasoningEffort: "low",
+      });
+      raw.push(result);
+      return {
+        winnerId: result.winner === "A" ? a.id : result.winner === "B" ? b.id : "",
+        confidence: result.confidence,
+        rationale: result.rationale,
+      };
+    };
+    const comparison = await compareDrafts({
+      baseline: { id: "baseline", text: input.baseline.text },
+      candidate: { id: "candidate", text: input.candidate.text },
+      judge,
+    });
+    const [firstRaw, swappedRaw] = raw;
+    const tie = Boolean(firstRaw && swappedRaw && firstRaw.winner === "持平" && swappedRaw.winner === "持平");
+    return {
+      winner: comparison.winnerId as ChapterPairwiseResult["winner"],
+      tie,
+      disagreement: tie ? false : comparison.disagreement,
+      first: {
+        winner: firstRaw?.winner ?? "持平",
+        rationale: firstRaw?.rationale ?? "",
+        confidence: firstRaw?.confidence ?? 0,
+      },
+      swapped: {
+        winner: swappedRaw?.winner ?? "持平",
+        rationale: swappedRaw?.rationale ?? "",
+        confidence: swappedRaw?.confidence ?? 0,
+      },
+      baselineChars: [...input.baseline.text].length,
+      candidateChars: [...input.candidate.text].length,
+    };
+  }
+
   async reviseChapter(
     project: ProjectDetail,
     chapter: Chapter,
@@ -1756,13 +2041,14 @@ export class AiService {
         `项目审美设定：${compileAestheticGuidance(project.contract?.aestheticProfile)}`,
         "涉及审美或叙事温度时只按本项目设定修复，不要擅自把人物改得更克制、更热烈、更幽默或更煽情。",
         "输出完整修订稿，不输出修改说明。title 没有必要时保持不变。",
+        renderStableBookContext(context),
       ].join("\n"),
       user: [
         `题材：${project.summary.genre}`,
         `章节：第${chapter.number}章 ${chapter.title}`,
         `章纲：${chapter.outline}`,
         "上下文：",
-        renderContextForPrompt(context),
+        renderContextForPrompt(context, { excludeStable: true }),
         `待处理问题：${JSON.stringify(pending.map((issue) => ({ severity: issue.severity, category: issue.category, message: issue.message, evidence: issue.evidence })))}`,
         `改写幅度：${scope}`,
         "原正文：",

@@ -9,6 +9,7 @@ import {
   GitPullRequestArrow,
   LoaderCircle,
   Plus,
+  Scale,
   SearchCheck,
   SlidersHorizontal,
   Sparkles,
@@ -18,7 +19,16 @@ import { Badge, Button, EmptyState, Field, Input, Modal, Segmented, Select, Text
 import { describeError } from "../lib/error-message";
 import { formatDate } from "../lib/format";
 import { issueTone } from "../shared/issue-tone";
-import type { AppApi, ChangeRequest, Chapter, ProjectDetail, QualityIssue } from "../shared/types";
+import type {
+  AppApi,
+  ChangeRequest,
+  Chapter,
+  ChapterPairwiseResult,
+  ChapterPairwiseVerdict,
+  ProjectDetail,
+  QualityIssue,
+  RevisionRecord,
+} from "../shared/types";
 
 export interface CommonProjectProps {
   project: ProjectDetail;
@@ -27,14 +37,38 @@ export interface CommonProjectProps {
   notify: (message: string, tone?: "success" | "error") => void;
 }
 
+/** 历史版本载荷是保存时的章节快照；只取正文用于对比。 */
+function revisionContent(payload: unknown): string {
+  if (payload && typeof payload === "object" && "content" in payload) {
+    const value = (payload as { content?: unknown }).content;
+    return typeof value === "string" ? value : "";
+  }
+  return "";
+}
+
+/** 裁判按位置作答；换序后 A/B 位置互换，展示前先映射回"历史版本 / 当前正文"。 */
+function verdictWinnerLabel(verdict: ChapterPairwiseVerdict, swapped: boolean): string {
+  if (verdict.winner === "持平") return "持平";
+  const baselineWon = swapped ? verdict.winner === "B" : verdict.winner === "A";
+  return baselineWon ? "历史版本" : "当前正文";
+}
+
 export function QualityPage({ project, api, reload, notify }: CommonProjectProps) {
   const [changeModal, setChangeModal] = useState(false);
   const [reviewChapterId, setReviewChapterId] = useState("");
-  const [qualityView, setQualityView] = useState<"审稿队列" | "问题记录" | "改纲变更">("审稿队列");
+  const [qualityView, setQualityView] = useState<"审稿队列" | "问题记录" | "改纲变更" | "版本对比">("审稿队列");
   const [issueScope, setIssueScope] = useState<"待处理" | "全部">("待处理");
   const [issueSeverity, setIssueSeverity] = useState<"全部" | "硬性" | "警告" | "建议">("全部");
   const [chapterAction, setChapterAction] = useState<{ id: string; kind: "质检" | "修订" } | null>(null);
   const [observations, setObservations] = useState<{ chapterId: string; items: string[] } | null>(null);
+  const [pairwiseChapterId, setPairwiseChapterId] = useState("");
+  const [pairwiseBaselineId, setPairwiseBaselineId] = useState("");
+  const [pairwiseRevisions, setPairwiseRevisions] = useState<RevisionRecord[]>([]);
+  const [pairwiseCriteria, setPairwiseCriteria] = useState("");
+  const [pairwiseResult, setPairwiseResult] = useState<ChapterPairwiseResult | null>(null);
+  const [pairwiseBusy, setPairwiseBusy] = useState(false);
+  const [whitelistText, setWhitelistText] = useState((project.aiFlavorWhitelist ?? []).join("\n"));
+  const [whitelistBusy, setWhitelistBusy] = useState(false);
   const [change, setChange] = useState<ChangeRequest>({
     id: "",
     targetKind: "创作契约",
@@ -152,6 +186,64 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
       notify(describeError(error), "error");
     }
   };
+  const loadPairwiseRevisions = async (chapterId: string) => {
+    setPairwiseRevisions([]);
+    setPairwiseBaselineId("");
+    setPairwiseResult(null);
+    if (!chapterId) return;
+    try {
+      setPairwiseRevisions(await api.listRevisions(project.summary.id, "chapters", chapterId));
+    } catch (error) {
+      notify(describeError(error), "error");
+    }
+  };
+  const saveWhitelist = async () => {
+    setWhitelistBusy(true);
+    try {
+      const saved = await api.saveAiFlavorWhitelist(
+        project.summary.id,
+        whitelistText
+          .split(/\n+/)
+          .map((item) => item.trim())
+          .filter(Boolean),
+      );
+      await reload();
+      setWhitelistText(saved.join("\n"));
+      notify(`AI 味白名单已保存，共 ${saved.length} 条`);
+    } catch (error) {
+      notify(describeError(error), "error");
+    } finally {
+      setWhitelistBusy(false);
+    }
+  };
+  const runPairwise = async () => {
+    const chapter = project.chapters.find((item) => item.id === pairwiseChapterId);
+    const revision = pairwiseRevisions.find((item) => item.id === pairwiseBaselineId);
+    if (!chapter || !revision) return;
+    const baselineText = revisionContent(revision.payload);
+    if (!baselineText.trim() || !chapter.content.trim()) {
+      notify("两个版本都需要有正文才能对比", "error");
+      return;
+    }
+    setPairwiseBusy(true);
+    try {
+      setPairwiseResult(
+        await api.judgeChapterDrafts(project.summary.id, {
+          chapterNumber: chapter.number,
+          baseline: { label: `第 ${revision.revision} 版`, text: baselineText },
+          candidate: { label: "当前正文", text: chapter.content },
+          criteria: pairwiseCriteria
+            .split(/[、,，\n]+/)
+            .map((item) => item.trim())
+            .filter(Boolean),
+        }),
+      );
+    } catch (error) {
+      notify(describeError(error), "error");
+    } finally {
+      setPairwiseBusy(false);
+    }
+  };
   return (
     <div className="page project-page quality-page">
       <header className="page-header quality-header">
@@ -216,6 +308,14 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
         >
           <GitPullRequestArrow size={16} />
           改纲变更<span>{project.changes.length}</span>
+        </button>
+        <button
+          type="button"
+          className={qualityView === "版本对比" ? "active" : ""}
+          onClick={() => setQualityView("版本对比")}
+        >
+          <Scale size={16} />
+          版本对比
         </button>
       </nav>
 
@@ -461,6 +561,100 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
         </section>
       )}
 
+      {qualityView === "版本对比" && (
+        <section className="section-band">
+          <div className="section-heading">
+            <div>
+              <h2>版本对比</h2>
+              <p>同一裁判对两个版本换序各判一次；两次结论不一致时会标记为高分歧，交给你裁定。</p>
+            </div>
+          </div>
+          <div className="form-grid two">
+            <Field label="章节" hint="候选固定为当前正文">
+              <Select
+                value={pairwiseChapterId}
+                onChange={(event) => {
+                  setPairwiseChapterId(event.target.value);
+                  void loadPairwiseRevisions(event.target.value);
+                }}
+              >
+                <option value="">选择章节</option>
+                {project.chapters
+                  .filter((chapter) => chapter.content.trim())
+                  .map((chapter) => (
+                    <option key={chapter.id} value={chapter.id}>
+                      第{chapter.number}章 {chapter.title}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+            <Field label="对比版本" hint="历史版本来自章节保存记录">
+              <Select value={pairwiseBaselineId} onChange={(event) => setPairwiseBaselineId(event.target.value)}>
+                <option value="">选择历史版本</option>
+                {pairwiseRevisions.map((revision) => (
+                  <option key={revision.id} value={revision.id}>
+                    第 {revision.revision} 版 · {formatDate(revision.createdAt)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Field label="重点标准" hint="可选，用顿号或逗号分隔，例如：章末钩子、爽点是否成立">
+            <Input
+              value={pairwiseCriteria}
+              placeholder="留空则按通用标准比较"
+              onChange={(event) => setPairwiseCriteria(event.target.value)}
+            />
+          </Field>
+          <div className="settings-actions">
+            <Button
+              disabled={pairwiseBusy || !pairwiseChapterId || !pairwiseBaselineId}
+              onClick={() => void runPairwise()}
+            >
+              {pairwiseBusy ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}
+              开始对比
+            </Button>
+          </div>
+          {pairwiseResult && (
+            <div className="quality-review-panel" style={{ marginTop: 12 }}>
+              <header className="quality-review-header">
+                <div>
+                  <strong>
+                    {pairwiseResult.tie
+                      ? "两版持平"
+                      : pairwiseResult.winner === "baseline"
+                        ? "历史版本胜出"
+                        : pairwiseResult.winner === "candidate"
+                          ? "当前正文胜出"
+                          : "结论不一致"}
+                  </strong>
+                  <small>
+                    {pairwiseResult.baselineChars} 字 vs {pairwiseResult.candidateChars} 字
+                    {pairwiseResult.disagreement ? " · 换序后结论相反，请人工裁定" : ""}
+                  </small>
+                </div>
+                <Badge tone={pairwiseResult.disagreement ? "warning" : "success"}>
+                  {pairwiseResult.disagreement ? "高分歧" : "一致"}
+                </Badge>
+              </header>
+              {(
+                [
+                  ["第一次判定", pairwiseResult.first, false],
+                  ["换序后判定", pairwiseResult.swapped, true],
+                ] as const
+              ).map(([label, verdict, swapped]) => (
+                <div key={label} style={{ marginTop: 8 }}>
+                  <small>
+                    {label}：{verdictWinnerLabel(verdict, swapped)} · 置信度 {Math.round(verdict.confidence)}
+                  </small>
+                  <p>{verdict.rationale}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       <details className="quality-debts">
         <summary>
           <span>
@@ -476,6 +670,33 @@ export function QualityPage({ project, api, reload, notify }: CommonProjectProps
               <span>{debt.label}</span>
             </div>
           ))}
+        </div>
+      </details>
+      <details className="quality-debts">
+        <summary>
+          <span>
+            <Sparkles size={16} />
+            AI 味白名单
+          </span>
+          <small>{project.aiFlavorWhitelist?.length ?? 0} 个词句</small>
+        </summary>
+        <div className="settings-form">
+          <Field
+            label="本书有意使用的词句"
+            hint="每行一个；质检统计 AI 味时这些词句不计入命中，也不计入字数分母。只作观察，不影响硬门禁。"
+          >
+            <Textarea
+              rows={4}
+              value={whitelistText}
+              placeholder="例如：深吸一口气（本书人物的固定习惯）"
+              onChange={(event) => setWhitelistText(event.target.value)}
+            />
+          </Field>
+          <div className="settings-actions">
+            <Button variant="secondary" disabled={whitelistBusy} onClick={() => void saveWhitelist()}>
+              保存白名单
+            </Button>
+          </div>
         </div>
       </details>
       {changeModal && (

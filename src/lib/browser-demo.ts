@@ -266,6 +266,8 @@ function seedProject(): ProjectDetail {
         updatedAt: now(),
       },
     ],
+    storyEntries: [],
+    aiFlavorWhitelist: [],
   };
 }
 

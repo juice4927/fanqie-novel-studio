@@ -10,7 +10,14 @@ import {
   planRevisionSnapshot,
   sameRevisionSnapshot,
 } from "../src/shared/novel-revision";
-import type { Chapter, ChapterFactsExtractionEvent, NovelRevisionProposal } from "../src/shared/types";
+import type {
+  Chapter,
+  ChapterFactsExtractionEvent,
+  ContextPackage,
+  LedgerFact,
+  NovelRevisionProposal,
+  ProjectDetail,
+} from "../src/shared/types";
 import { hasUsableAiCredential as hasUsableCredential } from "./ai/credential-presence";
 import { createProfileRuntime } from "./ai/profile-runtime";
 import { createAiRouteResolver } from "./ai/route-resolver";
@@ -50,6 +57,15 @@ let database: WorkspaceDatabase;
 let worker: BackgroundWorker;
 let ai: AiService;
 let apiCredential = "";
+
+/** 各处理器共用的上下文编译入口：按当前模型窗口计算预算，不再把整本书塞进每次请求。 */
+function compileContextWithBudget(
+  project: ProjectDetail,
+  chapter: Chapter,
+  relevantFacts?: readonly LedgerFact[],
+): ContextPackage {
+  return compileProjectChapterContext(project, chapter, relevantFacts, ai.contextBudget());
+}
 /** 来源熔断与并发控制：进程内共享，任务成功/失败都会更新。 */
 const profileRuntime = createProfileRuntime();
 /** 来源密钥内存缓存：路由解析必须同步，启动后预热，保存/删除时增量更新。 */
@@ -336,7 +352,7 @@ function registerHandlers() {
     register: handle,
     database,
     ai,
-    compileContext: compileProjectChapterContext,
+    compileContext: compileContextWithBudget,
     generateChapterDraft: chapterGeneration.generateOne,
     sendChapterDraftStream: (streamId, event) => {
       mainWindow?.webContents.send("studio:chapter-draft-stream", {
@@ -611,7 +627,7 @@ if (hasSingleInstanceLock)
       database,
       ai,
       hasAiCredential: hasUsableAiCredential,
-      compileContext: compileProjectChapterContext,
+      compileContext: compileContextWithBudget,
     });
     updateService = createUpdateService({
       logger,

@@ -92,6 +92,8 @@ export interface AiProfileModelOption {
   source: CapabilitySource;
   /** 能力行写入时间；手工填写的模型取合成时间。 */
   fetchedAt: string;
+  /** 作者手动覆盖或探测到的上下文窗口；null 表示未知，运行时按来源类型取默认值。 */
+  contextWindow: number | null;
 }
 
 /** 来源熔断状态；degradedUntil 非空表示正在冷却。 */

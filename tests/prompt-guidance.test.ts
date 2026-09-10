@@ -163,10 +163,11 @@ describe("chapter context guidance", () => {
     expect(strict.commercialGuidance).toContain("题材质量检查");
   });
 
-  it("renders the chapter task before the generic reference", () => {
+  it("renders the stable prefix before the chapter task", () => {
     const context = compileChapterContext(input());
     const rendered = renderContextForPrompt(context);
-    expect(rendered.startsWith("## 本章任务")).toBe(true);
+    expect(rendered.startsWith("## 创作契约与审美")).toBe(true);
+    expect(rendered.indexOf("## 创作契约与审美")).toBeLessThan(rendered.indexOf("## 本章任务"));
     expect(rendered).not.toContain("commercialGuidance");
     expect(rendered.length).toBeLessThan(JSON.stringify(context).length);
   });

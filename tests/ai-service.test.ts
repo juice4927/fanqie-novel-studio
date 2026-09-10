@@ -11,6 +11,7 @@ import type {
   BookConceptCandidate,
   BookConceptInput,
   Chapter,
+  ChapterPairwiseInput,
   ContextPackage,
   IncubationCandidate,
   ProjectDetail,
@@ -196,6 +197,29 @@ describe("selected concept expansion", () => {
         "中期分配矛盾引发团队路线分裂",
         "终局重组供应体系并建立共同治理制度",
       ],
+      genreSpecificSections: [
+        {
+          label: "人物档案",
+          items: [
+            "许棠，三十岁，供销社经营者，习惯先核验再承诺，害怕再次失去选择权。".repeat(15),
+            "陈青，四十岁，老采购员，熟悉渠道但不信任空口许诺，最终共同建立团队规则。",
+          ],
+        },
+        {
+          label: "地理与日常秩序",
+          items: [
+            "镇中心供销社连接两条乡间运输线，雨季到货需要多留两天。",
+            "工厂与周边村落按采购会协商供货，各方对质量拥有复核权。",
+          ],
+        },
+        {
+          label: "主线与伏笔",
+          items: [
+            "首卷发现运单时间差，中期以仓库证言验证渠道被占用。",
+            "老采购员保留的旧样品在终卷成为证明配方归属的证据。",
+          ],
+        },
+      ],
     };
     vi.stubGlobal(
       "fetch",
@@ -294,6 +318,8 @@ describe("selected concept expansion", () => {
     await expect(new AiService(database, () => "secret").expandBookConcept(input, concept)).resolves.toEqual(skeleton);
     expect(requests[0]).toContain("离婚当天，我接手了倒闭供销社");
     expect(requests[0]).toContain("不要系统");
+    expect(requests[0]).toContain("人物档案");
+    expect(requests[0]).toContain("谁已知、谁未知");
   });
 });
 
@@ -429,6 +455,38 @@ describe("AI provider routing", () => {
     });
     expect(body).not.toHaveProperty("messages");
     expect(body).not.toHaveProperty("response_format");
+  });
+
+  it("keeps the Responses endpoint when only native JSON Schema is unsupported", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "json_schema is not supported for this model" } }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ output_text: JSON.stringify({ issues: [] }), usage: { input_tokens: 1, output_tokens: 1 } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new AiService(databaseFor("gpt-5.1"), () => "secret").reviewChapter(project, chapter, context),
+    ).resolves.toEqual({ issues: [], observations: [] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.com/v1/responses",
+      "https://api.example.com/v1/responses",
+    ]);
+    const first = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const second = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(first.text.format.strict).toBe(true);
+    expect(second.text).toBeUndefined();
   });
 
   it("把含可选字段的 schema 归一化成严格模式可接受的形态", async () => {
@@ -2025,6 +2083,178 @@ describe("AI planning", () => {
     ).rejects.toThrow("预期 10 章");
   });
 
+  it("uses the entire draft planning context for launch packs without approving the story contract", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { messages: Array<{ content: string }> };
+        requests.push(body.messages[1].content);
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    batchGoal: "完成最后一个批次并兑现调查承诺",
+                    batchConflict: "证据公开之前面对最后一层组织阻力",
+                    batchOutcome: "公开证据并完成主角弧光与关系选择",
+                    chapters: Array.from({ length: 3 }, (_, index) => plannedChapter(index + 31)),
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    const project = {
+      ...planningProject,
+      summary: { ...planningProject.summary, targetWords: 82_500, wordsPerChapter: 2500 },
+      contract: { ...planningProject.contract, approved: false },
+      plans: [
+        {
+          id: "draft-volume",
+          kind: "分卷",
+          title: "全书终局承诺",
+          ordinal: 1,
+          targetWords: 82_500,
+          goal: "兑现开篇秘密",
+          conflict: "组织性阻力",
+          outcome: "公开真相",
+          status: "草稿",
+          parentId: null,
+        },
+      ],
+      chapters: Array.from({ length: 30 }, (_, index) => ({
+        id: `existing-${index + 1}`,
+        number: index + 1,
+        title: `前期线索${index + 1}`,
+        outline: `保留第${index + 1}章证据`,
+        content: "不得上传既有正文",
+      })),
+    } as unknown as ProjectDetail;
+    const service = new AiService(planningDatabase(), () => "secret");
+    await expect(service.generatePlanning(project, { mode: "全书结构" })).rejects.toThrow("必须先审批创作契约");
+    const generated = await service.generateLaunchPlanning(project, {
+      mode: "后续章纲",
+      fromChapter: 31,
+      chapterCount: 3,
+    });
+    expect(requests[0]).toContain("前期线索1");
+    expect(requests[0]).toContain("前期线索30");
+    expect(requests[0]).toContain("全书终局承诺");
+    expect(requests[0]).toContain("待作者确认的草稿");
+    expect(requests[0]).not.toContain("不得上传既有正文");
+    expect(generated.plans.every((plan) => plan.status === "草稿")).toBe(true);
+    expect(generated.plans.find((plan) => plan.kind === "粗纲")?.parentId).toBe("draft-volume");
+    expect(generated.chapters.at(-1)?.expectationTargetChapter).toBe(33);
+    expect(project.contract.approved).toBe(false);
+  });
+
+  it("keeps launch-pack prompts bounded as the book grows", async () => {
+    const prompts: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { messages: Array<{ content: string }> };
+        const prompt = body.messages.map((message) => message.content).join("\n");
+        prompts.push(prompt);
+        const match = /从第(\d+)章开始，严格输出(\d+)个/.exec(prompt);
+        const fromChapter = Number(match?.[1] ?? 1);
+        const count = Number(match?.[2] ?? 1);
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    batchGoal: "完成本批次调查目标并留下钩子",
+                    batchConflict: "组织性阻力在证据公开前升级",
+                    batchOutcome: "证据链推进一段并暴露位置",
+                    chapters: Array.from({ length: count }, (_, index) => plannedChapter(fromChapter + index)),
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    const chapters = Array.from({ length: 1190 }, (_, index) => ({
+      id: `chapter-${index + 1}`,
+      number: index + 1,
+      title: `线索${index + 1}`,
+      outline: `推进第${index + 1}章调查`,
+      content: "",
+      status: "章纲",
+      chapterPromise: `本章推进承诺${index + 1}`,
+      expectedPayoff: `可见回报${index + 1}`,
+      endingExpectation: `下一问题${index + 1}`,
+    }));
+    const project = {
+      ...planningProject,
+      summary: { ...planningProject.summary, targetWords: 3_000_000, wordsPerChapter: 2500 },
+      chapters,
+    } as unknown as ProjectDetail;
+    const service = new AiService(planningDatabase(), () => "secret");
+    await service.generateLaunchPlanning(project, { mode: "后续章纲", fromChapter: 1191, chapterCount: 10 });
+    expect(prompts[0].length).toBeLessThan(60_000);
+    expect(prompts[0]).toContain("线索1190");
+    expect(prompts[0]).toContain("线索1131");
+    expect(prompts[0]).not.toContain("线索1100");
+  });
+
+  it("generates whole-book coarse outlines without chapter details", async () => {
+    const prompts: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { messages: Array<{ content: string }> };
+        prompts.push(body.messages.map((message) => message.content).join("\n"));
+        const match = /fromChapter 依次为 ([^，。]+)/.exec(body.messages[1].content);
+        const starts = (match?.[1] ?? "1").split("、").map(Number);
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    blocks: starts.map((fromChapter) => ({
+                      fromChapter,
+                      goal: `推进第${fromChapter}章起的调查目标`,
+                      conflict: "组织阻力升级",
+                      outcome: "证据链推进一段",
+                    })),
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    const project = {
+      ...planningProject,
+      summary: { ...planningProject.summary, targetWords: 3_000_000, wordsPerChapter: 2500 },
+      contract: { ...planningProject.contract, approved: false },
+    } as unknown as ProjectDetail;
+    const service = new AiService(planningDatabase(), () => "secret");
+    const result = await service.generateLaunchPlanning(project, {
+      mode: "全书粗纲",
+      fromChapter: 1,
+      chapterCount: 100,
+    });
+    expect(result.chapters).toEqual([]);
+    expect(result.plans.map((plan) => [plan.kind, plan.ordinal])).toEqual(
+      Array.from({ length: 10 }, (_, index) => ["粗纲", 1 + index * 10]),
+    );
+    expect(prompts[0]).toContain("fromChapter 依次为 1、11、21");
+  });
+
   it("reviews planning with evidence and blocks protected repair targets", async () => {
     const approvedPlan = {
       id: "plan-approved",
@@ -2172,5 +2402,69 @@ describe("AI planning", () => {
     expect(result.planRepairs[0].blockedReason).toContain("已批准");
     expect(result.planRepairs[1].blockedReason).toBeNull();
     expect(result.chapterRepairs[0].blockedReason).toContain("已定稿");
+  });
+});
+
+describe("版本对比裁判", () => {
+  const project = { summary: { id: "p-pairwise", genre: "都市脑洞" }, contract: {} } as unknown as ProjectDetail;
+  const input: ChapterPairwiseInput = {
+    chapterNumber: 3,
+    baseline: { label: "第 2 版", text: "旧版本正文".repeat(30) },
+    candidate: { label: "当前正文", text: "新版本正文".repeat(30) },
+  };
+  const database = {
+    getAiSettings: () => ({
+      protocol: "openai-compatible",
+      baseUrl: "https://api.example.com/v1",
+      model: "deepseek-chat",
+      embeddingModel: "test",
+      hasApiKey: true,
+      inputPricePerMillion: 0,
+      outputPricePerMillion: 0,
+    }),
+    findAiJob: () => undefined,
+    startAiJob: () => "job-judge",
+    finishAiJob: vi.fn(),
+  } as unknown as WorkspaceDatabase;
+  const reply = (winner: string) =>
+    new Response(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ winner, rationale: "更贴合本章目标", confidence: 80 }) } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+      { status: 200 },
+    );
+
+  it("换序一致时给出胜者，并按位置映射回版本", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(reply("A")).mockResolvedValueOnce(reply("B"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new AiService(database, () => "secret").judgeChapterDrafts(project, input);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.winner).toBe("baseline");
+    expect(result.disagreement).toBe(false);
+    expect(result.first.winner).toBe("A");
+    expect(result.swapped.winner).toBe("B");
+    expect(result.baselineChars).toBe([...input.baseline.text].length);
+  });
+
+  it("换序结论相反时标记高分歧且不给胜者", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(reply("A")).mockResolvedValueOnce(reply("A"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new AiService(database, () => "secret").judgeChapterDrafts(project, input);
+    expect(result.winner).toBeNull();
+    expect(result.disagreement).toBe(true);
+  });
+
+  it("两次都判持平属于一致结论", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(reply("持平")).mockResolvedValueOnce(reply("持平"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new AiService(database, () => "secret").judgeChapterDrafts(project, input);
+    expect(result.tie).toBe(true);
+    expect(result.winner).toBeNull();
+    expect(result.disagreement).toBe(false);
   });
 });

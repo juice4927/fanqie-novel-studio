@@ -4,6 +4,7 @@ import {
   type ContextCompilerInput,
   compileChapterContext,
   compileProjectChapterContext,
+  DEFAULT_CONTEXT_BUDGET_TOKENS,
 } from "../src/shared/context-compiler";
 import type { Chapter, LedgerFact, PlanNode, ProjectDetail, StoryContract } from "../src/shared/types";
 
@@ -150,11 +151,55 @@ function input(patch: Partial<ContextCompilerInput> = {}): ContextCompilerInput 
 }
 
 describe("context compiler", () => {
+  it("keeps a large story bible inside the model window budget", () => {
+    const worldRule = "只有核验过的证据才能公开。".repeat(3000);
+    const context = compileChapterContext(
+      input({
+        contract: {
+          ...contract,
+          worldRules: [worldRule],
+          protagonistArc: "学会承担调查的后果",
+          genreSpecificSections: [{ label: "人物档案", items: ["林舟：事故调查员，害怕再次误判"] }],
+        },
+      }),
+    );
+    expect(context.estimatedTokens).toBeLessThanOrEqual(DEFAULT_CONTEXT_BUDGET_TOKENS);
+    expect(context.contract).toContain(worldRule);
+    expect(context.contract).toContain("林舟：事故调查员");
+    expect(context.rollingOutline).toContain("approved");
+    expect(context.authorStyle).toContain("平均句长");
+    expect(context.diagnostics?.budgetTokens).toBe(DEFAULT_CONTEXT_BUDGET_TOKENS);
+    expect(context.diagnostics?.windowTokens).toBeGreaterThan(0);
+  });
+
+  it("shrinks the rolling window and recent summary when the model window is small", () => {
+    const manyChapters = Array.from({ length: 200 }, (_, index) => chapter(index + 1));
+    const manyPlans = Array.from({ length: 260 }, (_, index) => plan(`plan-${index + 1}`, index + 190));
+    const shared = { chapter: chapter(201), recentChapters: manyChapters, plans: manyPlans };
+    const small = compileChapterContext(input(shared), { budgetTokens: 12_000, windowTokens: 32_000 });
+    const large = compileChapterContext(input(shared), {
+      budgetTokens: DEFAULT_CONTEXT_BUDGET_TOKENS,
+      windowTokens: 128_000,
+    });
+    expect(small.estimatedTokens).toBeLessThanOrEqual(12_000);
+    expect(small.recentSummary.split("\n").length).toBeLessThan(large.recentSummary.split("\n").length);
+    expect(small.rollingOutline.split("\n").length).toBeLessThan(large.rollingOutline.split("\n").length);
+    expect(small.diagnostics?.warnings.join("\n")).toContain("上下文预算 12000");
+  });
+
+  it("never sends chapter body text as context", () => {
+    const context = compileChapterContext(
+      input({ recentChapters: [chapter(9, { content: "这是不应注入的正文" })], styleSamples: ["这是不应注入的正文"] }),
+    );
+    expect(context.authorStyle).not.toContain("这是不应注入的正文");
+    expect(context.recentSummary).not.toContain("这是不应注入的正文");
+  });
+
   it("selects approved plans, active facts and prior chapters deterministically", () => {
     const context = compileChapterContext(input());
     expect(context.rollingOutline).toContain("approved");
     expect(context.rollingOutline).not.toContain("unapproved");
-    expect(context.rollingOutline).not.toContain("too-far");
+    expect(context.rollingOutline).toContain("too-far");
     expect(context.relevantFacts).toContain("active");
     expect(context.relevantFacts).not.toContain("future");
     expect(context.relevantFacts).not.toContain("expired");
@@ -170,10 +215,10 @@ describe("context compiler", () => {
     expect(context.diagnostics?.warnings.join("\n")).toContain("硬性·状态冲突");
   });
 
-  it("keeps linked expectations and caps unlinked open expectations", () => {
+  it("keeps linked expectations and all supplied open expectations", () => {
     const context = compileChapterContext(input());
     expect(context.expectationLedger).toContain("[本章承接] 关联期待");
-    expect(context.expectationLedger.match(/\[待处理\]/g) ?? []).toHaveLength(20);
+    expect(context.expectationLedger.match(/\[待处理\]/g) ?? []).toHaveLength(25);
   });
 
   it("sorts recent chapters and uses only supplied style samples", () => {

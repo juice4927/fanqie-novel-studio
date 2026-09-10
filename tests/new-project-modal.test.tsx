@@ -98,6 +98,11 @@ describe("new project modal", () => {
 
     expect(screen.getByText("方案甲")).toBeTruthy();
 
+    const advanced = screen.getByText("高级选项").closest("details");
+    expect(advanced?.open).toBe(false);
+    expect(screen.getByLabelText("番茄目标分类").closest("details")).toBeNull();
+    expect(screen.getByLabelText("你的灵感（可不填）").closest("details")).toBeNull();
+
     fireEvent.change(screen.getByLabelText("安全存稿线"), { target: { value: "20" } });
 
     expect(screen.getByText("方案甲")).toBeTruthy();

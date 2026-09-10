@@ -1,3 +1,4 @@
+import { contextBandOf } from "./context-layout";
 import type { ContextDiagnostics, ContextPackage, ContextSectionDiagnostic } from "./types";
 
 export type ContextContentKey = Exclude<keyof ContextPackage, "estimatedTokens" | "diagnostics">;
@@ -19,6 +20,7 @@ export const CONTEXT_SECTION_LABELS: Record<ContextContentKey, string> = {
   rollingOutline: "滚动章纲",
   recentSummary: "近期摘要",
   relevantFacts: "相关事实",
+  storyEntries: "设定条目",
   forbiddenKnowledge: "禁止泄露信息",
   authorStyle: "作者自身文风统计",
   guidanceMode: "引导档位",
@@ -31,11 +33,18 @@ const DEFAULT_METADATA: Record<ContextContentKey, ContextSectionMetadata> = {
   expectationLedger: { source: "期待兑现账本", reason: "优先加载本章承接和仍待兑现的跨章期待" },
   longTermMemory: { source: "章节、阶段、分卷和全书摘要", reason: "保留超出近期章节窗口的长期因果" },
   volumeGoal: { source: "当前已批准分卷", reason: "约束本章对当前卷目标的贡献" },
-  rollingOutline: { source: "未来三十章已批准规划", reason: "避免当前章破坏近期结构和后续兑现" },
-  recentSummary: { source: "最近五章摘要", reason: "承接紧邻事件、人物行动和局势变化" },
-  relevantFacts: { source: "当前有效且已确认的状态事实", reason: "约束人物、关系、能力、资源、地点和时间线" },
+  rollingOutline: {
+    source: "当前章节之后的已批准规划（按预算取前瞻窗口）",
+    reason: "避免当前章破坏近期结构和后续兑现",
+  },
+  recentSummary: { source: "当前章节之前的章节摘要（按预算取最近窗口）", reason: "承接既有事件、人物行动和局势变化" },
+  relevantFacts: { source: "检索后当前有效且已确认的相关事实", reason: "约束人物、关系、能力、资源、地点和时间线" },
+  storyEntries: {
+    source: "本章命中的设定条目（按提及、生效区间与揭示进度筛选）",
+    reason: "把契约长列表升级为按需注入，关键设定不再被预算截掉",
+  },
   forbiddenKnowledge: { source: "当前有效秘密与知情范围", reason: "防止角色使用尚未获得的信息" },
-  authorStyle: { source: "本项目最近二十章已定稿正文统计", reason: "保持作者自身叙事密度，不加载研究样本文风" },
+  authorStyle: { source: "本项目最近定稿正文统计与作者纠错偏好", reason: "保持作者自身叙事密度，不加载研究样本文风" },
   guidanceMode: { source: "作品自由度档位", reason: "决定提示词注入量与写作采样温度" },
 };
 
@@ -50,6 +59,7 @@ export function buildContextDiagnostics(
   context: Omit<ContextPackage, "diagnostics">,
   metadata: Partial<Record<ContextContentKey, Partial<ContextSectionMetadata>>> = {},
   warnings: string[] = [],
+  limits: { windowTokens?: number; budgetTokens?: number } = {},
 ): ContextDiagnostics {
   const sections = (Object.keys(CONTEXT_SECTION_LABELS) as ContextContentKey[]).map((key): ContextSectionDiagnostic => {
     const raw = context[key];
@@ -68,11 +78,18 @@ export function buildContextDiagnostics(
       includedItems,
       totalItems,
       status: empty ? "缺失" : includedItems < totalItems ? "已截断" : "已包含",
+      band: contextBandOf(key),
     };
   });
+  const stablePrefixCharacters = sections
+    .filter((section) => section.band === "stable")
+    .reduce((total, section) => total + section.characters, 0);
   return {
     generatedAt: new Date().toISOString(),
     sections,
     warnings: [...new Set(warnings.filter(Boolean))],
+    ...(limits.windowTokens ? { windowTokens: limits.windowTokens } : {}),
+    ...(limits.budgetTokens ? { budgetTokens: limits.budgetTokens } : {}),
+    ...(stablePrefixCharacters > 0 ? { stablePrefixCharacters } : {}),
   };
 }

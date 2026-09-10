@@ -13,6 +13,30 @@ export const QUALITY_BENCHMARK = {
   cases: [
     {
       fixture: {
+        id: "launch-character-dossier-knowledge-boundary",
+        title: "完整人物档案不等于角色知晓全局秘密",
+        genre: "都市脑洞",
+        stage: "开篇",
+        chapterKind: "开篇",
+        chapter: "许澄第一次见到顾闻，就说出了顾闻藏在旧站地下室的录音带。",
+        contextEvidence: ["人物档案中的作者设定：只有顾闻知道录音带位置，许澄尚未获得任何相关线索。"],
+        expectedIssues: [
+          { id: "dossier-secret", category: "知识边界", severity: "硬性", matchAny: ["录音带", "尚未", "顾闻"] },
+        ],
+      },
+      baselineOutput: {
+        issues: [
+          {
+            severity: "硬性",
+            category: "知识边界",
+            message: "许澄直接使用了仅顾闻知晓的人物档案秘密，尚未取得线索",
+            evidence: "说出了顾闻藏在旧站地下室的录音带",
+          },
+        ],
+      },
+    },
+    {
+      fixture: {
         id: "knowledge-boundary-password",
         title: "角色越过知识边界",
         genre: "都市脑洞",
@@ -114,6 +138,7 @@ export const QUALITY_BENCHMARK = {
         title: "正常推进不得误报",
         genre: "年代重生",
         stage: "开篇",
+        chapterKind: "开篇",
         chapter:
           "许棠先核对供销社的进货单，再用三天做出样品。主任验收后给了她第一张正式订单。她把订单折好，决定明早去找运输队。",
         contextEvidence: ["许棠会裁缝，目标是获得第一张订单；供销社主任有权验收样品。"],
@@ -156,6 +181,7 @@ export const QUALITY_BENCHMARK = {
         title: "平淡但无硬伤的章节不得误报",
         genre: "都市脑洞",
         stage: "中期",
+        chapterKind: "过渡",
         chapter:
           "林舟把录音笔收进外套内袋，沿走廊走到尽头。值班室的灯亮着，他隔着玻璃看了两分钟，确认里面只有一个人。回程路上他买了两个包子，边吃边把今天的见闻记进本子。明天还要来一次。",
         contextEvidence: ["本章为过渡章，章纲只要求确认值班室人员，不要求兑现冲突。"],
@@ -170,6 +196,7 @@ export const QUALITY_BENCHMARK = {
         title: "蓄势章未兑现回报不得判为问题",
         genre: "玄幻/仙侠",
         stage: "扩张",
+        chapterKind: "蓄势",
         chapter:
           "沈砚在丹房外站了很久，手里那封信始终没有拆。师父说过，赤炎炉的火候要等三天，他数着日子，把每一味药材都重新称了一遍。夜里他梦见炉火熄灭，醒来时天还没亮。",
         contextEvidence: ["本章章纲标注为蓄势章，回报预计在第 47 章兑现。"],

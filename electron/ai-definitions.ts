@@ -144,27 +144,25 @@ export const BookConceptSchema = z.object({
 /** 立项候选使用同一份 schema；保留别名便于调用点表达意图。 */
 export const IncubationCandidateSchema = BookConceptSchema;
 
-const distinctSkeletonList = (minimum: number, maximum: number) =>
+const distinctSkeletonList = (minimum: number) =>
   z
-    .array(z.string().min(8).max(300))
+    .array(z.string().min(8))
     .min(minimum)
-    .max(maximum)
     .refine((items) => new Set(items.map((item) => diversityKey(item))).size === items.length, "骨架条目不能重复");
 
 export const BookConceptSkeletonSchema = z.object({
-  protagonistArc: z.string().min(20).max(600),
-  keyRelationships: distinctSkeletonList(2, 8),
-  worldRules: distinctSkeletonList(2, 10),
-  majorForces: distinctSkeletonList(2, 8),
-  timelineAnchors: distinctSkeletonList(3, 10),
+  protagonistArc: z.string().min(20),
+  keyRelationships: distinctSkeletonList(2),
+  worldRules: distinctSkeletonList(2),
+  majorForces: distinctSkeletonList(2),
+  timelineAnchors: distinctSkeletonList(3),
   genreSpecificSections: z
     .array(
       z.object({
         label: z.string().min(2).max(20),
-        items: distinctSkeletonList(2, 6),
+        items: distinctSkeletonList(2),
       }),
     )
-    .max(2)
     .optional(),
 });
 
@@ -358,6 +356,13 @@ export const QualityReviewSchema = z.object({
   observations: z.array(z.string().min(1).max(300)).max(12).default([]),
 });
 
+/** 成对比较裁判：只比较两个版本，不重写。winner 按位置作答，换序映射由调用方负责。 */
+export const PairwiseJudgeSchema = z.object({
+  winner: z.enum(["A", "B", "持平"]),
+  rationale: z.string().min(1).max(500),
+  confidence: z.number().min(0).max(100),
+});
+
 export const FactCandidateSchema = z.object({
   facts: z
     .array(
@@ -403,6 +408,21 @@ export const StructurePlanningSchema = z.object({
     )
     .min(3)
     .max(8),
+});
+
+/** 全书粗纲：每 10 章一条，只给批次目标/矛盾/结果，不写章节目录。 */
+export const CoarsePlanningSchema = z.object({
+  blocks: z
+    .array(
+      z.object({
+        fromChapter: z.number().int().positive(),
+        goal: z.string().min(5).max(300),
+        conflict: z.string().min(5).max(300),
+        outcome: z.string().min(5).max(300),
+      }),
+    )
+    .min(1)
+    .max(30),
 });
 
 const PlannedChapterSchema = z

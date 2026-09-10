@@ -161,23 +161,45 @@ test("shows automatic backup controls without exposing stored secrets", async ({
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("creates a book from zero through AI concept selection", async ({ page }) => {
+test("creates a book from zero through AI concept selection", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "新建作品" }).first().click();
-  await expect(page.getByRole("dialog", { name: "从 0 开始创建一本书" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "AI 开书" })).toBeVisible();
   await expect(page.getByText("AI 从零开书", { exact: true })).toBeVisible();
   await expect(page.getByText("番茄目标分类", { exact: true })).toBeVisible();
   // 情绪基调与主角身份只在专属字段出现一次，不再作为题材元素重复渲染。
   await expect(page.getByText("情绪基调", { exact: true })).toHaveCount(1);
   await expect(page.getByText("主角身份", { exact: true })).toHaveCount(1);
-  await expect(page.getByText("本次定位", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("你的灵感（可不填）")).toBeVisible();
+  await expect(page.locator("details.creation-advanced")).not.toHaveAttribute("open");
+  if (screenshotRoot)
+    await page.screenshot({
+      path: path.join(screenshotRoot, `${testInfo.project.name}-simple-creation.png`),
+      fullPage: true,
+    });
   await page.getByRole("button", { name: "生成三套方案" }).click();
   await expect(page.getByRole("heading", { name: "她能看见事故留下的断点" })).toBeVisible();
   await expect(page.locator(".book-concept-grid > button")).toHaveCount(3);
   await expect(page.getByText("立项体检")).toBeVisible();
   await page.getByRole("button", { name: /离婚当天，我接手了倒闭供销社/ }).click();
-  await page.getByRole("button", { name: "采用此方案并创建" }).click();
+  await page.getByRole("button", { name: "选定方向，生成完整创作包" }).click();
   await expect(page.getByRole("heading", { name: "离婚当天，我接手了倒闭供销社" })).toBeVisible();
-  await page.getByRole("button", { name: /故事圣经/ }).click();
+  await expect(page.getByRole("region", { name: "创作包集中复核" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认创作包", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "分层大纲", exact: true }).click();
+  await expect(page.getByRole("group", { name: "大纲层级" })).toBeVisible();
+  await page.getByRole("button", { name: "全书章纲", exact: true }).click();
+  await expect(page.getByLabel("内容页码")).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+  ).toBeLessThanOrEqual(1);
+  if (screenshotRoot)
+    await page.screenshot({
+      path: path.join(screenshotRoot, `${testInfo.project.name}-launch-review.png`),
+      fullPage: true,
+    });
+  await page.getByRole("button", { name: "确认创作包", exact: true }).click();
+  await expect(page.getByRole("region", { name: "创作包集中复核" })).toBeHidden();
+  await page.getByRole("button", { name: "故事圣经", exact: true }).click();
   await expect(page.getByLabel("故事前提")).toHaveValue(/被夺走婚房的基层职员/);
   await expect(page.getByLabel("经营", { exact: true })).toBeChecked();
   await expect(page.getByLabel("群像", { exact: true }).first()).toBeChecked();
@@ -197,12 +219,12 @@ test("creates a book from zero through AI concept selection", async ({ page }) =
   await expect(page.getByLabel("文字质地")).toBeVisible();
   await expect(page.getByLabel("对话风格")).toBeVisible();
   await expect(page.getByLabel("情绪表达")).toBeVisible();
-  await expect(page.getByRole("button", { name: "审批契约" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "审批契约" })).toBeDisabled();
 });
 
 test("keeps an incubation draft and compares candidates side by side", async ({ page }) => {
   await page.getByRole("button", { name: "新建作品" }).first().click();
-  await expect(page.getByRole("dialog", { name: "从 0 开始创建一本书" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "AI 开书" })).toBeVisible();
   await page.getByRole("button", { name: "生成三套方案" }).click();
   await expect(page.locator(".book-concept-grid > button")).toHaveCount(3);
   await page.getByRole("button", { name: "保存为立项草稿" }).click();
@@ -212,16 +234,16 @@ test("keeps an incubation draft and compares candidates side by side", async ({ 
   await page.getByRole("button", { name: /立项台/ }).click();
   await expect(page.getByRole("heading", { name: "她能看见事故留下的断点" })).toBeVisible();
   await expect(page.locator(".compare-row.head > button")).toHaveCount(3);
-  await expect(page.locator(".step-bar li.current")).toHaveText("体检");
+  await expect(page.locator(".step-bar li.current")).toHaveText("选择方向");
   await page.getByRole("button", { name: "继续编辑" }).click();
-  await expect(page.getByRole("dialog", { name: "继续立项草稿" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "继续开书" })).toBeVisible();
 });
 
 test("traps modal focus, closes with Escape, and restores focus", async ({ page }) => {
   const trigger = page.getByRole("button", { name: "新建作品" }).first();
   await trigger.focus();
   await trigger.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "从 0 开始创建一本书" });
+  const dialog = page.getByRole("dialog", { name: "AI 开书" });
   await expect(dialog).toBeVisible();
   await expect(page.getByRole("button", { name: "关闭" })).toBeFocused();
   await page.keyboard.press("Shift+Tab");

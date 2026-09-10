@@ -372,7 +372,10 @@ export function AiProfileManager({
           const routeProfile = profiles.find((profile) => profile.id === route?.profileId) ?? null;
           return (
             <div className="form-grid two" key={role}>
-              <Field label={MODEL_ROLE_LABELS[role]}>
+              <Field
+                label={MODEL_ROLE_LABELS[role]}
+                hint={role === "review" ? "语义质检与版本对比共用此角色，建议与写作模型不同" : undefined}
+              >
                 <Select
                   value={route?.profileId ?? ""}
                   onChange={(event) => void updateRoute(role, event.target.value, route?.modelId ?? "")}
@@ -411,6 +414,74 @@ export function AiProfileManager({
             </div>
           );
         })}
+      </div>
+
+      <h3>模型上下文窗口</h3>
+      <p className="muted">留空按来源类型推导（云端 1M、本地 32k）；这里填写的值优先于模型目录与探测结果。</p>
+      <div className="settings-form">
+        {(() => {
+          const pairs = new Map<
+            string,
+            { profileId: string; profileName: string; modelId: string; localEndpoint: boolean }
+          >();
+          for (const profile of profiles) {
+            const modelId = profile.defaultModel.trim();
+            if (modelId)
+              pairs.set(`${profile.id}:${modelId}`, {
+                profileId: profile.id,
+                profileName: profile.name,
+                modelId,
+                localEndpoint: profile.localEndpoint,
+              });
+          }
+          for (const route of routes) {
+            const modelId = (route.modelId ?? "").trim();
+            const profile = route.profileId ? profiles.find((item) => item.id === route.profileId) : null;
+            if (!profile || !modelId) continue;
+            pairs.set(`${profile.id}:${modelId}`, {
+              profileId: profile.id,
+              profileName: profile.name,
+              modelId,
+              localEndpoint: profile.localEndpoint,
+            });
+          }
+          if (!pairs.size) return <p className="muted">还没有配置默认模型或角色路由模型。</p>;
+          return [...pairs.values()].map((item) => {
+            const option = (modelOptions[item.profileId] ?? []).find((entry) => entry.modelId === item.modelId);
+            const current = option?.contextWindow ?? null;
+            return (
+              <div className="form-grid two" key={`${item.profileId}:${item.modelId}`}>
+                <Field
+                  label={`${item.profileName} · ${item.modelId}`}
+                  hint={current ? `当前覆盖：${current.toLocaleString()} tokens` : "未设置，按来源类型推导"}
+                >
+                  <Input
+                    key={`${item.profileId}:${item.modelId}:${current ?? "none"}`}
+                    type="number"
+                    min={1000}
+                    step={1000}
+                    defaultValue={current ?? ""}
+                    placeholder={item.localEndpoint ? "32000" : "1000000"}
+                    onBlur={(event) => {
+                      const raw = event.target.value.trim();
+                      const next = raw ? Number(raw) : null;
+                      if (next !== null && (!Number.isFinite(next) || next < 1000)) return;
+                      if (next === current) return;
+                      void run(item.profileId, async () => {
+                        await api.saveAiModelContextWindow(item.profileId, item.modelId, next);
+                        const options = await api.listAiProfileModels(item.profileId);
+                        setModelOptions((previous) => ({ ...previous, [item.profileId]: options }));
+                        return next === null
+                          ? `已清除「${item.modelId}」的窗口覆盖`
+                          : `已把「${item.modelId}」的窗口设为 ${next.toLocaleString()} tokens`;
+                      });
+                    }}
+                  />
+                </Field>
+              </div>
+            );
+          });
+        })()}
       </div>
 
       {editing && (

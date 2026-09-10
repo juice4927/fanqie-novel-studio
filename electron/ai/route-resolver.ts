@@ -1,4 +1,5 @@
 import { resolveAuthHeaders } from "../../src/shared/ai/auth";
+import { lookupCatalog } from "../../src/shared/ai/catalog";
 import { normalizeProviderUrl } from "../../src/shared/ai/provider-url";
 import type {
   AiProfile,
@@ -23,6 +24,10 @@ export interface ResolvedAiRoute {
   extraQuery: Record<string, string>;
   /** 本地模型端点：走直连通道。 */
   localEndpoint: boolean;
+  /** 模型上下文窗口；null 表示未知，由调用方按来源类型取默认值。 */
+  contextWindow: number | null;
+  /** 模型最大输出；null 表示未知。 */
+  maxOutputTokens: number | null;
   /** 旧版 provider 缓存键别名，用于迁移后继续命中历史缓存。 */
   legacyProviderKey: string | null;
 }
@@ -41,7 +46,8 @@ type RouteDatabase = Pick<
 export function roleForTask(taskType: string): ModelRole {
   if (taskType === "draft-chapter" || taskType === "revise-chapter-quality") return "draft";
   if (taskType === "connection-test" || taskType === "suggest-aesthetic-profile") return "utility";
-  if (taskType === "quality-review") return "review";
+  // 裁判任务复用质检角色：默认与写作模型分离，避免自评自判（新增独立角色需要改设置页与角色校验）。
+  if (taskType === "quality-review" || taskType === "judge") return "review";
   if (taskType.startsWith("deconstruct-") || taskType === "extract-chapter-facts") return "extract";
   return "plan";
 }
@@ -76,15 +82,19 @@ export function createAiRouteResolver(deps: { database: RouteDatabase; getCreden
     const apiKey = requiresKey ? deps.getCredential(profile.id) : "";
 
     let apiSurface = profile.apiSurface;
+    const capabilities = deps.database.listModelCapabilities(profile.id).filter((item) => item.modelId === model);
     if (apiSurface === "auto") {
       // 探测失败的能力行两个支持位都是 false；不要因为它的插入顺序靠前就选中它，
       // 否则每个任务都会先打一次注定失败的协议面。
-      const learned = deps.database
-        .listModelCapabilities(profile.id)
-        .filter((item) => item.modelId === model && (item.source === "probe" || item.source === "user"))
+      const learned = capabilities
+        .filter((item) => item.source === "probe" || item.source === "user")
         .find((item) => item.supportsJsonSchema !== false || item.supportsJsonMode !== false);
       if (learned) apiSurface = learned.apiSurface as ApiSurface;
     }
+    // 窗口与输出上限：探测/作者填写优先，其次模型目录；都没有则交给调用方取默认值。
+    const catalog = lookupCatalog(model);
+    const learnedContextWindow = capabilities.find((item) => item.contextWindow !== null)?.contextWindow ?? null;
+    const learnedMaxOutput = capabilities.find((item) => item.maxOutputTokens !== null)?.maxOutputTokens ?? null;
 
     return {
       profileId: profile.id,
@@ -98,6 +108,8 @@ export function createAiRouteResolver(deps: { database: RouteDatabase; getCreden
       extraHeaders: profile.extraHeaders,
       extraQuery: profile.extraQuery,
       localEndpoint: profile.localEndpoint,
+      contextWindow: learnedContextWindow ?? catalog?.contextWindow ?? null,
+      maxOutputTokens: learnedMaxOutput ?? catalog?.maxOutputTokens ?? null,
       legacyProviderKey: legacyProviderKeyFor(profile, baseUrl),
     };
   };

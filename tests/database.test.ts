@@ -1788,6 +1788,27 @@ describe("transaction rollback for batch writes", () => {
 });
 
 describe("legacy catalog repair", () => {
+  it("整张 ai_jobs 表缺失时首次启动即可记录 AI 任务", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "novel-studio-legacy-"));
+    roots.push(root);
+    const legacy = new DatabaseSync(path.join(root, "catalog.sqlite"));
+    legacy.exec("PRAGMA user_version = 9");
+    legacy.close();
+
+    const database = new WorkspaceDatabase(root);
+    databases.push(database);
+    const jobId = database.startAiJob(null, "repair-test", "input-hash", "v1", "local-test", "test-model", "test");
+    expect(database.getAiJob(jobId)).toMatchObject({
+      id: jobId,
+      taskType: "repair-test",
+      status: "运行中",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    database.updateAiJobTelemetry(jobId, { chunkCount: 1, attemptCount: 1 });
+    expect(database.getAiJob(jobId)).toMatchObject({ chunkCount: 1, attemptCount: 1 });
+  });
+
   it("补齐被版本记账跳过的 incubations 表与 projects.words_per_chapter 列", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "novel-studio-legacy-"));
     roots.push(root);

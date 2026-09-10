@@ -167,6 +167,34 @@ describe("来源模型清单", () => {
     expect(fetchPublicHttpResponse).toHaveBeenCalledTimes(2);
   });
 
+  it("作者填写的上下文窗口优先于远端空值，刷新清单也不会被冲掉", async () => {
+    const database = createDatabase();
+    database.saveAiProfile(profile({ id: "p-window", defaultModel: "m-1" }));
+    fetchPublicHttpResponse.mockResolvedValue(modelsResponse(["m-1"]));
+
+    const handlers = createHandlers(database);
+    const refresh = handlers.get("refreshAiProfileModels") as (id: string, force?: boolean) => Promise<string[]>;
+    const save = handlers.get("saveAiModelContextWindow") as (
+      id: string,
+      modelId: string,
+      contextWindow: number | null,
+    ) => StoredModelCapability;
+    const list = handlers.get("listAiProfileModels") as (id: string) => AiProfileModelOption[];
+
+    await refresh("p-window", true);
+    expect(list("p-window").find((option) => option.modelId === "m-1")?.contextWindow).toBeNull();
+
+    save("p-window", "m-1", 200_000);
+    expect(list("p-window").find((option) => option.modelId === "m-1")?.contextWindow).toBe(200_000);
+
+    // 再次刷新远端清单时，作者填写的值不能被 null 冲掉。
+    await refresh("p-window", true);
+    expect(list("p-window").find((option) => option.modelId === "m-1")?.contextWindow).toBe(200_000);
+
+    save("p-window", "m-1", null);
+    expect(list("p-window").find((option) => option.modelId === "m-1")?.contextWindow).toBeNull();
+  });
+
   it("anthropic-messages 不发请求", async () => {
     const database = createDatabase();
     database.saveAiProfile(profile({ id: "p-anthropic", apiSurface: "anthropic-messages" }));

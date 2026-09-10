@@ -9,6 +9,7 @@ import {
   readAnthropicStream,
   readChatCompletionStream,
   readResponsesStream,
+  rejectsNativeStructuredOutput,
   rejectsResponsesApi,
   rejectsStreaming,
   supportsReasoning,
@@ -148,6 +149,12 @@ describe("Responses API", () => {
     expect(rejectsResponsesApi(405, "method not allowed")).toBe(true);
     expect(rejectsResponsesApi(500, "temporary failure")).toBe(false);
     expect(aiEndpoint("https://model.invalid/v1", "gpt-5.1", false)).toBe("https://model.invalid/v1/chat/completions");
+  });
+
+  it("distinguishes an unsupported native schema from an invalid schema", () => {
+    expect(rejectsNativeStructuredOutput(400, "json_schema is not supported for this model")).toBe(true);
+    expect(rejectsNativeStructuredOutput(400, "invalid response_format schema")).toBe(false);
+    expect(rejectsNativeStructuredOutput(500, "json_schema is not supported")).toBe(false);
   });
 
   it("reads output text from a non-streaming response", () => {

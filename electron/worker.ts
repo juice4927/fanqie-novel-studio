@@ -7,6 +7,7 @@ import { XMLParser } from "fast-xml-parser";
 import JSZip from "jszip";
 import mammoth from "mammoth";
 import { normalizeAestheticProfile } from "../src/shared/aesthetic-profile";
+import { analyzeAiFlavor, formatAiFlavorReport, whitelistRangesFor } from "../src/shared/ai-flavor";
 import { GENRE_PLUGINS } from "../src/shared/genre-plugins";
 import { analyzeProseTemperature } from "../src/shared/prose-temperature";
 import type { Chapter, Genre, ImportPreview, LedgerFact, QualityIssue, StoryContract } from "../src/shared/types";
@@ -47,6 +48,8 @@ interface QualityPayload {
   contract: StoryContract;
   genre: Genre;
   originalityMatches: Array<{ researchRef: string; fingerprint: string }>;
+  /** AI 味白名单：本书有意使用的词句，统计时排除。 */
+  aiFlavorWhitelist?: string[];
 }
 
 function cleanText(text: string) {
@@ -204,6 +207,7 @@ export function qualityCheck(payload: QualityPayload): LocalQualityResult {
     contract,
     genre,
     originalityMatches,
+    aiFlavorWhitelist = [],
   } = payload;
   const issues: QualityIssue[] = [];
   const observations: string[] = [];
@@ -237,6 +241,13 @@ export function qualityCheck(payload: QualityPayload): LocalQualityResult {
     observations.push(
       `每千字具身情绪 ${temperature.embodiedEmotionPerThousand.toFixed(1)} 次、感官反馈 ${temperature.sensoryPerThousand.toFixed(1)} 次，低于本项目“${aestheticProfile.emotionalTemperature}”温度设定，仅作观察。`,
     );
+  }
+  // AI 味只作观察：频率比阈值来自人稿语料校准，不进入硬门禁；白名单内的词句不计入。
+  const flavor = analyzeAiFlavor(chapter.content, {
+    whitelist: whitelistRangesFor(chapter.content, aiFlavorWhitelist),
+  });
+  if (flavor.blockingCount > 0 || flavor.risk !== "低") {
+    observations.push(formatAiFlavorReport(flavor));
   }
   for (const fact of facts.filter((item) => item.confidence === "有冲突")) {
     add(

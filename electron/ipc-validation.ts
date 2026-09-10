@@ -181,13 +181,13 @@ const incubationDraft = z
     skeleton: z
       .object({
         protagonistArc: mediumText,
-        keyRelationships: z.array(shortText).max(50),
-        worldRules: z.array(shortText).max(50),
-        majorForces: z.array(shortText).max(50),
-        timelineAnchors: z.array(shortText).max(50),
+        keyRelationships: z.array(mediumText).max(100),
+        worldRules: z.array(mediumText).max(100),
+        majorForces: z.array(mediumText).max(100),
+        timelineAnchors: z.array(mediumText).max(100),
         genreSpecificSections: z
-          .array(z.object({ label: shortText, items: z.array(shortText).max(20) }).strict())
-          .max(2)
+          .array(z.object({ label: shortText, items: z.array(mediumText).max(100) }).strict())
+          .max(24)
           .optional(),
       })
       .strict()
@@ -216,13 +216,13 @@ const contract = z
     longFormEngine: mediumText.optional(),
     protagonistDesire: mediumText,
     protagonistArc: mediumText.optional(),
-    keyRelationships: z.array(shortText).max(50).optional(),
-    worldRules: z.array(shortText).max(50).optional(),
-    majorForces: z.array(shortText).max(50).optional(),
-    timelineAnchors: z.array(shortText).max(50).optional(),
+    keyRelationships: z.array(mediumText).max(100).optional(),
+    worldRules: z.array(mediumText).max(100).optional(),
+    majorForces: z.array(mediumText).max(100).optional(),
+    timelineAnchors: z.array(mediumText).max(100).optional(),
     genreSpecificSections: z
-      .array(z.object({ label: shortText, items: z.array(shortText).max(20) }).strict())
-      .max(2)
+      .array(z.object({ label: shortText, items: z.array(mediumText).max(100) }).strict())
+      .max(24)
       .optional(),
     readerPromise: mediumText,
     coreEmotion: mediumText,
@@ -308,6 +308,35 @@ const expectation = z
     payoffResult: mediumText,
     createdAt: timestamp,
     updatedAt: timestamp,
+  })
+  .strict();
+
+const storyEntry = z
+  .object({
+    id: z.string().max(200),
+    kind: z.enum(["人物", "地点", "物品", "势力", "设定", "伏笔"]),
+    name: shortText,
+    aliases: z.array(z.string().trim().max(60)).max(20),
+    summary: mediumText,
+    detail: longText,
+    aiContext: z.enum(["always", "detected", "detected_excluded", "never"]),
+    effectiveFrom: positiveInt,
+    effectiveTo: positiveInt.nullable(),
+    revealChapter: positiveInt.nullable(),
+    knownBy: z.array(z.string().trim().max(60)).max(50),
+    exclusionTerms: z.array(z.string().trim().max(60)).max(50),
+    sourceContractItem: z.string().max(200).nullable(),
+    pinned: z.boolean(),
+    updatedAt: timestamp,
+  })
+  .strict();
+
+const chapterPairwiseInput = z
+  .object({
+    chapterNumber: positiveInt,
+    baseline: z.object({ label: shortText, text: longText }).strict(),
+    candidate: z.object({ label: shortText, text: longText }).strict(),
+    criteria: z.array(z.string().trim().min(1).max(200)).max(10).optional(),
   })
   .strict();
 
@@ -580,7 +609,11 @@ const schemas = {
   deleteIncubation: z.tuple([id]),
   promoteIncubation: z.tuple([id]),
   getCategoryTags: z.tuple([shortText]),
-  generateLaunchPack: z.tuple([id, z.object({ withStructure: z.boolean(), withFirstChapters: z.boolean() }).strict()]),
+  generateLaunchPack: z.tuple([
+    id,
+    z.object({ withStructure: z.boolean(), withFirstChapters: z.boolean() }).strict().optional(),
+  ]),
+  approveLaunchPack: idOnly,
   deleteProject: z.tuple([id, z.string().max(100)]),
   getProject: idOnly,
   getChapter: projectEntity,
@@ -682,6 +715,10 @@ const schemas = {
   applyNovelRevision: z.tuple([id, novelRevisionProposal, z.array(id).min(1).max(500)]),
   saveChapter: z.tuple([id, chapter, z.enum(["version", "autosave"]).optional()]),
   saveExpectation: z.tuple([id, expectation]),
+  saveStoryEntry: z.tuple([id, storyEntry]),
+  deleteStoryEntry: z.tuple([id, id]),
+  seedStoryEntries: idOnly,
+  saveAiFlavorWhitelist: z.tuple([id, z.array(z.string().trim().min(1).max(60)).max(200)]),
   transitionChapter: z.tuple([id, id, z.enum(["章纲", "草稿", "待质检", "待定稿", "已定稿", "待发布", "已发布"])]),
   compileContext: projectEntity,
   reviseChapterFromQuality: z.tuple([id, id]),
@@ -694,6 +731,7 @@ const schemas = {
   listRevisions: z.tuple([id, z.enum(["state", "plans", "chapters", "facts", "changes"]), id]),
   restoreRevision: projectEntity,
   runQualityCheck: z.tuple([id, id, taskModelOverride.optional()]),
+  judgeChapterDrafts: z.tuple([id, chapterPairwiseInput, taskModelOverride.optional()]),
   extractChapterFacts: z.tuple([id, id, taskModelOverride.optional()]),
   saveFact: z.tuple([id, fact]),
   resolveFactConflict: z.tuple([id, id, z.enum(["keep", "ignore"])]),
@@ -783,6 +821,7 @@ const schemas = {
   testAiProfile: idOnly,
   listAiProfileModels: idOnly,
   refreshAiProfileModels: z.tuple([id, z.boolean().optional()]),
+  saveAiModelContextWindow: z.tuple([id, z.string().trim().min(1).max(200), positiveInt.nullable()]),
   exportAiProfiles: noArgs,
   importAiProfiles: z.tuple([z.string().max(2_000_000)]),
   getProxySettings: noArgs,

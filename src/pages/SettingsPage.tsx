@@ -69,6 +69,7 @@ const AI_TASK_LABELS: Record<string, string> = {
   "generate-chapter-plans": "生成章纲",
   "generate-concepts": "生成作品方向",
   "generate-story-structure": "生成故事结构",
+  judge: "版本对比",
   "quality-review": "语义质检",
   "review-planning-logic": "规划逻辑审查",
   "revise-chapter-quality": "按质检修订",

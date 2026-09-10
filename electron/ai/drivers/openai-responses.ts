@@ -51,6 +51,15 @@ export function rejectsResponsesApi(status: number, detail: string) {
   return endpointMentioned && unsupported;
 }
 
+/** Responses 端点可用，但当前模型不支持原生 JSON Schema 严格输出。 */
+export function rejectsNativeStructuredOutput(status: number, detail: string) {
+  return (
+    status === 400 &&
+    /(?:json[_\s-]?schema|text\.?format|response[_\s-]?format|structured output)/i.test(detail) &&
+    /(?:unsupported|not supported|does not support|unavailable)/i.test(detail)
+  );
+}
+
 export async function readResponsesStream(
   response: Response,
   onActivity: () => void,

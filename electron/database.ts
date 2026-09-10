@@ -26,10 +26,12 @@ import { prepareExpectationSave } from "../src/shared/expectation-service";
 import { planFactConflictResolution, prepareFactSave } from "../src/shared/fact-service";
 import { computeGenerationQuality, type GenerationDecision } from "../src/shared/generation-quality";
 import { approvePlanDraft, preparePlanSave } from "../src/shared/plan-service";
+import { COARSE_BLOCK_CHAPTERS } from "../src/shared/planning";
 import { prepareProjectCreation, prepareProjectUpdate } from "../src/shared/project-service";
 import { prepareQualityIssueSave, resolveQualityIssue } from "../src/shared/quality-issue-service";
 import { prepareReviewExperiment } from "../src/shared/review-experiment-service";
 import { prepareScheduleSave } from "../src/shared/schedule-service";
+import { prepareStoryEntrySave, seedStoryEntriesFromContract } from "../src/shared/story-entry-service";
 import { prepareFinalizedChapterSummaries } from "../src/shared/summaries";
 import type {
   AiJobRecord,
@@ -44,9 +46,11 @@ import type {
   ExpectationEntry,
   IncubationDraft,
   InsightPack,
+  LaunchPackProgress,
   LedgerFact,
   MetricSnapshot,
   PlanNode,
+  PlanningGenerationResult,
   ProjectDetail,
   ProjectPatch,
   ProjectSummary,
@@ -62,6 +66,7 @@ import type {
   ScheduleItem,
   SearchHit,
   StoryContract,
+  StoryEntry,
   StorySummary,
   SystemHealthReport,
 } from "../src/shared/types";
@@ -823,7 +828,12 @@ export class WorkspaceDatabase {
       expectations: this.listRecords<ExpectationEntry>(db, "expectations").sort(
         (a, b) => a.sourceChapter - b.sourceChapter,
       ),
+      storyEntries: this.listRecords<StoryEntry>(db, "story_entries").sort((a, b) =>
+        a.name.localeCompare(b.name, "zh-CN"),
+      ),
+      aiFlavorWhitelist: this.getState<string[]>(db, "aiFlavorWhitelist", []),
       directorNotes: this.getDirectorNotes(id),
+      launchPack: this.getState<LaunchPackProgress | null>(db, "launchPack", null) ?? undefined,
     };
   }
 
@@ -847,7 +857,12 @@ export class WorkspaceDatabase {
       expectations: this.listRecords<ExpectationEntry>(db, "expectations").sort(
         (a, b) => a.sourceChapter - b.sourceChapter,
       ),
+      storyEntries: this.listRecords<StoryEntry>(db, "story_entries").sort((a, b) =>
+        a.name.localeCompare(b.name, "zh-CN"),
+      ),
+      aiFlavorWhitelist: this.getState<string[]>(db, "aiFlavorWhitelist", []),
       directorNotes: this.getDirectorNotes(id),
+      launchPack: this.getState<LaunchPackProgress | null>(db, "launchPack", null) ?? undefined,
     };
   }
 
@@ -855,6 +870,111 @@ export class WorkspaceDatabase {
     const chapter = this.projects.getChapter(this.projectDb(id), chapterId);
     if (!chapter) throw new Error("章节不存在");
     return chapter;
+  }
+
+  saveLaunchPackProgress(id: string, progress: LaunchPackProgress): LaunchPackProgress {
+    this.setState(this.projectDb(id), "launchPack", progress);
+    this.touchProject(id);
+    return progress;
+  }
+
+  /** 落盘一批开书包内容；同一层级同一位置的节点只保留一个（粗纲与章纲批次会重叠）。 */
+  saveLaunchPackBatch(id: string, batch: PlanningGenerationResult, progress?: LaunchPackProgress): void {
+    const db = this.projectDb(id);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const chapterNumbers = new Set(this.projects.listChapterMetadata(db).map((chapter) => chapter.number));
+      for (const chapter of batch.chapters) {
+        if (chapterNumbers.has(chapter.number)) throw new Error(`第${chapter.number}章已存在，开书包未覆盖现有内容`);
+        if (chapter.content.trim()) throw new Error("开书包只能保存章纲草稿");
+        chapterNumbers.add(chapter.number);
+      }
+      const existingPlans = this.listRecords<PlanNode>(db, "plans");
+      const existingIds = new Set(existingPlans.map((plan) => plan.id));
+      const existingBySlot = new Map(existingPlans.map((plan) => [`${plan.kind}:${plan.ordinal}`, plan]));
+      const batchIds = new Set<string>();
+      const idRemap = new Map<string, string>();
+      for (const plan of batch.plans) {
+        if (existingIds.has(plan.id) || batchIds.has(plan.id)) throw new Error("开书包规划节点已存在");
+        batchIds.add(plan.id);
+        const existing = existingBySlot.get(`${plan.kind}:${plan.ordinal}`);
+        if (existing) {
+          // 同一层级同一位置已存在（粗纲先由全书粗纲生成）；子节点改指向已存在的节点。
+          idRemap.set(plan.id, existing.id);
+          continue;
+        }
+        existingBySlot.set(`${plan.kind}:${plan.ordinal}`, plan);
+        const parentId = plan.parentId ? (idRemap.get(plan.parentId) ?? plan.parentId) : plan.parentId;
+        this.saveRecord(db, "plans", plan.id, { ...plan, parentId, status: "草稿" });
+      }
+      for (const chapter of batch.chapters) {
+        this.persistChapterInTransaction(db, id, { ...chapter, status: "章纲" }, "章纲", false);
+      }
+      if (progress) this.setState(db, "launchPack", progress);
+      db.exec("COMMIT");
+      this.touchProject(id);
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
+      throw error;
+    }
+  }
+
+  approveLaunchPack(id: string): void {
+    const db = this.projectDb(id);
+    db.exec("BEGIN IMMEDIATE");
+    let catalogTransaction = false;
+    try {
+      const progress = this.getState<LaunchPackProgress | null>(db, "launchPack", null);
+      if (progress?.status !== "待确认") throw new Error("创作包生成完毕后才能统一确认");
+      const summary = this.getProjectSummary(id);
+      const targetChapters = Math.ceil(summary.targetWords / (summary.wordsPerChapter || 2500));
+      if (progress.targetChapters !== targetChapters) throw new Error("目标篇幅已改变，请继续生成后再确认");
+      const horizon = Math.min(progress.horizonChapters ?? targetChapters, targetChapters);
+      const chapters = this.projects.listChapterMetadata(db);
+      const chapterNumbers = new Set(chapters.map((chapter) => chapter.number));
+      for (let number = 1; number <= horizon; number += 1) {
+        if (!chapterNumbers.has(number)) throw new Error(`第${number}章章纲缺失，暂时不能确认创作包`);
+      }
+      const contract = this.getState<StoryContract>(db, "contract");
+      const approved = contract.approved ? contract : approveContractDraft(contract, now());
+      const plans = this.listRecords<PlanNode>(db, "plans");
+      if (!["宏观阶段", "分卷", "粗纲", "细纲", "场景卡"].every((kind) => plans.some((plan) => plan.kind === kind))) {
+        throw new Error("创作包的规划层级尚不完整");
+      }
+      const coarseOrdinals = new Set(plans.filter((plan) => plan.kind === "粗纲").map((plan) => plan.ordinal));
+      for (let start = 1; start <= targetChapters; start += COARSE_BLOCK_CHAPTERS) {
+        if (!coarseOrdinals.has(start)) throw new Error(`第${start}章起的粗纲缺失，暂时不能确认创作包`);
+      }
+      const detailPlans = plans.filter((plan) => plan.kind === "细纲");
+      const scenePlans = plans.filter((plan) => plan.kind === "场景卡");
+      for (let number = 1; number <= horizon; number += 1) {
+        const detail = detailPlans.find((plan) => plan.ordinal === number);
+        if (!detail) throw new Error(`第${number}章细纲缺失，暂时不能确认创作包`);
+        if (!scenePlans.some((plan) => plan.parentId === detail.id))
+          throw new Error(`第${number}章场景卡缺失，暂时不能确认创作包`);
+      }
+      this.setState(db, "contract", approved);
+      for (const plan of plans) this.saveRecord(db, "plans", plan.id, approvePlanDraft(plan, approved));
+      this.setState(db, "launchPack", { ...progress, status: "已确认", updatedAt: now() });
+      this.catalog.exec("BEGIN IMMEDIATE");
+      catalogTransaction = true;
+      this.catalog.prepare("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?").run("连载准备", now(), id);
+      db.exec("COMMIT");
+      this.catalog.exec("COMMIT");
+      catalogTransaction = false;
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
+      if (catalogTransaction) this.catalog.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   saveContract(id: string, contract: StoryContract, changeRequestId?: string) {
@@ -1133,6 +1253,81 @@ export class WorkspaceDatabase {
     });
     this.saveRecord(db, "expectations", next.id, next, undefined, createRevision);
     return next;
+  }
+
+  saveStoryEntry(id: string, entry: StoryEntry) {
+    const db = this.projectDb(id);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const previous = entry.id ? this.getRecord<StoryEntry>(db, "story_entries", entry.id) : undefined;
+      const next = prepareStoryEntrySave(previous, entry, {
+        id: entry.id || randomUUID(),
+        updatedAt: now(),
+      });
+      this.saveRecord(db, "story_entries", next.id, next, undefined, false);
+      db.exec("COMMIT");
+      this.touchProject(id);
+      return next;
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
+      throw error;
+    }
+  }
+
+  deleteStoryEntry(id: string, entryId: string) {
+    const db = this.projectDb(id);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare("DELETE FROM records WHERE collection = ? AND id = ?").run("story_entries", entryId);
+      db.exec("COMMIT");
+      this.touchProject(id);
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 从契约长列表生成设定条目种子。幂等：已存在同 id 条目时跳过，
+   * 不覆盖作者编辑过的内容，也不删除任何条目。
+   */
+  /** AI 味白名单：本书有意使用的词句，质检统计时从命中与字数里排除。 */
+  saveAiFlavorWhitelist(id: string, terms: readonly string[]) {
+    const db = this.projectDb(id);
+    const cleaned = [...new Set(terms.map((item) => item.trim()).filter(Boolean))].slice(0, 200);
+    this.setState(db, "aiFlavorWhitelist", cleaned);
+    this.touchProject(id);
+    return cleaned;
+  }
+
+  seedStoryEntries(id: string) {
+    const db = this.projectDb(id);
+    const contract = this.getState<StoryContract>(db, "contract");
+    const existing = new Set(this.listRecords<StoryEntry>(db, "story_entries").map((entry) => entry.id));
+    const created = seedStoryEntriesFromContract(contract, now()).filter((entry) => !existing.has(entry.id));
+    if (!created.length) return this.listRecords<StoryEntry>(db, "story_entries");
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const entry of created) this.saveRecord(db, "story_entries", entry.id, entry, undefined, false);
+      db.exec("COMMIT");
+      this.touchProject(id);
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* transaction already closed */
+      }
+      throw error;
+    }
+    return this.listRecords<StoryEntry>(db, "story_entries");
   }
 
   transitionChapter(id: string, chapterId: string, status: ChapterStatus) {

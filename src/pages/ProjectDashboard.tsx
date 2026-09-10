@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { LaunchPackReview } from "../components/LaunchPackReview";
 import { Badge, Button, Modal } from "../components/UI";
 import { describeError } from "../lib/error-message";
 import { formatCount } from "../lib/format";
@@ -56,29 +57,20 @@ export function ProjectDashboard({
     };
   }, [api, project.summary.id]);
   const unresolved = project.issues.filter((issue) => issue.status === "待处理");
-  const approvedPlans = project.plans.filter((plan) => plan.status === "已批准");
+  const hasCreationPack = Boolean(project.launchPack);
   const milestones = [
     {
-      label: "复核创作契约",
-      done: Boolean(
-        project.contract.premise.trim() && project.contract.readerPromise.trim() && project.contract.ending.trim(),
-      ),
-      action: () => onNavigate("故事圣经"),
-    },
-    {
-      label: "审批创作契约",
-      done: project.contract.approved,
-      action: () => onNavigate("故事圣经"),
-    },
-    {
-      label: "确认全书结构",
-      done: approvedPlans.some((plan) => plan.kind === "分卷"),
+      label: "生成故事、人物、世界与全书大纲",
+      done: project.launchPack?.status === "待确认" || project.launchPack?.status === "已确认",
       action: () => onNavigate("规划台"),
     },
     {
-      label: "确认前 10 章章纲",
-      done: project.chapters.filter((chapter) => chapter.status === "章纲" || chapter.outline.trim()).length >= 10,
-      action: () => onNavigate("规划台"),
+      label: "复核并确认创作包",
+      done:
+        project.contract.approved &&
+        project.plans.length > 0 &&
+        project.plans.every((plan) => plan.status === "已批准"),
+      action: () => onNavigate("故事圣经"),
     },
     {
       label: "写第一章并质检",
@@ -138,6 +130,16 @@ export function ProjectDashboard({
           </div>
         </div>
       </section>
+      {hasCreationPack && project.launchPack?.status !== "已确认" && (
+        <LaunchPackReview
+          project={project}
+          api={api}
+          reload={reload}
+          notify={notify}
+          onEditContract={() => onNavigate("故事圣经")}
+          onEditPlans={() => onNavigate("规划台")}
+        />
+      )}
       {quality && quality.total > 0 && (
         <section className="section-band compact-band">
           <div className="section-heading">
@@ -175,8 +177,8 @@ export function ProjectDashboard({
         <div className="section-band compact-band">
           <div className="section-heading">
             <div>
-              <h2>闭环进度</h2>
-              <p>门禁按顺序推进，不允许 AI 越权。</p>
+              <h2>创作进度</h2>
+              <p>{project.contract.approved ? "创作包已确认" : "创作包待确认"}</p>
             </div>
           </div>
           <div className="milestone-list">
@@ -188,38 +190,29 @@ export function ProjectDashboard({
               </button>
             ))}
           </div>
-          {project.contract.approved &&
-            !approvedPlans.some((plan) => plan.kind === "分卷") &&
-            !project.plans.length &&
-            !project.chapters.length && (
-              <div className="launch-pack">
-                <p>
-                  契约已审批。可以一键生成开书包：4–8 个宏观阶段、3–6 个分卷骨架与前 10
-                  章章纲，全部为草稿状态，仍需你逐项确认。
-                </p>
-                <Button
-                  icon={launchBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
-                  disabled={launchBusy}
-                  onClick={async () => {
-                    setLaunchBusy(true);
-                    try {
-                      const result = await api.generateLaunchPack(project.summary.id, {
-                        withStructure: true,
-                        withFirstChapters: true,
-                      });
-                      await reload();
-                      notify(`已生成 ${result.plans} 个规划草稿和 ${result.chapters} 章章纲，请到规划台逐项确认`);
-                    } catch (error) {
-                      notify(describeError(error), "error");
-                    } finally {
-                      setLaunchBusy(false);
-                    }
-                  }}
-                >
-                  {launchBusy ? "正在生成开书包…" : "生成开书包"}
-                </Button>
-              </div>
-            )}
+          {project.contract.premise.trim() && !hasCreationPack && !project.plans.length && !project.chapters.length && (
+            <div className="launch-pack">
+              <p>已有故事方向，完整创作包尚未生成。</p>
+              <Button
+                icon={launchBusy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
+                disabled={launchBusy}
+                onClick={async () => {
+                  setLaunchBusy(true);
+                  try {
+                    await api.generateLaunchPack(project.summary.id);
+                    await reload();
+                    notify("完整创作包已开始生成");
+                  } catch (error) {
+                    notify(describeError(error), "error");
+                  } finally {
+                    setLaunchBusy(false);
+                  }
+                }}
+              >
+                {launchBusy ? "正在生成完整创作包…" : "生成完整创作包"}
+              </Button>
+            </div>
+          )}
         </div>
         <div className="section-band compact-band">
           <div className="section-heading">

@@ -58,4 +58,27 @@ describe("encrypted backup", () => {
     await expect(restoreEncryptedBackup(backup, root, "wrong-password")).rejects.toThrow(/密码错误|损坏/);
     database.close();
   });
+
+  it("does not include deleted-project files retained in the workspace recycle bin", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "novel-backup-trash-"));
+    roots.push(root);
+    const database = new WorkspaceDatabase(root);
+    const project = database.createProject({
+      title: "待删除作品",
+      genre: "年代重生",
+      targetWords: 3000000,
+      updateCadence: "每日1章",
+    });
+    database.deleteProject(project.id, project.title);
+    writeFileSync(path.join(database.trashRoot, "unrelated-deleted-content.txt"), "deleted content", "utf8");
+    database.checkpointAll();
+
+    const backup = path.join(os.tmpdir(), `novel-${crypto.randomUUID()}.novelbak`);
+    roots.push(backup);
+    await createEncryptedBackup(root, backup, "strong-password");
+    const restored = await restoreEncryptedBackup(backup, root, "strong-password");
+
+    expect(existsSync(path.join(restored, "trash"))).toBe(false);
+    database.close();
+  });
 });

@@ -66,6 +66,30 @@ describe("ensureStructure", () => {
     const db = openDatabase();
     expect(() => ensureStructure(db, { columns: { projects: { words_per_chapter: "INTEGER" } } })).not.toThrow();
   });
+
+  it("新建表在同一次修复中补齐后续字段", () => {
+    const db = openDatabase();
+    ensureStructure(db, {
+      tables: { ai_jobs: "CREATE TABLE IF NOT EXISTS ai_jobs (id TEXT PRIMARY KEY)" },
+      columns: { ai_jobs: { retry_context: "TEXT", input_tokens: "INTEGER NOT NULL DEFAULT 0" } },
+    });
+    db.prepare("INSERT INTO ai_jobs(id, retry_context) VALUES('job', 'retry')").run();
+    expect(db.prepare("SELECT retry_context, input_tokens FROM ai_jobs WHERE id = 'job'").get()).toMatchObject({
+      retry_context: "retry",
+      input_tokens: 0,
+    });
+  });
+
+  it("补列失败时同时回滚本轮创建的表", () => {
+    const db = openDatabase();
+    expect(() =>
+      ensureStructure(db, {
+        tables: { ai_jobs: "CREATE TABLE IF NOT EXISTS ai_jobs (id TEXT PRIMARY KEY)" },
+        columns: { ai_jobs: { invalid_column: "INTEGER PRIMARY KEY" } },
+      }),
+    ).toThrow();
+    expect(tableExists(db, "ai_jobs")).toBe(false);
+  });
 });
 
 describe("runMigrations", () => {
@@ -79,6 +103,21 @@ describe("runMigrations", () => {
     const inserted = migration("ab", (database) => database.exec("CREATE TABLE ab(id TEXT PRIMARY KEY)"));
     runMigrations(db, [first, inserted, second]);
     expect(tableExists(db, "ab")).toBe(true);
+  });
+
+  it("在取得写锁后重新读取迁移记录，避免按启动快照重复非幂等 DDL", () => {
+    const db = openDatabase();
+    const first = migration("first", (database) => {
+      // 模拟另一启动实例在本次启动读取初始快照之后，已经完成了 second。
+      database.exec("CREATE TABLE second_table(id TEXT PRIMARY KEY)");
+      database
+        .prepare("INSERT INTO schema_migrations(id, applied_at) VALUES('second', '2026-09-09T00:00:00.000Z')")
+        .run();
+    });
+    const second = migration("second", (database) => database.exec("CREATE TABLE second_table(id TEXT PRIMARY KEY)"));
+
+    expect(() => runMigrations(db, [first, second])).not.toThrow();
+    expect(tableExists(db, "second_table")).toBe(true);
   });
 
   it("历史库按 user_version 播种一次后不再重复执行", () => {

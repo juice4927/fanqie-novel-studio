@@ -46,6 +46,7 @@ describe("AI 来源路由", () => {
   it("按任务类型推断角色", () => {
     expect(roleForTask("draft-chapter")).toBe("draft");
     expect(roleForTask("quality-review")).toBe("review");
+    expect(roleForTask("judge")).toBe("review");
     expect(roleForTask("deconstruct-batch")).toBe("extract");
     expect(roleForTask("extract-chapter-facts")).toBe("extract");
     expect(roleForTask("connection-test")).toBe("utility");

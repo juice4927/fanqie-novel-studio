@@ -63,11 +63,30 @@ describe("toStrictJsonSchema", () => {
     expect(strictIssues(toStrictJsonSchema(schema))).toEqual([]);
   });
 
-  it("保持 record 之类的自由对象不被清空", () => {
+  it("拒绝无法表示为 strict schema 的 record 动态键", () => {
     const schema = z.toJSONSchema(z.record(z.string(), z.string())) as Record<string, unknown>;
-    const normalized = toStrictJsonSchema(schema) as { properties?: unknown; required?: unknown };
-    expect(normalized.properties).toBeUndefined();
-    expect(normalized.required).toBeUndefined();
+    expect(() => toStrictJsonSchema(schema)).toThrow(/动态对象键/);
+  });
+
+  it("递归处理 nullable anyOf 分支与 $defs 引用目标", () => {
+    const Entry = z.object({ label: z.string(), note: z.string().optional() });
+    const schema = z.toJSONSchema(z.object({ entry: Entry.nullable(), duplicate: Entry }), { reused: "ref" }) as Record<
+      string,
+      unknown
+    >;
+    const normalized = toStrictJsonSchema(schema) as {
+      properties: { entry: { anyOf: Array<{ $ref?: string } | { type?: string }> } };
+      $defs: { __schema0: { required: string[]; properties: Record<string, unknown>; additionalProperties: boolean } };
+    };
+    expect(normalized.properties.entry.anyOf.some((item) => item.$ref === "#/$defs/__schema0")).toBe(true);
+    expect(normalized.$defs.__schema0.required).toEqual(Object.keys(normalized.$defs.__schema0.properties));
+    expect(normalized.$defs.__schema0.additionalProperties).toBe(false);
+    expect(strictIssues(normalized)).toEqual([]);
+  });
+
+  it("拒绝根级 nullable 或 union，避免 Responses API 的 strict 400", () => {
+    const schema = z.toJSONSchema(z.union([z.object({ a: z.string() }), z.object({ b: z.string() })]));
+    expect(() => toStrictJsonSchema(schema)).toThrow(/根 schema 必须是对象/);
   });
 
   it("可重复归一化", () => {

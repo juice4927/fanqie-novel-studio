@@ -1,3 +1,4 @@
+import { analyzeAiFlavor, formatAiFlavorReport, whitelistRangesFor } from "../shared/ai-flavor";
 import { aggregateCategoryTags } from "../shared/category-tags";
 import {
   decideChangeRequest as decideChangeRequestDraft,
@@ -34,12 +35,14 @@ import {
   sameRevisionSnapshot,
 } from "../shared/novel-revision";
 import { approvePlanDraft, preparePlanSave } from "../shared/plan-service";
+import { COARSE_BLOCK_CHAPTERS } from "../shared/planning";
 import { prepareProjectCreation, prepareProjectUpdate } from "../shared/project-service";
 import { prepareQualityIssueSave, resolveQualityIssue } from "../shared/quality-issue-service";
 import { parseRankingCsv } from "../shared/ranking-csv";
 import { prepareLocalResearchBook } from "../shared/research-import-service";
 import { prepareReviewExperiment } from "../shared/review-experiment-service";
 import { prepareScheduleSave } from "../shared/schedule-service";
+import { prepareStoryEntrySave, seedStoryEntriesFromContract } from "../shared/story-entry-service";
 import { prepareFinalizedChapterSummaries } from "../shared/summaries";
 import type {
   AppApi,
@@ -68,10 +71,12 @@ import type {
   ReviewExperiment,
   ScheduleItem,
   StoryContract,
+  StoryEntry,
   UpdateStatus,
 } from "../shared/types";
 import type { DemoState } from "./browser-demo";
 import { analyzeBrowserNovelRevision, id, key, now, seed, summary } from "./browser-demo";
+import { buildBrowserLaunchPack } from "./browser-launch-pack";
 
 function load(): DemoState {
   try {
@@ -101,6 +106,8 @@ function getProject(state: DemoState, projectId: string) {
   if (!project) throw new Error("项目不存在");
   project.summaries ??= [];
   project.expectations ??= [];
+  project.storyEntries ??= [];
+  project.aiFlavorWhitelist ??= [];
   project.experiments ??= [];
   project.chapters.forEach((chapter) => {
     chapter.linkedExpectationIds ??= [];
@@ -278,6 +285,8 @@ export function createBrowserApi(): AppApi {
       insightIds: [],
       summaries: [],
       expectations: [],
+      storyEntries: [],
+      aiFlavorWhitelist: [],
     };
     state.projects.unshift(project);
     persist();
@@ -432,6 +441,7 @@ export function createBrowserApi(): AppApi {
       const created = createProject({ ...input, title: concept.title });
       const project = getProject(state, created.id);
       applyConceptToProject(project, input, concept);
+      buildBrowserLaunchPack(project, id, now());
       persist();
       return summary(project);
     },
@@ -440,71 +450,32 @@ export function createBrowserApi(): AppApi {
       if (!profile) return [];
       return aggregateCategoryTags(state.rankings, profile.name, profile.channel);
     },
-    async generateLaunchPack(projectId, options) {
+    async generateLaunchPack(projectId) {
       const project = getProject(state, projectId);
-      if (!project.contract.approved) throw new Error("必须先审批创作契约，才能生成开书包");
-      const stamp = now();
-      let plans = 0;
-      let chapters = 0;
-      if (options.withStructure) {
-        const stages = ["开局立足", "扩张成形", "真相与抉择"];
-        stages.forEach((title, index) => {
-          project.plans.push({
-            id: id(),
-            kind: "宏观阶段",
-            title,
-            ordinal: index + 1,
-            goal: `完成${title}阶段的核心目标`,
-            conflict: "旧规则无法处理更高层对手",
-            outcome: "主线状态发生不可逆变化",
-            targetWords: Math.round(project.summary.targetWords / stages.length),
-            status: "草稿",
-            parentId: null,
-          });
-        });
-        const volumes = ["第一卷 立足", "第二卷 扩张", "第三卷 收束"];
-        volumes.forEach((title, index) => {
-          project.plans.push({
-            id: id(),
-            kind: "分卷",
-            title,
-            ordinal: index + 1,
-            goal: `推进${title}的主线目标`,
-            conflict: "资源、关系与对手同时升级",
-            outcome: "阶段目标兑现并留下新问题",
-            targetWords: Math.round(project.summary.targetWords / volumes.length),
-            status: "草稿",
-            parentId: null,
-          });
-        });
-        plans = stages.length + volumes.length;
-      }
-      if (options.withFirstChapters) {
-        for (let number = 1; number <= 10; number += 1) {
-          project.chapters.push({
-            id: id(),
-            number,
-            title: `第${number}章 待定`,
-            outline: `功能：行动；目标：推进本章任务；张力：外部阻力与自身代价；结果：留下新问题。`,
-            content: "",
-            wordCount: 0,
-            status: "章纲",
-            batchMode: number <= 2 ? "逐章" : "五章批次",
-            isKeyChapter: number <= 2,
-            targetWords: project.summary.wordsPerChapter,
-            chapterPromise: "本章给读者一个明确的进展",
-            expectedPayoff: "下一章兑现本章埋下的期待",
-            crisis: "主角的选择会带来新的代价",
-            endingExpectation: "章末留下一个必须回答的问题",
-            expectationTargetChapter: number + 3,
-            revision: 0,
-            updatedAt: stamp,
-          });
-          chapters += 1;
-        }
-      }
+      buildBrowserLaunchPack(project, id, now());
       persist();
-      return { plans, chapters };
+      return { plans: project.plans.length, chapters: project.chapters.length, progress: project.launchPack };
+    },
+    async approveLaunchPack(projectId) {
+      const project = getProject(state, projectId);
+      const progress = project.launchPack;
+      if (progress?.status !== "待确认") throw new Error("请等待创作包生成完成后再确认");
+      const horizon = Math.min(progress.horizonChapters ?? progress.targetChapters, progress.targetChapters);
+      const chapterNumbers = new Set(project.chapters.map((chapter) => chapter.number));
+      for (let number = 1; number <= horizon; number += 1)
+        if (!chapterNumbers.has(number)) throw new Error(`第${number}章章纲缺失，暂时不能确认创作包`);
+      const coarseOrdinals = new Set(project.plans.filter((plan) => plan.kind === "粗纲").map((plan) => plan.ordinal));
+      for (let start = 1; start <= progress.targetChapters; start += COARSE_BLOCK_CHAPTERS)
+        if (!coarseOrdinals.has(start)) throw new Error(`第${start}章起的粗纲缺失，暂时不能确认创作包`);
+      const approved = approveContractDraft(project.contract, now());
+      const plans = project.plans.map((plan) => approvePlanDraft(plan, approved));
+      project.contract = approved;
+      project.plans = plans;
+      project.launchPack = { ...progress, status: "已确认", updatedAt: now() };
+      project.summary.status = "连载准备";
+      project.summary.updatedAt = now();
+      for (const plan of plans) state.planVersions[plan.id] = browserPlanVersion(state, plan) + 1;
+      persist();
     },
     async listIncubations() {
       return structuredClone(state.incubations);
@@ -543,6 +514,7 @@ export function createBrowserApi(): AppApi {
       const created = createProject({ ...input, title: concept.title });
       const project = getProject(state, created.id);
       applyConceptToProject(project, input, concept);
+      buildBrowserLaunchPack(project, id, now());
       draft.status = "已立项";
       draft.step = "开书包";
       draft.createdProjectId = created.id;
@@ -831,6 +803,38 @@ export function createBrowserApi(): AppApi {
       persist();
       return next;
     },
+    async saveStoryEntry(projectId, entry: StoryEntry) {
+      const project = getProject(state, projectId);
+      const previous = project.storyEntries.find((item) => item.id === entry.id);
+      const next = prepareStoryEntrySave(previous, entry, {
+        id: entry.id || id(),
+        updatedAt: now(),
+      });
+      const index = project.storyEntries.findIndex((item) => item.id === next.id);
+      if (index >= 0) project.storyEntries[index] = next;
+      else project.storyEntries.push(next);
+      persist();
+      return next;
+    },
+    async deleteStoryEntry(projectId, entryId) {
+      const project = getProject(state, projectId);
+      project.storyEntries = project.storyEntries.filter((item) => item.id !== entryId);
+      persist();
+    },
+    async seedStoryEntries(projectId) {
+      const project = getProject(state, projectId);
+      const existing = new Set(project.storyEntries.map((item) => item.id));
+      const created = seedStoryEntriesFromContract(project.contract, now()).filter((item) => !existing.has(item.id));
+      project.storyEntries.push(...created);
+      persist();
+      return project.storyEntries;
+    },
+    async saveAiFlavorWhitelist(projectId, terms) {
+      const project = getProject(state, projectId);
+      project.aiFlavorWhitelist = [...new Set(terms.map((item) => item.trim()).filter(Boolean))].slice(0, 200);
+      persist();
+      return project.aiFlavorWhitelist;
+    },
     async transitionChapter(projectId, chapterId, status: Chapter["status"]) {
       const project = getProject(state, projectId);
       const chapter = project.chapters.find((item) => item.id === chapterId);
@@ -906,6 +910,11 @@ export function createBrowserApi(): AppApi {
       const issues: QualityIssue[] = [];
       const observations: string[] = [];
       if (chapter.wordCount < 1200) observations.push(`本章 ${chapter.wordCount} 字，低于建议的 1200 字。`);
+      // AI 味只作观察，与桌面端质检保持一致；白名单内的词句不计入。
+      const flavor = analyzeAiFlavor(chapter.content, {
+        whitelist: whitelistRangesFor(chapter.content, project.aiFlavorWhitelist ?? []),
+      });
+      if (flavor.blockingCount > 0 || flavor.risk !== "低") observations.push(formatAiFlavorReport(flavor));
       if (chapter.isKeyChapter && chapter.batchMode === "五章批次")
         issues.push({
           id: id(),
@@ -966,6 +975,9 @@ export function createBrowserApi(): AppApi {
     },
     async reviseChapterFromQuality() {
       throw new Error("AI 修订正文需要在桌面版配置模型后使用");
+    },
+    async judgeChapterDrafts() {
+      throw new Error("版本对比需要在桌面版配置模型后使用");
     },
     async extractChapterFacts() {
       throw new Error("状态候选提取需要在桌面版配置 AI 后使用");
@@ -1259,6 +1271,8 @@ export function createBrowserApi(): AppApi {
     async refreshAiProfileModels() {
       return [];
     },
+    // 浏览器预览没有真实模型来源，窗口覆盖只保留在内存里，不做持久化。
+    async saveAiModelContextWindow() {},
     async exportAiProfiles() {
       return JSON.stringify({ schemaVersion: 1, profiles: [], roleRoutes: [] }, null, 2);
     },

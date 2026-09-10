@@ -6,6 +6,9 @@ import type {
   BookConceptCandidate,
   BookConceptInput,
   BookConceptSkeleton,
+  LaunchPackProgress,
+  PlanningGenerationResult,
+  ProjectDetail,
   ProjectSummary,
   StoryContract,
 } from "../src/shared/types";
@@ -72,10 +75,17 @@ function createDependencies(activeProjectId = "") {
     if (handlers.has(channel)) throw new Error(`重复注册：${channel}`);
     handlers.set(channel, callback);
   };
+  const overview = {
+    summary: { ...project, targetWords: 25_000, wordsPerChapter: 2500 },
+    contract: { ...concept, ...skeleton, approved: false },
+    plans: [],
+    chapters: [],
+  } as unknown as ProjectDetail;
   const database = {
     attachInsights: vi.fn(),
     approveContract: vi.fn(),
     approvePlan: vi.fn(),
+    approveLaunchPack: vi.fn(),
     createProject: vi.fn(() => project),
     createProjectFromConcept: vi.fn(() => project),
     decideChangeRequest: vi.fn(),
@@ -92,7 +102,7 @@ function createDependencies(activeProjectId = "") {
     getIncubation: vi.fn(),
     getInsights: vi.fn(() => []),
     getProject: vi.fn(() => ({ summary: project, contract: {}, metrics: [] })),
-    getProjectOverview: vi.fn(),
+    getProjectOverview: vi.fn(() => overview),
     listIncubations: vi.fn(() => []),
     listProjectSignatures: vi.fn(() => []),
     listProjects: vi.fn(() => [project]),
@@ -112,6 +122,15 @@ function createDependencies(activeProjectId = "") {
     saveIncubation: vi.fn((draft) => draft),
     saveMetrics: vi.fn(),
     savePlan: vi.fn(),
+    saveLaunchPackProgress: vi.fn((_id: string, progress: LaunchPackProgress) => {
+      overview.launchPack = progress;
+      return progress;
+    }),
+    saveLaunchPackBatch: vi.fn((_id: string, batch: PlanningGenerationResult, progress: LaunchPackProgress) => {
+      overview.plans.push(...batch.plans);
+      overview.chapters.push(...batch.chapters);
+      overview.launchPack = progress;
+    }),
     saveReviewExperiment: vi.fn(),
     saveSchedule: vi.fn(),
     searchProject: vi.fn(),
@@ -120,7 +139,45 @@ function createDependencies(activeProjectId = "") {
   const ai = {
     expandBookConcept: vi.fn(async () => skeleton),
     generateBookConcepts: vi.fn(),
-    generatePlanning: vi.fn(async () => ({ startChapter: 1, chapters: [], plans: [] })),
+    generateLaunchPlanning: vi.fn(
+      async (
+        _project: ProjectDetail,
+        input: { mode: string; fromChapter?: number; chapterCount?: number },
+      ): Promise<PlanningGenerationResult> => {
+        if (input.mode === "全书结构")
+          return {
+            startChapter: 1,
+            chapters: [],
+            plans: [{ id: "structure-1", kind: "分卷", status: "草稿" }] as PlanningGenerationResult["plans"],
+          };
+        if (input.mode === "全书粗纲") {
+          const from = input.fromChapter ?? 1;
+          const count = input.chapterCount ?? 10;
+          const starts: number[] = [];
+          for (let number = from; number < from + count; number += 10) starts.push(number);
+          return {
+            startChapter: from,
+            chapters: [],
+            plans: starts.map((ordinal) => ({
+              id: `coarse-${ordinal}`,
+              kind: "粗纲",
+              ordinal,
+              status: "草稿",
+            })) as PlanningGenerationResult["plans"],
+          };
+        }
+        return {
+          startChapter: input.fromChapter ?? 1,
+          plans: [],
+          chapters: Array.from({ length: input.chapterCount ?? 10 }, (_, index) => ({
+            id: `chapter-${(input.fromChapter ?? 1) + index}`,
+            number: (input.fromChapter ?? 1) + index,
+            content: "",
+            status: "章纲",
+          })) as PlanningGenerationResult["chapters"],
+        };
+      },
+    ),
     suggestAestheticProfile: vi.fn(),
   };
   const currentDate = new Date(2026, 6, 31, 0, 30);
@@ -131,7 +188,7 @@ function createDependencies(activeProjectId = "") {
     isGenerationActive: (projectId: string) => projectId === activeProjectId,
     currentDate: () => currentDate,
   } as unknown as ProjectHandlerDependencies;
-  return { handlers, database, ai, dependencies, currentDate };
+  return { handlers, database, ai, dependencies, currentDate, overview };
 }
 
 describe("project handlers", () => {
@@ -141,6 +198,7 @@ describe("project handlers", () => {
 
     expect([...handlers.keys()].sort()).toEqual([
       "approveContract",
+      "approveLaunchPack",
       "approvePlan",
       "attachInsights",
       "createProject",
@@ -148,6 +206,7 @@ describe("project handlers", () => {
       "decideChangeRequest",
       "deleteIncubation",
       "deleteProject",
+      "deleteStoryEntry",
       "generateBookConcepts",
       "generateLaunchPack",
       "getCategoryTags",
@@ -168,6 +227,7 @@ describe("project handlers", () => {
       "resolveFactConflict",
       "resolveIssue",
       "restoreRevision",
+      "saveAiFlavorWhitelist",
       "saveChangeRequest",
       "saveChapter",
       "saveContract",
@@ -178,7 +238,9 @@ describe("project handlers", () => {
       "savePlan",
       "saveReviewExperiment",
       "saveSchedule",
+      "saveStoryEntry",
       "searchProject",
+      "seedStoryEntries",
       "suggestAestheticProfile",
       "updateProject",
     ]);
@@ -294,56 +356,203 @@ describe("project handlers", () => {
     );
   });
 
-  it("generates the launch pack only once, and only after the contract is approved", async () => {
-    const { dependencies, handlers, database, ai } = createDependencies();
+  it("generates the entire book from a draft contract in durable batches without approving it", async () => {
+    const { dependencies, handlers, database, ai, overview } = createDependencies();
+    overview.summary.targetWords = 82_500;
     registerProjectHandlers(dependencies);
-    const approved = { summary: project, contract: { approved: true }, metrics: [], plans: [], chapters: [] };
-    database.getProjectOverview = vi.fn(() => approved);
-    const structure = {
-      startChapter: 1,
-      chapters: [],
-      plans: [{ id: "plan-1", kind: "分卷" as const }],
-    };
-    const chapters = {
-      startChapter: 1,
-      plans: [{ id: "plan-2", kind: "粗纲" as const }],
-      chapters: [{ id: "chapter-1", number: 1 }],
-    };
-    ai.generatePlanning = vi
-      .fn()
-      .mockResolvedValueOnce(structure)
-      .mockResolvedValueOnce(chapters) as unknown as typeof ai.generatePlanning;
 
-    const result = await handlers.get("generateLaunchPack")!(project.id, {
-      withStructure: true,
-      withFirstChapters: true,
+    const result = handlers.get("generateLaunchPack")!(project.id);
+    expect(result).toMatchObject({ progress: { status: "生成中", targetChapters: 33 } });
+    await vi.waitFor(() => expect(overview.launchPack?.status).toBe("待确认"));
+    expect(overview.chapters.map((chapter) => chapter.number)).toEqual(
+      Array.from({ length: 33 }, (_, index) => index + 1),
+    );
+    expect(
+      ai.generateLaunchPlanning.mock.calls
+        .slice(1)
+        .map(([, input]) => [input.mode, input.fromChapter, input.chapterCount]),
+    ).toEqual([
+      ["全书粗纲", 1, 33],
+      ["后续章纲", 1, 10],
+      ["后续章纲", 11, 10],
+      ["后续章纲", 21, 10],
+      ["后续章纲", 31, 3],
+    ]);
+    expect(database.saveLaunchPackBatch).toHaveBeenCalledTimes(6);
+    expect(overview.contract.approved).toBe(false);
+    expect(database.approveContract).not.toHaveBeenCalled();
+    expect(database.approvePlan).not.toHaveBeenCalled();
+    handlers.get("generateLaunchPack")!(project.id);
+    expect(ai.generateLaunchPlanning).toHaveBeenCalledTimes(6);
+    handlers.get("approveLaunchPack")!(project.id);
+    expect(database.approveLaunchPack).toHaveBeenCalledWith(project.id);
+  });
+
+  it("preserves completed batches after an error and resumes from the first missing chapter", async () => {
+    const { dependencies, handlers, ai, overview } = createDependencies();
+    overview.summary.targetWords = 55_000;
+    const implementation = ai.generateLaunchPlanning.getMockImplementation()!;
+    ai.generateLaunchPlanning
+      .mockImplementationOnce(implementation)
+      .mockImplementationOnce(implementation)
+      .mockImplementationOnce(implementation)
+      .mockRejectedValueOnce(new Error("网络中断"));
+    registerProjectHandlers(dependencies);
+
+    handlers.get("generateLaunchPack")!(project.id);
+    await vi.waitFor(() => expect(overview.launchPack?.status).toBe("已暂停"));
+    expect(overview.launchPack).toMatchObject({ completedChapters: 10, error: "网络中断" });
+    const firstIds = overview.chapters.map((chapter) => chapter.id);
+    handlers.get("generateLaunchPack")!(project.id);
+    await vi.waitFor(() => expect(overview.launchPack?.status).toBe("待确认"));
+    expect(overview.chapters).toHaveLength(22);
+    expect(overview.chapters.slice(0, 10).map((chapter) => chapter.id)).toEqual(firstIds);
+    expect(ai.generateLaunchPlanning.mock.calls.map(([, input]) => [input.mode, input.fromChapter])).toEqual([
+      ["全书结构", undefined],
+      ["全书粗纲", 1],
+      ["后续章纲", 1],
+      ["后续章纲", 11],
+      ["后续章纲", 11],
+      ["后续章纲", 21],
+    ]);
+  });
+
+  it("continues chapter outlines in the background once writing moves past the prepared horizon", async () => {
+    const { dependencies, handlers, ai, overview } = createDependencies();
+    overview.summary.targetWords = 300_000;
+    overview.launchPack = {
+      status: "已确认",
+      phase: "完成",
+      targetChapters: 120,
+      horizonChapters: 100,
+      completedChapters: 100,
+      updatedAt: "2026-09-09T00:00:00.000Z",
+    };
+    overview.chapters = Array.from({ length: 100 }, (_, index) => ({
+      id: `chapter-${index + 1}`,
+      number: index + 1,
+      title: `已备章纲${index + 1}`,
+      content: index === 0 ? "第一章正文" : "",
+      status: "章纲",
+    })) as ProjectDetail["chapters"];
+    registerProjectHandlers(dependencies);
+
+    handlers.get("saveChapter")!(project.id, overview.chapters[0], "autosave");
+    await vi.waitFor(() => expect(overview.chapters.some((chapter) => chapter.number === 101)).toBe(true));
+    expect(
+      ai.generateLaunchPlanning.mock.calls.map(([, input]) => [input.mode, input.fromChapter, input.chapterCount]),
+    ).toEqual([["后续章纲", 101, 1]]);
+    expect(overview.launchPack?.status).toBe("已确认");
+    await vi.waitFor(() => expect(overview.launchPack?.autoContinuing).toBe(false));
+  });
+
+  it("clears a stale auto-continuation flag when no generation is running", () => {
+    const { dependencies, handlers, overview } = createDependencies();
+    overview.summary.targetWords = 300_000;
+    overview.launchPack = {
+      status: "已确认",
+      phase: "完成",
+      targetChapters: 120,
+      horizonChapters: 100,
+      completedChapters: 100,
+      autoContinuing: true,
+      updatedAt: "2026-09-09T00:00:00.000Z",
+    };
+    overview.chapters = Array.from({ length: 100 }, (_, index) => ({
+      id: `chapter-${index + 1}`,
+      number: index + 1,
+      title: `已备章纲${index + 1}`,
+      content: "",
+      status: "章纲",
+    })) as ProjectDetail["chapters"];
+    registerProjectHandlers(dependencies);
+    handlers.get("getProject")!(project.id);
+    expect(overview.launchPack?.autoContinuing).toBe(false);
+  });
+
+  it("does not continue outlines before the pack is confirmed", async () => {
+    const { dependencies, handlers, ai, overview } = createDependencies();
+    overview.summary.targetWords = 300_000;
+    overview.launchPack = {
+      status: "待确认",
+      phase: "完成",
+      targetChapters: 120,
+      horizonChapters: 100,
+      completedChapters: 100,
+      updatedAt: "2026-09-09T00:00:00.000Z",
+    };
+    registerProjectHandlers(dependencies);
+    handlers.get("getProject")!(project.id);
+    expect(ai.generateLaunchPlanning).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate concurrent launch requests or overwrite an unrelated outline", async () => {
+    const { dependencies, handlers, ai, overview } = createDependencies();
+    let release: (() => void) | undefined;
+    const implementation = ai.generateLaunchPlanning.getMockImplementation()!;
+    ai.generateLaunchPlanning.mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return implementation(...args);
     });
+    registerProjectHandlers(dependencies);
+    handlers.get("generateLaunchPack")!(project.id);
+    handlers.get("generateLaunchPack")!(project.id);
+    expect(ai.generateLaunchPlanning).toHaveBeenCalledTimes(1);
+    expect(() => handlers.get("deleteProject")!(project.id, project.title)).toThrow("完整开书包");
+    release!();
+    await vi.waitFor(() => expect(overview.launchPack?.status).toBe("待确认"));
+    overview.launchPack = undefined;
+    expect(() => handlers.get("generateLaunchPack")!(project.id)).toThrow("不能覆盖现有内容");
+  });
 
-    expect(result).toEqual({ plans: 2, chapters: 1 });
-    expect(database.savePlan).toHaveBeenCalledTimes(2);
-    expect(database.saveChapter).toHaveBeenCalledWith(project.id, chapters.chapters[0], "autosave");
+  it("pauses when the target word budget changes while a batch is in flight", async () => {
+    const { dependencies, handlers, ai, overview } = createDependencies();
+    let release: (() => void) | undefined;
+    const implementation = ai.generateLaunchPlanning.getMockImplementation()!;
+    ai.generateLaunchPlanning.mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return implementation(...args);
+    });
+    registerProjectHandlers(dependencies);
+    handlers.get("generateLaunchPack")!(project.id);
+    overview.summary.targetWords = 35_000;
+    release!();
+    await vi.waitFor(() => expect(overview.launchPack?.status).toBe("已暂停"));
+    expect(overview.launchPack?.error).toContain("目标字数");
+    expect(overview.chapters).toHaveLength(0);
+  });
 
-    // 开书包产出的都是草稿规划，不能靠状态判断"已生成过"：已有规划或章节时必须拒绝重复生成。
-    database.getProjectOverview = vi.fn(() => ({
-      ...approved,
-      plans: structure.plans,
-      chapters: chapters.chapters,
-    }));
-    await expect(
-      handlers.get("generateLaunchPack")!(project.id, { withStructure: true, withFirstChapters: true }),
-    ).rejects.toThrow("只能生成一次");
-    expect(database.saveChapter).toHaveBeenCalledTimes(1);
+  it("discards a batch if the contract is edited before the model returns", async () => {
+    const { dependencies, handlers, database, ai, overview } = createDependencies();
+    let release: (() => void) | undefined;
+    const implementation = ai.generateLaunchPlanning.getMockImplementation()!;
+    ai.generateLaunchPlanning.mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return implementation(...args);
+    });
+    registerProjectHandlers(dependencies);
+    handlers.get("generateLaunchPack")!(project.id);
+    overview.contract.premise = "作者在生成途中调整了故事前提";
+    release!();
+    await vi.waitFor(() => expect(overview.launchPack?.status).toBe("已暂停"));
+    expect(overview.launchPack?.error).toContain("设定已修改");
+    expect(database.saveLaunchPackBatch).not.toHaveBeenCalled();
+  });
 
-    database.getProjectOverview = vi.fn(() => ({
-      summary: project,
-      contract: { approved: false },
-      metrics: [],
-      plans: [],
-      chapters: [],
-    }));
-    await expect(
-      handlers.get("generateLaunchPack")!(project.id, { withStructure: true, withFirstChapters: false }),
-    ).rejects.toThrow("必须先审批创作契约");
+  it("keeps a blank legacy project intact instead of inventing a direction", () => {
+    const { dependencies, handlers, database, ai, overview } = createDependencies();
+    overview.contract = { ...overview.contract, premise: "", readerPromise: "", openingMechanism: "" };
+    registerProjectHandlers(dependencies);
+    expect(() => handlers.get("generateLaunchPack")!(project.id)).toThrow("请先完善开书方向");
+    expect(ai.generateLaunchPlanning).not.toHaveBeenCalled();
+    expect(database.saveLaunchPackProgress).not.toHaveBeenCalled();
+    expect(overview.plans).toHaveLength(0);
   });
 
   it("keeps overview reads lightweight and overlays aesthetic candidates", () => {

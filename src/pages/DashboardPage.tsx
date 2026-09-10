@@ -243,19 +243,21 @@ export function DashboardPage({
             </div>
             <AlertTriangle size={19} />
           </div>
-          data.activeAlerts.length ? (
-          <div className="simple-list">
-            {data.activeAlerts.slice(0, 5).map((issue) => (
-              <div key={issue.id}>
-                <span>
-                  <strong>{issue.category}</strong>
-                  <small>{issue.message}</small>
-                </span>
-                <Badge tone={issue.severity === "硬性" ? "danger" : "warning"}>{issue.severity}</Badge>
-              </div>
-            ))}
-          </div>
-          ) : (<p className="muted-line">当前没有未处理问题</p>)
+          {data.activeAlerts.length ? (
+            <div className="simple-list">
+              {data.activeAlerts.slice(0, 5).map((issue) => (
+                <div key={issue.id}>
+                  <span>
+                    <strong>{issue.category}</strong>
+                    <small>{issue.message}</small>
+                  </span>
+                  <Badge tone={issue.severity === "硬性" ? "danger" : "warning"}>{issue.severity}</Badge>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted-line">当前没有未处理问题</p>
+          )}
         </div>
       </section>
     </div>

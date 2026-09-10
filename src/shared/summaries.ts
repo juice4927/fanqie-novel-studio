@@ -1,3 +1,4 @@
+import { renderSelectedSummarySections } from "./memory-retrieval";
 import type { Chapter, PlanNode, StorySummary } from "./types";
 
 const CHANGE_WORDS =
@@ -177,7 +178,16 @@ export function prepareFinalizedChapterSummaries(
   return updates;
 }
 
-export function buildLongTermMemory(summaries: readonly StorySummary[], chapterNumber: number, maxCharacters = 12000) {
+export function buildLongTermMemory(
+  summaries: readonly StorySummary[],
+  chapterNumber: number,
+  maxCharacters = 12000,
+  /**
+   * 记忆检索按查询打分选出的节点（memory-retrieval.selectSummaryNodes）。
+   * 缺省时沿用固定三层（全书 + 当前分卷 + 最近 3 个十章阶段），行为与历史版本逐字节一致。
+   */
+  selection?: readonly StorySummary[],
+) {
   const bounded = (content: string, budget: number) =>
     content.length <= budget
       ? content
@@ -196,6 +206,16 @@ export function buildLongTermMemory(summaries: readonly StorySummary[], chapterN
   const bookBudget = Math.max(800, Math.floor(4000 * scale));
   const volumeBudget = Math.max(600, Math.floor(3000 * scale));
   const stageBudget = Math.max(400, Math.floor(1400 * scale));
+  if (selection) {
+    return renderSelectedSummarySections(
+      selection,
+      chapterNumber,
+      { book: bookBudget, volume: volumeBudget, stage: stageBudget },
+      bounded,
+    )
+      .join("\n")
+      .slice(0, maxCharacters);
+  }
   const sections = [
     book ? `【全书进展】\n${bounded(book.content, bookBudget)}` : "【全书进展】暂无全书摘要",
     volume ? `【当前分卷记忆】\n${bounded(volume.content, volumeBudget)}` : "",

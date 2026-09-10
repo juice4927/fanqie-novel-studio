@@ -35,7 +35,9 @@ export async function pruneAutoBackups(backupRoot: string, retentionCount: numbe
 async function walk(root: string, current = root): Promise<Array<{ absolute: string; relative: string }>> {
   const result: Array<{ absolute: string; relative: string }> = [];
   for (const entry of await readdir(current, { withFileTypes: true })) {
-    if (entry.name === "backups" || entry.name === "restored") continue;
+    // Recycle-bin content is retained locally for recovery, but it is no longer
+    // active workspace data and must not be copied into every new backup.
+    if (entry.name === "backups" || entry.name === "restored" || entry.name === "trash") continue;
     const absolute = path.join(current, entry.name);
     if (entry.isDirectory()) result.push(...(await walk(root, absolute)));
     else if (!entry.name.endsWith("-wal") && !entry.name.endsWith("-shm"))

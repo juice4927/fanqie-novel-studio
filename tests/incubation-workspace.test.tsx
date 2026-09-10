@@ -139,7 +139,7 @@ describe("incubation workspace", () => {
       expect.objectContaining({ selectedCandidateId: "b", review: { acknowledged: [] } }),
     );
 
-    const promote = screen.getByRole("button", { name: "采用并创建作品" }) as HTMLButtonElement;
+    const promote = screen.getByRole("button", { name: "选定方向，生成完整创作包" }) as HTMLButtonElement;
     expect(promote.disabled).toBe(false);
     fireEvent.click(promote);
 

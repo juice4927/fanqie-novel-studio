@@ -10,6 +10,7 @@ import {
   NotebookTabs,
   RefreshCw,
   SearchCheck,
+  Tags,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Select } from "../components/UI";
@@ -26,12 +27,23 @@ import { PublishingPage } from "./PublishingWorkspace";
 import { QualityPage } from "./QualityWorkspace";
 import { ReviewPage } from "./ReviewWorkspace";
 import { StoryBiblePage } from "./StoryBibleWorkspace";
+import { StoryEntriesPage } from "./StoryEntriesWorkspace";
 import { WritingPage } from "./WritingWorkspace";
 
-type ProjectTab = "驾驶舱" | "故事圣经" | "规划台" | "写作台" | "状态账本" | "质检中心" | "发布日历" | "数据复盘";
+type ProjectTab =
+  | "驾驶舱"
+  | "故事圣经"
+  | "设定条目"
+  | "规划台"
+  | "写作台"
+  | "状态账本"
+  | "质检中心"
+  | "发布日历"
+  | "数据复盘";
 const TABS: Array<{ id: ProjectTab; icon: typeof BookMarked }> = [
   { id: "驾驶舱", icon: BookMarked },
   { id: "故事圣经", icon: NotebookTabs },
+  { id: "设定条目", icon: Tags },
   { id: "规划台", icon: Layers3 },
   { id: "写作台", icon: BookOpenCheck },
   { id: "状态账本", icon: BrainCircuit },
@@ -88,6 +100,12 @@ export function ProjectPage({
       requestRef.current += 1;
     };
   }, [reload]);
+
+  useEffect(() => {
+    if (project?.launchPack?.status !== "生成中" && !project?.launchPack?.autoContinuing) return;
+    const timer = window.setInterval(() => void reload(), 2500);
+    return () => window.clearInterval(timer);
+  }, [project, reload]);
 
   if (loadError && !project)
     return (
@@ -187,6 +205,7 @@ export function ProjectPage({
           />
         )}
         {tab === "故事圣经" && <StoryBiblePage project={project} api={api} reload={reload} notify={notify} />}
+        {tab === "设定条目" && <StoryEntriesPage project={project} api={api} reload={reload} notify={notify} />}
         {tab === "规划台" && <PlanningPage project={project} api={api} reload={reload} notify={notify} />}
         {writingMounted && (
           <div hidden={tab !== "写作台"}>

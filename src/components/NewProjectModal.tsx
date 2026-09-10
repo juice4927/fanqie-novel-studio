@@ -291,7 +291,7 @@ export function NewProjectModal({
   };
 
   const create = async () => {
-    setBusyMessage(mode === "AI 从零开书" ? "正在完善人物与世界…" : "正在创建作品…");
+    setBusyMessage(mode === "AI 从零开书" ? "正在完成人物、世界与全书大纲…" : "正在创建作品…");
     setBusy(true);
     try {
       let project: ProjectSummary;
@@ -369,11 +369,7 @@ export function NewProjectModal({
   };
 
   return (
-    <Modal
-      title={initialDraft ? "继续立项草稿" : "从 0 开始创建一本书"}
-      onClose={() => !busy && onClose()}
-      width={1020}
-    >
+    <Modal title={initialDraft ? "继续开书" : "AI 开书"} onClose={() => !busy && onClose()} width={1020}>
       <div className="book-wizard">
         <Segmented
           options={["AI 从零开书", "手动创建"] as const}
@@ -384,397 +380,436 @@ export function NewProjectModal({
             setSelectedId(null);
           }}
         />
-        <details className="positioning-group" open>
-          <summary>
-            <ChevronRight size={15} /> 题材定位
-          </summary>
-          <div className="form-grid three">
-            <Field label="番茄目标分类" hint="37 个官方榜单分类，选定后自动带出商业基线">
-              <Select
-                value={positioning.fanqieCategoryKey}
-                onChange={(event) => selectCategory(event.target.value)}
-                disabled={busy}
-              >
-                {(["男频", "女频"] as const).map((channel) => (
-                  <optgroup key={channel} label={channel}>
-                    {FANQIE_CATEGORY_PROFILES.filter((item) => item.channel === channel).map((item) => (
-                      <option key={item.key} value={item.key}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </Select>
-            </Field>
-            <Field label="平台主题材" hint="跟随番茄分类自动确定，决定写作基线规则">
-              <div className="field-static" title="由番茄分类推导，不单独修改">
-                {positioning.genre}
-              </div>
-            </Field>
-            <Field label="二级流派" hint={`可选 1–2 个；${subGenreOptions.length} 个可选；灰色项与分类/主题材重名`}>
-              <div className="genre-option-grid compact">
-                {subGenreOptions.map((item) => {
-                  const owner = claimedBy(item.name, "二级流派");
-                  return (
-                    <label
-                      key={item.id}
-                      className={`check-row${owner ? " claimed" : ""}`}
-                      title={owner ? `已在「${owner}」中选择` : undefined}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={positioning.subGenreIds.includes(item.id)}
-                        disabled={
-                          busy ||
-                          Boolean(owner) ||
-                          (!positioning.subGenreIds.includes(item.id) && positioning.subGenreIds.length >= 2)
-                        }
-                        onChange={() => patch({ subGenreIds: toggleValue(positioning.subGenreIds, item.id, 2) })}
-                      />
+        <div className="form-grid two creation-essentials">
+          <Field label="番茄目标分类">
+            <Select
+              value={positioning.fanqieCategoryKey}
+              onChange={(event) => selectCategory(event.target.value)}
+              disabled={busy}
+            >
+              {(["男频", "女频"] as const).map((channel) => (
+                <optgroup key={channel} label={channel}>
+                  {FANQIE_CATEGORY_PROFILES.filter((item) => item.channel === channel).map((item) => (
+                    <option key={item.key} value={item.key}>
                       {item.name}
-                    </label>
-                  );
-                })}
-              </div>
-            </Field>
-          </div>
-          {category && (
-            <div className="wizard-genre-note">
-              <strong>
-                {category.channel}·{category.name}
-              </strong>
-              <span>
-                开篇抓手：{category.openingFocus}｜首章钩子：{category.chapterHookStyle}｜首个回报：第{" "}
-                {category.firstPayoffWindow[0]}–{category.firstPayoffWindow[1]} 章｜单章参考：
-                {category.typicalChapterWords[0]}–{category.typicalChapterWords[1]} 字
-              </span>
-              <span>常见毒点：{category.clicheTraps.join("；")}</span>
-            </div>
-          )}
-          <div className="positioning-reset">
-            <Button variant="secondary" disabled={busy} onClick={() => selectCategory(positioning.fanqieCategoryKey)}>
-              用分类推荐值重置
-            </Button>
-          </div>
-        </details>
-        <details className="positioning-group" open>
-          <summary>
-            <ChevronRight size={15} /> 证据（可跳过）
-          </summary>
-          {tagStats.length ? (
-            <>
-              <p className="muted-line">
-                来自本地已采集的公开榜单快照，按新书占比与上榜比例排序；勾选后作为本次立项的定位参考。
-              </p>
-              <div className="genre-option-grid">
-                {tagStats.slice(0, 24).map((stat) => (
-                  <label
-                    key={stat.tag}
-                    className="check-row"
-                    title={`样本 ${stat.count} 本 · 平均排名 ${stat.avgRank.toFixed(1)}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={evidenceTags.includes(stat.tag)}
-                      disabled={busy}
-                      onChange={() => setEvidenceTags((current) => toggleValue(current, stat.tag))}
-                    />
-                    {stat.tag}
-                    <small>{Math.round(stat.share * 100)}%</small>
-                  </label>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p className="muted-line">该分类还没有本地榜单快照。可在“市场研究”采集榜单后再回来，或直接跳过证据。</p>
-          )}
-          <Field
-            label="榜单机会"
-            hint={
-              opportunities.length
-                ? "来自本地榜单快照的趋势统计（竞争度、新书率、动量），只作需求证据，不会机械追热点。"
-                : "该分类还没有足够快照形成机会判断，可跳过。"
-            }
-          >
-            {opportunities.length ? (
-              <div className="choice-list compact">
-                {opportunities.map((item) => (
-                  <label key={item.listName}>
-                    <input
-                      type="checkbox"
-                      checked={evidenceOpportunities.includes(item.recommendation)}
-                      disabled={busy}
-                      onChange={() => setEvidenceOpportunities((current) => toggleValue(current, item.recommendation))}
-                    />
-                    <span>
-                      <strong>{item.categoryName}</strong>
-                      <small>{item.recommendation}</small>
-                    </span>
-                    <Badge tone={item.competition === "高" ? "warning" : "accent"}>竞争 {item.competition}</Badge>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <p className="muted-line">暂无榜单机会数据。</p>
-            )}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </Select>
           </Field>
-          <Field
-            label="脱敏市场洞察"
-            hint={
-              insightOptions.length
-                ? "只读取研究区生成的脱敏洞察包，不涉及样本书名与原文；勾选后会作为需求证据进入三案生成。"
-                : "还没有脱敏洞察包。可在“市场研究”拆书后生成，或直接跳过。"
-            }
-          >
-            {insightOptions.length ? (
-              <div className="choice-list compact">
-                {insightOptions.map((insight) => (
-                  <label key={insight.id}>
-                    <input
-                      type="checkbox"
-                      checked={evidenceInsights.includes(insight.id)}
-                      disabled={busy}
-                      onChange={() => setEvidenceInsights((current) => toggleValue(current, insight.id))}
-                    />
-                    <span>
-                      <strong>{insight.name}</strong>
-                      <small>
-                        {insight.genre} · {insight.marketGap}
-                      </small>
-                    </span>
-                    <Badge>{insight.confidence}</Badge>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <p className="muted-line">暂无洞察包。</p>
-            )}
-          </Field>
-        </details>
-        <details className="positioning-group" open>
-          <summary>
-            <ChevronRight size={15} /> 故事定位
-          </summary>
-          <div className="form-grid three">
-            <Field label="开局形态">
-              <Select
-                value={positioning.openingArchetype}
-                onChange={(event) => patch({ openingArchetype: event.target.value })}
-                disabled={busy}
-              >
-                {rankByRecommended(OPENING_ARCHETYPES, (item) => recommended.openings.has(item)).map((item) => (
-                  <option key={item} value={item}>
-                    {recommended.openings.has(item) ? `${item}（推荐）` : item}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="篇幅形态">
-              <Select
-                value={positioning.lengthShape}
-                onChange={(event) => patch({ lengthShape: event.target.value })}
-                disabled={busy}
-              >
-                {rankByRecommended(LENGTH_SHAPES, (item) => recommended.lengthShapes.has(item.name)).map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name}
-                    {recommended.lengthShapes.has(item.name) ? "（推荐）" : ""}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="视角">
-              <Select
-                value={positioning.narrativePerson}
-                onChange={(event) => patch({ narrativePerson: event.target.value })}
-                disabled={busy}
-              >
-                {rankByRecommended(NARRATIVE_PERSONS, (item) => recommended.narrativePersons.has(item)).map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                    {recommended.narrativePersons.has(item) ? "（推荐）" : ""}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <Field label="复合叙事类型" hint="最多 3 项；决定主要冲突与情绪体验；灰色项已在更高优先级的选择中出现">
-            <div className="genre-option-grid">
-              {rankByRecommended(NARRATIVE_GENRES, (genre) => recommended.narrativeGenres.has(genre)).map((genre) => {
-                const owner = claimedBy(genre, "复合叙事类型");
-                const isRecommended = recommended.narrativeGenres.has(genre);
-                return (
-                  <label
-                    key={genre}
-                    className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
-                    title={owner ? `已在「${owner}」中选择` : undefined}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={positioning.secondaryGenres.includes(genre)}
-                      disabled={
-                        busy ||
-                        Boolean(owner) ||
-                        (!positioning.secondaryGenres.includes(genre) && positioning.secondaryGenres.length >= 3)
-                      }
-                      onChange={() =>
-                        patch({ secondaryGenres: toggleValue(positioning.secondaryGenres, genre as NarrativeGenre, 3) })
-                      }
-                    />
-                    {genre}
-                    {isRecommended && <small className="preset-badge">推荐</small>}
-                  </label>
-                );
-              })}
-            </div>
-          </Field>
-          <p className="positioning-note">
-            情绪基调与主角身份在下方单独选择；灰色项已在更高优先级的选择中出现，同一个词只保留一层。
-          </p>
-          {PRIMARY_GENRE_ELEMENT_GROUPS.map((group) => (
-            <Field key={group.label} label={group.label} hint="按需多选，不会要求每章都出现">
-              <div className="genre-option-grid">
-                {rankByRecommended(group.elements, (element) => recommended.elements.has(element)).map((element) => {
-                  const owner = claimedBy(element, "题材元素");
-                  const isRecommended = recommended.elements.has(element);
-                  return (
-                    <label
-                      key={element}
-                      className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
-                      title={owner ? `已在「${owner}」中选择` : undefined}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={positioning.genreElements.includes(element)}
-                        disabled={
-                          busy ||
-                          Boolean(owner) ||
-                          (!positioning.genreElements.includes(element) && positioning.genreElements.length >= 8)
-                        }
-                        onChange={() => patch({ genreElements: toggleValue(positioning.genreElements, element, 8) })}
-                      />
-                      {element}
-                      {isRecommended && <small className="preset-badge">推荐</small>}
-                    </label>
-                  );
-                })}
-              </div>
-            </Field>
-          ))}
-          <div className="form-grid three">
-            <Field label="主角身份" hint="最多 2 项">
-              <div className="genre-option-grid compact">
-                {rankByRecommended(PROTAGONIST_ROLES, (role) => recommended.roles.has(role)).map((role) => {
-                  const owner = claimedBy(role, "主角身份");
-                  const isRecommended = recommended.roles.has(role);
-                  return (
-                    <label
-                      key={role}
-                      className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
-                      title={owner ? `已在「${owner}」中选择` : undefined}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={positioning.protagonistRoles.includes(role)}
-                        disabled={
-                          busy ||
-                          Boolean(owner) ||
-                          (!positioning.protagonistRoles.includes(role) && positioning.protagonistRoles.length >= 2)
-                        }
-                        onChange={() => patch({ protagonistRoles: toggleValue(positioning.protagonistRoles, role, 2) })}
-                      />
-                      {role}
-                      {isRecommended && <small className="preset-badge">推荐</small>}
-                    </label>
-                  );
-                })}
-              </div>
-            </Field>
-            <Field label="情绪基调" hint="最多 2 项">
-              <div className="genre-option-grid compact">
-                {rankByRecommended(TONE_TAGS, (tone) => recommended.tones.has(tone)).map((tone) => {
-                  const owner = claimedBy(tone, "情绪基调");
-                  const isRecommended = recommended.tones.has(tone);
-                  return (
-                    <label
-                      key={tone}
-                      className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
-                      title={owner ? `已在「${owner}」中选择` : undefined}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={positioning.toneTags.includes(tone)}
-                        disabled={
-                          busy ||
-                          Boolean(owner) ||
-                          (!positioning.toneTags.includes(tone) && positioning.toneTags.length >= 2)
-                        }
-                        onChange={() => patch({ toneTags: toggleValue(positioning.toneTags, tone, 2) })}
-                      />
-                      {tone}
-                      {isRecommended && <small className="preset-badge">推荐</small>}
-                    </label>
-                  );
-                })}
-              </div>
-            </Field>
-          </div>
-          <Field label="自定义创作方向" hint="补充列表里没有的混合方式、反套路要求或题材边界">
-            <Input
-              value={positioning.customGenreDirection}
-              onChange={(event) => patch({ customGenreDirection: event.target.value })}
-              placeholder="例如：医疗悬疑为主，不要系统，用群像推进真相"
-              disabled={busy}
-            />
-          </Field>
-        </details>
-        <details className="positioning-group" open>
-          <summary>
-            <ChevronRight size={15} /> 规模与节奏
-          </summary>
-          <div className="form-grid three">
-            <Field label="目标字数">
-              <Select
-                value={positioning.targetWords}
-                onChange={(event) => patch({ targetWords: Number(event.target.value) })}
-                disabled={busy}
-              >
-                {TARGET_WORD_PRESETS.map((words) => (
-                  <option key={words} value={words}>
-                    {words / 10000} 万字
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="单章字数" hint={`${MIN_WORDS_PER_CHAPTER}–${MAX_WORDS_PER_CHAPTER}`}>
-              <Input
-                type="number"
-                min={MIN_WORDS_PER_CHAPTER}
-                max={MAX_WORDS_PER_CHAPTER}
-                step={100}
-                value={positioning.wordsPerChapter}
-                onChange={(event) => patch({ wordsPerChapter: Number(event.target.value) })}
+          {mode === "AI 从零开书" && (
+            <Field label="方向数量">
+              <Segmented
+                options={PATH_OPTIONS.map((item) => item.label)}
+                value={pathOption.label}
+                onChange={(label) => setPath(PATH_OPTIONS.find((item) => item.label === label)?.value ?? "探索")}
                 disabled={busy}
               />
             </Field>
-            <Field label="安全存稿线">
-              <Input
-                type="number"
-                min={0}
-                max={1000}
-                value={positioning.safeStockLine}
-                onChange={(event) => patchMeta({ safeStockLine: Number(event.target.value) })}
-                disabled={busy}
-              />
-            </Field>
-          </div>
-          <Field label="更新节奏">
-            <Input
-              value={positioning.updateCadence}
-              onChange={(event) => patch({ updateCadence: event.target.value })}
+          )}
+        </div>
+        {mode === "AI 从零开书" && (
+          <Field label={path === "直达" ? "你的想法（必填）" : "你的灵感（可不填）"}>
+            <Textarea
+              rows={3}
+              value={seed}
+              onChange={(event) => setSeed(event.target.value)}
+              placeholder="想写什么故事、喜欢什么感觉、有哪些边界，都可以写在这里。"
               disabled={busy}
             />
           </Field>
+        )}
+        <details className="creation-advanced">
+          <summary>
+            <ChevronRight size={15} /> 高级选项{" "}
+            <span>
+              {positioning.targetWords / 10000} 万字 · 每章 {positioning.wordsPerChapter} 字
+            </span>
+          </summary>
+          <details className="positioning-group" open>
+            <summary>
+              <ChevronRight size={15} /> 题材定位
+            </summary>
+            <div className="form-grid three">
+              <Field label="平台主题材" hint="跟随番茄分类自动确定，决定写作基线规则">
+                <div className="field-static" title="由番茄分类推导，不单独修改">
+                  {positioning.genre}
+                </div>
+              </Field>
+              <Field label="二级流派" hint={`可选 1–2 个；${subGenreOptions.length} 个可选；灰色项与分类/主题材重名`}>
+                <div className="genre-option-grid compact">
+                  {subGenreOptions.map((item) => {
+                    const owner = claimedBy(item.name, "二级流派");
+                    return (
+                      <label
+                        key={item.id}
+                        className={`check-row${owner ? " claimed" : ""}`}
+                        title={owner ? `已在「${owner}」中选择` : undefined}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={positioning.subGenreIds.includes(item.id)}
+                          disabled={
+                            busy ||
+                            Boolean(owner) ||
+                            (!positioning.subGenreIds.includes(item.id) && positioning.subGenreIds.length >= 2)
+                          }
+                          onChange={() => patch({ subGenreIds: toggleValue(positioning.subGenreIds, item.id, 2) })}
+                        />
+                        {item.name}
+                      </label>
+                    );
+                  })}
+                </div>
+              </Field>
+            </div>
+            {category && (
+              <div className="wizard-genre-note">
+                <strong>
+                  {category.channel}·{category.name}
+                </strong>
+                <span>
+                  开篇抓手：{category.openingFocus}｜首章钩子：{category.chapterHookStyle}｜首个回报：第{" "}
+                  {category.firstPayoffWindow[0]}–{category.firstPayoffWindow[1]} 章｜单章参考：
+                  {category.typicalChapterWords[0]}–{category.typicalChapterWords[1]} 字
+                </span>
+                <span>常见毒点：{category.clicheTraps.join("；")}</span>
+              </div>
+            )}
+            <div className="positioning-reset">
+              <Button variant="secondary" disabled={busy} onClick={() => selectCategory(positioning.fanqieCategoryKey)}>
+                用分类推荐值重置
+              </Button>
+            </div>
+          </details>
+          <details className="positioning-group" open>
+            <summary>
+              <ChevronRight size={15} /> 证据（可跳过）
+            </summary>
+            {tagStats.length ? (
+              <>
+                <p className="muted-line">
+                  来自本地已采集的公开榜单快照，按新书占比与上榜比例排序；勾选后作为本次立项的定位参考。
+                </p>
+                <div className="genre-option-grid">
+                  {tagStats.slice(0, 24).map((stat) => (
+                    <label
+                      key={stat.tag}
+                      className="check-row"
+                      title={`样本 ${stat.count} 本 · 平均排名 ${stat.avgRank.toFixed(1)}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={evidenceTags.includes(stat.tag)}
+                        disabled={busy}
+                        onChange={() => setEvidenceTags((current) => toggleValue(current, stat.tag))}
+                      />
+                      {stat.tag}
+                      <small>{Math.round(stat.share * 100)}%</small>
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="muted-line">该分类还没有本地榜单快照。可在“市场研究”采集榜单后再回来，或直接跳过证据。</p>
+            )}
+            <Field
+              label="榜单机会"
+              hint={
+                opportunities.length
+                  ? "来自本地榜单快照的趋势统计（竞争度、新书率、动量），只作需求证据，不会机械追热点。"
+                  : "该分类还没有足够快照形成机会判断，可跳过。"
+              }
+            >
+              {opportunities.length ? (
+                <div className="choice-list compact">
+                  {opportunities.map((item) => (
+                    <label key={item.listName}>
+                      <input
+                        type="checkbox"
+                        checked={evidenceOpportunities.includes(item.recommendation)}
+                        disabled={busy}
+                        onChange={() =>
+                          setEvidenceOpportunities((current) => toggleValue(current, item.recommendation))
+                        }
+                      />
+                      <span>
+                        <strong>{item.categoryName}</strong>
+                        <small>{item.recommendation}</small>
+                      </span>
+                      <Badge tone={item.competition === "高" ? "warning" : "accent"}>竞争 {item.competition}</Badge>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted-line">暂无榜单机会数据。</p>
+              )}
+            </Field>
+            <Field
+              label="脱敏市场洞察"
+              hint={
+                insightOptions.length
+                  ? "只读取研究区生成的脱敏洞察包，不涉及样本书名与原文；勾选后会作为需求证据进入三案生成。"
+                  : "还没有脱敏洞察包。可在“市场研究”拆书后生成，或直接跳过。"
+              }
+            >
+              {insightOptions.length ? (
+                <div className="choice-list compact">
+                  {insightOptions.map((insight) => (
+                    <label key={insight.id}>
+                      <input
+                        type="checkbox"
+                        checked={evidenceInsights.includes(insight.id)}
+                        disabled={busy}
+                        onChange={() => setEvidenceInsights((current) => toggleValue(current, insight.id))}
+                      />
+                      <span>
+                        <strong>{insight.name}</strong>
+                        <small>
+                          {insight.genre} · {insight.marketGap}
+                        </small>
+                      </span>
+                      <Badge>{insight.confidence}</Badge>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted-line">暂无洞察包。</p>
+              )}
+            </Field>
+          </details>
+          <details className="positioning-group" open>
+            <summary>
+              <ChevronRight size={15} /> 故事定位
+            </summary>
+            <div className="form-grid three">
+              <Field label="开局形态">
+                <Select
+                  value={positioning.openingArchetype}
+                  onChange={(event) => patch({ openingArchetype: event.target.value })}
+                  disabled={busy}
+                >
+                  {rankByRecommended(OPENING_ARCHETYPES, (item) => recommended.openings.has(item)).map((item) => (
+                    <option key={item} value={item}>
+                      {recommended.openings.has(item) ? `${item}（推荐）` : item}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="篇幅形态">
+                <Select
+                  value={positioning.lengthShape}
+                  onChange={(event) => patch({ lengthShape: event.target.value })}
+                  disabled={busy}
+                >
+                  {rankByRecommended(LENGTH_SHAPES, (item) => recommended.lengthShapes.has(item.name)).map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {item.name}
+                      {recommended.lengthShapes.has(item.name) ? "（推荐）" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="视角">
+                <Select
+                  value={positioning.narrativePerson}
+                  onChange={(event) => patch({ narrativePerson: event.target.value })}
+                  disabled={busy}
+                >
+                  {rankByRecommended(NARRATIVE_PERSONS, (item) => recommended.narrativePersons.has(item)).map(
+                    (item) => (
+                      <option key={item} value={item}>
+                        {item}
+                        {recommended.narrativePersons.has(item) ? "（推荐）" : ""}
+                      </option>
+                    ),
+                  )}
+                </Select>
+              </Field>
+            </div>
+            <Field label="复合叙事类型" hint="最多 3 项；决定主要冲突与情绪体验；灰色项已在更高优先级的选择中出现">
+              <div className="genre-option-grid">
+                {rankByRecommended(NARRATIVE_GENRES, (genre) => recommended.narrativeGenres.has(genre)).map((genre) => {
+                  const owner = claimedBy(genre, "复合叙事类型");
+                  const isRecommended = recommended.narrativeGenres.has(genre);
+                  return (
+                    <label
+                      key={genre}
+                      className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
+                      title={owner ? `已在「${owner}」中选择` : undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={positioning.secondaryGenres.includes(genre)}
+                        disabled={
+                          busy ||
+                          Boolean(owner) ||
+                          (!positioning.secondaryGenres.includes(genre) && positioning.secondaryGenres.length >= 3)
+                        }
+                        onChange={() =>
+                          patch({
+                            secondaryGenres: toggleValue(positioning.secondaryGenres, genre as NarrativeGenre, 3),
+                          })
+                        }
+                      />
+                      {genre}
+                      {isRecommended && <small className="preset-badge">推荐</small>}
+                    </label>
+                  );
+                })}
+              </div>
+            </Field>
+            <p className="positioning-note">
+              情绪基调与主角身份在下方单独选择；灰色项已在更高优先级的选择中出现，同一个词只保留一层。
+            </p>
+            {PRIMARY_GENRE_ELEMENT_GROUPS.map((group) => (
+              <Field key={group.label} label={group.label} hint="按需多选，不会要求每章都出现">
+                <div className="genre-option-grid">
+                  {rankByRecommended(group.elements, (element) => recommended.elements.has(element)).map((element) => {
+                    const owner = claimedBy(element, "题材元素");
+                    const isRecommended = recommended.elements.has(element);
+                    return (
+                      <label
+                        key={element}
+                        className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
+                        title={owner ? `已在「${owner}」中选择` : undefined}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={positioning.genreElements.includes(element)}
+                          disabled={
+                            busy ||
+                            Boolean(owner) ||
+                            (!positioning.genreElements.includes(element) && positioning.genreElements.length >= 8)
+                          }
+                          onChange={() => patch({ genreElements: toggleValue(positioning.genreElements, element, 8) })}
+                        />
+                        {element}
+                        {isRecommended && <small className="preset-badge">推荐</small>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </Field>
+            ))}
+            <div className="form-grid three">
+              <Field label="主角身份" hint="最多 2 项">
+                <div className="genre-option-grid compact">
+                  {rankByRecommended(PROTAGONIST_ROLES, (role) => recommended.roles.has(role)).map((role) => {
+                    const owner = claimedBy(role, "主角身份");
+                    const isRecommended = recommended.roles.has(role);
+                    return (
+                      <label
+                        key={role}
+                        className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
+                        title={owner ? `已在「${owner}」中选择` : undefined}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={positioning.protagonistRoles.includes(role)}
+                          disabled={
+                            busy ||
+                            Boolean(owner) ||
+                            (!positioning.protagonistRoles.includes(role) && positioning.protagonistRoles.length >= 2)
+                          }
+                          onChange={() =>
+                            patch({ protagonistRoles: toggleValue(positioning.protagonistRoles, role, 2) })
+                          }
+                        />
+                        {role}
+                        {isRecommended && <small className="preset-badge">推荐</small>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </Field>
+              <Field label="情绪基调" hint="最多 2 项">
+                <div className="genre-option-grid compact">
+                  {rankByRecommended(TONE_TAGS, (tone) => recommended.tones.has(tone)).map((tone) => {
+                    const owner = claimedBy(tone, "情绪基调");
+                    const isRecommended = recommended.tones.has(tone);
+                    return (
+                      <label
+                        key={tone}
+                        className={`check-row${owner ? " claimed" : ""}${isRecommended ? " recommended" : ""}`}
+                        title={owner ? `已在「${owner}」中选择` : undefined}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={positioning.toneTags.includes(tone)}
+                          disabled={
+                            busy ||
+                            Boolean(owner) ||
+                            (!positioning.toneTags.includes(tone) && positioning.toneTags.length >= 2)
+                          }
+                          onChange={() => patch({ toneTags: toggleValue(positioning.toneTags, tone, 2) })}
+                        />
+                        {tone}
+                        {isRecommended && <small className="preset-badge">推荐</small>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </Field>
+            </div>
+            <Field label="自定义创作方向" hint="补充列表里没有的混合方式、反套路要求或题材边界">
+              <Input
+                value={positioning.customGenreDirection}
+                onChange={(event) => patch({ customGenreDirection: event.target.value })}
+                placeholder="例如：医疗悬疑为主，不要系统，用群像推进真相"
+                disabled={busy}
+              />
+            </Field>
+          </details>
+          <details className="positioning-group" open>
+            <summary>
+              <ChevronRight size={15} /> 规模与节奏
+            </summary>
+            <div className="form-grid three">
+              <Field label="目标字数">
+                <Select
+                  value={positioning.targetWords}
+                  onChange={(event) => patch({ targetWords: Number(event.target.value) })}
+                  disabled={busy}
+                >
+                  {TARGET_WORD_PRESETS.map((words) => (
+                    <option key={words} value={words}>
+                      {words / 10000} 万字
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="单章字数" hint={`${MIN_WORDS_PER_CHAPTER}–${MAX_WORDS_PER_CHAPTER}`}>
+                <Input
+                  type="number"
+                  min={MIN_WORDS_PER_CHAPTER}
+                  max={MAX_WORDS_PER_CHAPTER}
+                  step={100}
+                  value={positioning.wordsPerChapter}
+                  onChange={(event) => patch({ wordsPerChapter: Number(event.target.value) })}
+                  disabled={busy}
+                />
+              </Field>
+              <Field label="安全存稿线">
+                <Input
+                  type="number"
+                  min={0}
+                  max={1000}
+                  value={positioning.safeStockLine}
+                  onChange={(event) => patchMeta({ safeStockLine: Number(event.target.value) })}
+                  disabled={busy}
+                />
+              </Field>
+            </div>
+            <Field label="更新节奏">
+              <Input
+                value={positioning.updateCadence}
+                onChange={(event) => patch({ updateCadence: event.target.value })}
+                disabled={busy}
+              />
+            </Field>
+          </details>
         </details>
         {mode === "手动创建" ? (
           <Field label="书名">
@@ -788,42 +823,6 @@ export function NewProjectModal({
           </Field>
         ) : (
           <>
-            <Field
-              label="开书路径"
-              hint={
-                path === "直达"
-                  ? "只出一套方案，严格按你的灵感落地；需要先写下你的想法。"
-                  : path === "定向"
-                    ? "出两套方案，都围绕你的灵感展开，差异门禁放宽到两维。"
-                    : "出三套方案，保持完整的差异门禁。"
-              }
-            >
-              <Segmented
-                options={PATH_OPTIONS.map((item) => item.label)}
-                value={pathOption.label}
-                onChange={(label) => setPath(PATH_OPTIONS.find((item) => item.label === label)?.value ?? "探索")}
-                disabled={busy}
-              />
-            </Field>
-            <Field
-              label={path === "直达" ? "你的完整想法（必填）" : "你已有的灵感（可不填）"}
-              hint={
-                path === "直达"
-                  ? "写清人物、处境、核心冲突与边界；这一套方案会严格按它生成，不会另起炉灶。"
-                  : `系统以 ${positioning.genre} 与所选分类为商业基线；可只写一句人物、情境或想要的情绪。`
-              }
-            >
-              <Textarea
-                value={seed}
-                onChange={(event) => setSeed(event.target.value)}
-                placeholder="例如：女主重回八零年代，不想再替妹妹牺牲；留空则完全由 AI 提案。"
-                disabled={busy}
-              />
-            </Field>
-            <div className="wizard-genre-note">
-              <strong>本次定位</strong>
-              <span>{plugin.readerPromise}</span>
-            </div>
             {!concepts.length ? (
               <div className="wizard-generate">
                 <Sparkles size={24} />
@@ -835,7 +834,7 @@ export function NewProjectModal({
                         ? "AI 会围绕你的灵感给出两套方案"
                         : "AI 会先给出三套完整开书方案"}
                   </strong>
-                  <span>每套包含书名候选、故事前提、开局设计、升级阶梯、差异化说明与未审批创作契约。</span>
+                  <span>{plugin.readerPromise}</span>
                 </div>
                 <Button
                   icon={busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}
@@ -950,7 +949,7 @@ export function NewProjectModal({
             disabled={busy || (mode === "手动创建" ? !manualTitle.trim() : !selected || blocking.length > 0)}
             onClick={create}
           >
-            {busy ? busyMessage : mode === "AI 从零开书" ? "采用此方案并创建" : "创建空白作品"}
+            {busy ? busyMessage : mode === "AI 从零开书" ? "选定方向，生成完整创作包" : "创建空白作品"}
           </Button>
         </div>
       </div>

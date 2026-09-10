@@ -5,7 +5,7 @@ import { describeError } from "../lib/error-message";
 import { formatDate } from "../lib/format";
 import { resolveCreationPreset } from "../shared/creation-presets";
 import { getFanqieCategoryProfile } from "../shared/fanqie-taxonomy";
-import { describeIncubationPositioning, type IncubationDraft, stepsForPath } from "../shared/incubation";
+import { describeIncubationPositioning, type IncubationDraft } from "../shared/incubation";
 import { blockingFindings, reviewIncubationCandidate, summarizeFindings } from "../shared/incubation-review";
 import type { AppApi, IncubationCandidate } from "../shared/types";
 
@@ -122,13 +122,13 @@ export function IncubationWorkspace({
 
   const promote = async () => {
     if (!draft || !selectedCandidate) return;
-    setBusyMessage("正在生成人物与世界骨架…");
+    setBusyMessage("正在完成人物、世界与全书大纲…");
     setBusy(true);
     try {
       await persist({});
       const project = await api.promoteIncubation(draft.id);
       await reload();
-      notify(`已创建《${project.title}》，请到故事圣经复核并审批契约`);
+      notify(`已创建《${project.title}》，完整创作包已开始生成`);
       onOpenProject(project.id);
     } catch (error) {
       notify(describeError(error), "error");
@@ -206,8 +206,8 @@ export function IncubationWorkspace({
         {draft && (
           <div className="incubation-detail">
             <ol className="step-bar">
-              {stepsForPath(draft.path).map((step) => (
-                <li key={step} className={step === draft.step ? "current" : ""}>
+              {["选择方向", "生成完整创作包", "集中复核"].map((step, index) => (
+                <li key={step} className={index === 0 ? "current" : ""}>
                   {step}
                 </li>
               ))}
@@ -241,8 +241,8 @@ export function IncubationWorkspace({
             <section className="section-band compact-band">
               <div className="section-heading">
                 <div>
-                  <h2>三案对比</h2>
-                  <p>只高亮存在差异的维度；点选一行即可切换采用方案。</p>
+                  <h2>方向对比</h2>
+                  <p>{selectedCandidate ? `已选《${selectedCandidate.title}》` : "尚未选定方向"}</p>
                 </div>
                 <Badge>{draft.candidates.length} 套</Badge>
               </div>
@@ -314,7 +314,7 @@ export function IncubationWorkspace({
                       disabled={busy || blocking.length > 0}
                       onClick={promote}
                     >
-                      {busy ? busyMessage : "采用并创建作品"}
+                      {busy ? busyMessage : "选定方向，生成完整创作包"}
                     </Button>
                   </div>
                 </div>

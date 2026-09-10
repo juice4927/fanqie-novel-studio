@@ -12,6 +12,7 @@
   --line-strong: #c8cbc4;
   --surface: #ffffff;
   --surface-soft: #f7f7f4;
+  --surface-muted: #eef0eb;
   --sidebar: #202724;
   --sidebar-soft: #2d3531;
   --accent: #c6502e;
@@ -1670,6 +1671,148 @@ p {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
+.creation-advanced {
+  border-block: 1px solid var(--line);
+}
+.creation-advanced > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 0;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+.creation-advanced > summary span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.creation-advanced[open] > summary > svg {
+  transform: rotate(90deg);
+}
+.creation-essentials .segmented {
+  flex-wrap: wrap;
+}
+.creation-essentials .segmented > button {
+  flex: 1;
+  min-width: 100px;
+}
+.launch-review-toolbar,
+.launch-review-footer,
+.launch-review-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.launch-review > :not(.section-heading) {
+  margin-inline: 18px;
+}
+.launch-review-progress {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+.launch-review-progress span,
+.launch-review-progress small {
+  color: var(--muted);
+}
+.launch-review-progress small {
+  flex-basis: 100%;
+}
+.launch-review-toolbar {
+  margin-bottom: 16px;
+}
+.launch-review .segmented {
+  flex-wrap: wrap;
+}
+.launch-review-fields,
+.launch-review-items {
+  max-height: 560px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  margin: 14px 0;
+  padding-right: 12px;
+  overflow-wrap: anywhere;
+}
+.launch-review-fields > div,
+.launch-review-items dl > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.launch-review dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.launch-review dd {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.launch-review dd ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.launch-review-items article {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.launch-review-items article header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.launch-review-items article h3 {
+  font-size: 15px;
+  margin: 0;
+}
+.launch-review-items article > p {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.launch-review-items dl {
+  margin: 10px 0;
+}
+.launch-review-pagination {
+  justify-content: center;
+}
+.launch-review-pagination .select {
+  width: auto;
+  min-width: 150px;
+}
+.launch-review-footer {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  margin-bottom: 18px;
+}
+.launch-review-footer > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .launch-review-fields > div,
+  .launch-review-items dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .launch-review-fields,
+  .launch-review-items {
+    max-height: 440px;
+  }
+}
 .book-concept-grid > button {
   min-width: 0;
   padding: 14px;
@@ -2349,6 +2492,42 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.story-entry-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 150px auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.story-entry-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.story-entry-row small {
+  color: var(--muted);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.story-entry-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.story-entry-filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.story-entry-filters .input {
+  min-width: 220px;
 }
 .summary-list details {
   border-bottom: 1px solid #e9ebe6;

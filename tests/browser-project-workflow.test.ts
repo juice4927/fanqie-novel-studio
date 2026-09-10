@@ -20,6 +20,36 @@ afterEach(() => {
 });
 
 describe("browser project workflow", () => {
+  it("creates all planning levels through the last chapter and waits for author approval", async () => {
+    const api = createBrowserApi();
+    const input = {
+      genre: "都市脑洞" as const,
+      targetWords: 82_500,
+      wordsPerChapter: 2500,
+      updateCadence: "每日一章",
+      seed: "职业调查",
+    };
+    const [concept] = await api.generateBookConcepts(input);
+    const created = await api.createProjectFromConcept(input, concept);
+    const draft = await api.getProject(created.id);
+    expect(draft.chapters).toHaveLength(33);
+    expect(new Set(draft.plans.map((plan) => plan.kind))).toEqual(
+      new Set(["宏观阶段", "分卷", "粗纲", "细纲", "场景卡"]),
+    );
+    expect(draft.plans.every((plan) => plan.status === "草稿")).toBe(true);
+    expect(draft.contract.approved).toBe(false);
+    expect(draft.chapters.every((chapter) => !chapter.content)).toBe(true);
+    const resumed = await api.generateLaunchPack(created.id);
+    expect(resumed.chapters).toBe(33);
+    expect(resumed.plans).toBe(draft.plans.length);
+    await api.approveLaunchPack(created.id);
+    const approved = await api.getProject(created.id);
+    expect(approved.contract.approved).toBe(true);
+    expect(approved.plans.every((plan) => plan.status === "已批准")).toBe(true);
+    expect(approved.launchPack?.status).toBe("已确认");
+    expect(approved.chapters.every((chapter) => chapter.status === "章纲")).toBe(true);
+  });
+
   it("uses shared creation defaults and update normalization", async () => {
     const api = createBrowserApi();
     const created = await api.createProject({

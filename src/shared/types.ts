@@ -379,6 +379,35 @@ export interface ChapterQualityReview {
   observations: string[];
 }
 
+/** 成对比较：同一裁判对两个版本换序各判一次。 */
+export interface ChapterPairwiseInput {
+  chapterNumber: number;
+  baseline: { label: string; text: string };
+  candidate: { label: string; text: string };
+  /** 可选的重点标准，例如"章末钩子""爽点是否成立"。 */
+  criteria?: string[];
+}
+
+export interface ChapterPairwiseVerdict {
+  /** 裁判按位置作答；调用方负责换序映射。 */
+  winner: "A" | "B" | "持平";
+  rationale: string;
+  confidence: number;
+}
+
+export interface ChapterPairwiseResult {
+  /** 换序一致时的胜者；不一致或双持平时为 null。 */
+  winner: "baseline" | "candidate" | null;
+  /** 两次都判持平：属于一致结论，不算分歧。 */
+  tie: boolean;
+  /** 换序后结论相反：需要人工裁定。 */
+  disagreement: boolean;
+  first: ChapterPairwiseVerdict;
+  swapped: ChapterPairwiseVerdict;
+  baselineChars: number;
+  candidateChars: number;
+}
+
 export interface ChangeRequest {
   id: string;
   targetKind: "创作契约" | "规划" | "章节";
@@ -532,6 +561,39 @@ export type ChapterDraftStreamEvent =
   | { type: "complete"; attempt: number }
   | { type: "failed"; attempt: number; error: string };
 
+export type StoryEntryKind = "人物" | "地点" | "物品" | "势力" | "设定" | "伏笔";
+
+/** 条目级 AI 策略：常驻 / 命中才注入 / 命中反而排除 / 永不注入。 */
+export type StoryEntryAiContext = "always" | "detected" | "detected_excluded" | "never";
+
+/** 设定条目：把契约长列表升级为「被提及才注入 + 生效区间 + 揭示进度」的设定库。 */
+export interface StoryEntry {
+  id: string;
+  kind: StoryEntryKind;
+  name: string;
+  /** 别名、称呼、绰号；提及检测按子串匹配。 */
+  aliases: string[];
+  /** 一行摘要，默认注入。 */
+  summary: string;
+  /** 详述，命中且预算充足时注入。 */
+  detail: string;
+  aiContext: StoryEntryAiContext;
+  /** 生效章区间；effectiveTo 为 null 表示开放。 */
+  effectiveFrom: number;
+  effectiveTo: number | null;
+  /** 读者可见章；晚于当前章时只注入摘要，不注入详述。 */
+  revealChapter: number | null;
+  /** 知情角色；用于渲染知情范围提示。 */
+  knownBy: string[];
+  /** 排除词，避免常见词误命中。 */
+  exclusionTerms: string[];
+  /** 种子来源，如 keyRelationships；用于幂等迁移与撤销。 */
+  sourceContractItem: string | null;
+  /** 常驻：等价于 always，但保留作者可随时取消的开关。 */
+  pinned: boolean;
+  updatedAt: string;
+}
+
 export interface ProjectDetail {
   summary: ProjectSummary;
   contract: StoryContract;
@@ -546,8 +608,13 @@ export interface ProjectDetail {
   insightIds: string[];
   summaries: StorySummary[];
   expectations: ExpectationEntry[];
+  /** 设定条目：按提及与生效区间注入的设定库。 */
+  storyEntries: StoryEntry[];
+  /** AI 味白名单：本书有意使用的词句，质检时不计入 AI 味统计。 */
+  aiFlavorWhitelist: string[];
   /** 作者打回 AI 产出时沉淀的导演备注，注入后续生成上下文 */
   directorNotes?: string[];
+  launchPack?: LaunchPackProgress;
 }
 
 export interface ConceptCandidate {
@@ -707,6 +774,8 @@ export interface ContextPackage {
   rollingOutline: string;
   recentSummary: string;
   relevantFacts: string;
+  /** 本章按提及与生效区间注入的设定条目。 */
+  storyEntries: string;
   forbiddenKnowledge: string;
   authorStyle: string;
   /** 本次上下文使用的创作自由度档位；缺省按均衡处理，用于推导写作温度。 */
@@ -714,6 +783,9 @@ export interface ContextPackage {
   estimatedTokens: number;
   diagnostics?: ContextDiagnostics;
 }
+
+/** 上下文分层：按稳定度排序，稳定前缀在前、本章任务在后，便于供应商前缀缓存复用。 */
+export type ContextBand = "stable" | "slow" | "fast" | "task";
 
 export interface ContextSectionDiagnostic {
   key: Exclude<keyof ContextPackage, "estimatedTokens" | "diagnostics">;
@@ -724,12 +796,20 @@ export interface ContextSectionDiagnostic {
   includedItems: number;
   totalItems: number;
   status: "已包含" | "已截断" | "缺失";
+  /** 该段所属分层；稳定段可被供应商前缀缓存复用。 */
+  band?: ContextBand;
 }
 
 export interface ContextDiagnostics {
   generatedAt: string;
   sections: ContextSectionDiagnostic[];
   warnings: string[];
+  /** 本次使用的模型上下文窗口；未知时按来源类型默认值。 */
+  windowTokens?: number;
+  /** 本次上下文的 token 预算。 */
+  budgetTokens?: number;
+  /** 稳定前缀字符数：布局不变时可被供应商前缀缓存复用的部分。 */
+  stablePrefixCharacters?: number;
 }
 
 export interface BatchGenerationPreview {
@@ -741,12 +821,12 @@ export interface BatchGenerationPreview {
   blockingReason: string | null;
 }
 
-export type PlanningGenerationMode = "全书结构" | "后续章纲";
+export type PlanningGenerationMode = "全书结构" | "全书粗纲" | "后续章纲";
 
 export interface PlanningGenerationInput {
   mode: PlanningGenerationMode;
   fromChapter?: number;
-  chapterCount?: 10 | 30;
+  chapterCount?: number;
 }
 
 export interface PlanningGenerationResult {
@@ -1030,9 +1110,28 @@ export interface LaunchPackOptions {
   withFirstChapters: boolean;
 }
 
+export interface LaunchPackProgress {
+  status: "生成中" | "已暂停" | "待确认" | "已确认";
+  phase: "全书结构" | "全书粗纲" | "逐章规划" | "完成";
+  /** 全书章数。 */
+  targetChapters: number;
+  /** 本次开书包要备好的章纲数；缺省等于全书章数（旧数据兼容）。 */
+  horizonChapters?: number;
+  /** 已备好的章纲数。 */
+  completedChapters: number;
+  /** 已完成的全书粗纲批次数与总批次数。 */
+  coarseCompleted?: number;
+  coarseTotal?: number;
+  /** 已确认的创作包正在后台补齐章纲，用于让界面轮询刷新。 */
+  autoContinuing?: boolean;
+  error?: string;
+  updatedAt: string;
+}
+
 export interface LaunchPackResult {
   plans: number;
   chapters: number;
+  progress?: LaunchPackProgress;
 }
 
 export interface AppApi {
@@ -1048,7 +1147,8 @@ export interface AppApi {
   deleteIncubation(id: string): Promise<void>;
   promoteIncubation(id: string): Promise<ProjectSummary>;
   getCategoryTags(categoryKey: string): Promise<CategoryTagStat[]>;
-  generateLaunchPack(id: string, options: LaunchPackOptions): Promise<LaunchPackResult>;
+  generateLaunchPack(id: string, options?: LaunchPackOptions): Promise<LaunchPackResult>;
+  approveLaunchPack(id: string): Promise<void>;
   deleteProject(id: string, confirmationTitle: string): Promise<string>;
   getProject(id: string): Promise<ProjectDetail>;
   getChapter(id: string, chapterId: string): Promise<Chapter>;
@@ -1073,6 +1173,10 @@ export interface AppApi {
   ): Promise<NovelRevisionApplyResult>;
   saveChapter(id: string, chapter: Chapter, mode?: ChapterSaveMode): Promise<Chapter>;
   saveExpectation(id: string, expectation: ExpectationEntry): Promise<ExpectationEntry>;
+  saveStoryEntry(id: string, entry: StoryEntry): Promise<StoryEntry>;
+  deleteStoryEntry(id: string, entryId: string): Promise<void>;
+  seedStoryEntries(id: string): Promise<StoryEntry[]>;
+  saveAiFlavorWhitelist(id: string, terms: string[]): Promise<string[]>;
   transitionChapter(id: string, chapterId: string, status: ChapterStatus): Promise<ChapterTransitionResult>;
   onChapterFactsExtracted(listener: (event: ChapterFactsExtractionEvent) => void): () => void;
   compileContext(id: string, chapterId: string): Promise<ContextPackage>;
@@ -1080,6 +1184,11 @@ export interface AppApi {
   listRevisions(id: string, collection: RevisionRecord["collection"], entityId: string): Promise<RevisionRecord[]>;
   restoreRevision(id: string, revisionId: string): Promise<void>;
   runQualityCheck(id: string, chapterId: string, override?: TaskModelOverride): Promise<ChapterQualityReview>;
+  judgeChapterDrafts(
+    id: string,
+    input: ChapterPairwiseInput,
+    override?: TaskModelOverride,
+  ): Promise<ChapterPairwiseResult>;
   reviseChapterFromQuality(id: string, chapterId: string): Promise<Chapter>;
   extractChapterFacts(id: string, chapterId: string, override?: TaskModelOverride): Promise<LedgerFact[]>;
   saveFact(id: string, fact: LedgerFact): Promise<LedgerFact>;
@@ -1141,6 +1250,7 @@ export interface AppApi {
   testAiProfile(id: string): Promise<{ ok: boolean; message: string }>;
   listAiProfileModels(id: string): Promise<AiProfileModelOption[]>;
   refreshAiProfileModels(id: string, force?: boolean): Promise<string[]>;
+  saveAiModelContextWindow(id: string, modelId: string, contextWindow: number | null): Promise<void>;
   exportAiProfiles(): Promise<string>;
   importAiProfiles(json: string): Promise<AiProfileView[]>;
   getProxySettings(): Promise<ProxySettings>;

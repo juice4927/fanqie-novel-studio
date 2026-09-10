@@ -1,6 +1,7 @@
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { Badge, IconButton } from "../components/UI";
 import { CONTEXT_SECTION_LABELS } from "../shared/context-diagnostics";
+import { CONTEXT_BAND_SHORT } from "../shared/context-layout";
 import { TOKEN_ESTIMATE_WARNING } from "../shared/token-estimator";
 import type { ContextPackage } from "../shared/types";
 
@@ -11,6 +12,14 @@ export function ContextPanel({ context, onClose }: { context: ContextPackage; on
         <span>
           <strong>上下文包</strong>
           <small>约 {context.estimatedTokens} tokens</small>
+          {context.diagnostics?.budgetTokens ? (
+            <small>
+              预算 {context.diagnostics.budgetTokens} · 模型窗口 {context.diagnostics.windowTokens}
+            </small>
+          ) : null}
+          {context.diagnostics?.stablePrefixCharacters ? (
+            <small>稳定前缀 {context.diagnostics.stablePrefixCharacters} 字（跨章节可复用）</small>
+          ) : null}
           <small>{TOKEN_ESTIMATE_WARNING}</small>
         </span>
         <IconButton label="关闭上下文" onClick={() => onClose()}>
@@ -36,6 +45,7 @@ export function ContextPanel({ context, onClose }: { context: ContextPackage; on
                   <Badge tone={section.status === "缺失" ? "warning" : "neutral"}>{section.status}</Badge>
                   <small>
                     {section.includedItems}/{section.totalItems} 项 · {section.characters} 字
+                    {section.band ? ` · ${CONTEXT_BAND_SHORT[section.band]}` : ""}
                   </small>
                 </span>
                 <p>{section.reason}</p>

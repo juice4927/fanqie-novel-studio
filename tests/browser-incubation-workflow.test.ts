@@ -105,7 +105,7 @@ describe("browser incubation workflow", () => {
     expect(await api.listIncubations()).toHaveLength(0);
   });
 
-  it("generates the launch pack only after the contract is approved", async () => {
+  it("generates the whole launch pack as drafts before explicit confirmation", async () => {
     const api = createBrowserApi();
     const created = await api.createProject({
       title: "开书包测试",
@@ -113,10 +113,6 @@ describe("browser incubation workflow", () => {
       targetWords: 1_000_000,
       updateCadence: "每日 2 章",
     });
-    await expect(api.generateLaunchPack(created.id, { withStructure: true, withFirstChapters: true })).rejects.toThrow(
-      "必须先审批创作契约",
-    );
-
     await api.saveContract(created.id, {
       ...(await api.getProject(created.id)).contract,
       premise: "主角在旧城开了一家回收异常规则的店。",
@@ -132,14 +128,27 @@ describe("browser incubation workflow", () => {
       majorForces: ["规则商店", "回收组织"],
       timelineAnchors: ["捡到机器", "规则扩散", "来源揭露"],
     });
-    await api.approveContract(created.id);
-
-    const result = await api.generateLaunchPack(created.id, { withStructure: true, withFirstChapters: true });
-    expect(result.plans).toBeGreaterThanOrEqual(6);
-    expect(result.chapters).toBe(10);
+    const result = await api.generateLaunchPack(created.id);
+    expect(result.chapters).toBe(100);
     const detail = await api.getProject(created.id);
+    expect(detail.contract.approved).toBe(false);
+    expect(detail.launchPack?.status).toBe("待确认");
+    expect(detail.launchPack?.targetChapters).toBe(400);
+    expect(detail.launchPack?.horizonChapters).toBe(100);
     expect(detail.plans.every((plan) => plan.status === "草稿")).toBe(true);
-    expect(detail.chapters).toHaveLength(10);
+    expect(detail.plans.filter((plan) => plan.kind === "粗纲")).toHaveLength(40);
+    expect(detail.chapters).toHaveLength(100);
     expect(detail.chapters.every((chapter) => chapter.status === "章纲")).toBe(true);
+    expect(detail.chapters.every((chapter) => chapter.content === "")).toBe(true);
+    expect(new Set(detail.plans.map((plan) => plan.kind))).toEqual(
+      new Set(["宏观阶段", "分卷", "粗纲", "细纲", "场景卡"]),
+    );
+
+    await api.approveLaunchPack(created.id);
+    const approved = await api.getProject(created.id);
+    expect(approved.contract.approved).toBe(true);
+    expect(approved.launchPack?.status).toBe("已确认");
+    expect(approved.plans.every((plan) => plan.status === "已批准")).toBe(true);
+    expect(approved.chapters.every((chapter) => chapter.status === "章纲")).toBe(true);
   });
 });

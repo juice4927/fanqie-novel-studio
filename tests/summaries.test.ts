@@ -86,6 +86,49 @@ describe("structured story summaries", () => {
     expect(result.length).toBeLessThanOrEqual(12000);
   });
 
+  it("keeps byte-identical long-term memory when no selection is provided", () => {
+    const summary = (
+      id: string,
+      layer: StorySummary["layer"],
+      fromChapter: number,
+      toChapter: number,
+      content: string,
+    ): StorySummary => ({
+      id,
+      layer,
+      title: id,
+      fromChapter,
+      toChapter,
+      content,
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const summaries = [
+      summary("book", "全书", 1, 300, "全书摘要"),
+      summary("volume", "分卷", 201, 400, "当前卷摘要"),
+      summary("stage-1", "十章阶段", 271, 280, "阶段271"),
+      summary("stage-2", "十章阶段", 281, 290, "阶段281"),
+    ];
+    const expected = [
+      "【全书进展】",
+      "全书摘要",
+      "【当前分卷记忆】",
+      "当前卷摘要",
+      "【近期阶段 271-280】",
+      "阶段271",
+      "【近期阶段 281-290】",
+      "阶段281",
+    ].join("\n");
+
+    expect(buildLongTermMemory(summaries, 300, 12000)).toBe(expected);
+    // 显式传 undefined 与省略参数必须完全一致。
+    expect(buildLongTermMemory(summaries, 300, 12000, undefined)).toBe(expected);
+    // selection 恰好等于固定三层时，输出仍与历史版本逐字节一致。
+    expect(buildLongTermMemory(summaries, 300, 12000, summaries)).toBe(expected);
+    // 传入不同 selection 时改用给定节点。
+    expect(buildLongTermMemory(summaries, 300, 12000, [summaries[3]])).toBe("【近期阶段 281-290】\n阶段281");
+  });
+
   it("prepares versioned layered summaries without mutating project state", () => {
     const current = chapter("林舟获得门禁卡。\n\n真正的密码仍未找到，巡逻队即将抵达！");
     const existing: StorySummary[] = [

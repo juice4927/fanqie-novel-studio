@@ -55,6 +55,7 @@ export interface AiHandlerDependencies {
     | "extractChapterFacts"
     | "generateConcepts"
     | "generatePlanning"
+    | "judgeChapterDrafts"
     | "reviewChapter"
     | "reviewPlanning"
     | "reviseChapter"
@@ -87,6 +88,7 @@ export interface AiHandlerDependencies {
     contract: ProjectDetail["contract"];
     genre: ProjectDetail["summary"]["genre"];
     originalityMatches: ReturnType<WorkspaceDatabase["findOriginalityMatches"]>;
+    aiFlavorWhitelist?: string[];
   }) => Promise<{ issues: QualityIssue[]; observations: string[] }>;
   createId: () => string;
   currentTimestamp: () => string;
@@ -144,6 +146,7 @@ export function registerAiHandlers({
       contract: project.contract,
       genre: project.summary.genre,
       originalityMatches: database.findOriginalityMatches(chapter.content),
+      aiFlavorWhitelist: project.aiFlavorWhitelist,
     });
     const localIssues = local.issues;
     const intentIssues: QualityIssue[] = [
@@ -223,6 +226,10 @@ export function registerAiHandlers({
       database.transitionChapter(id, chapterId, "待质检");
     }
     return { issues, observations };
+  });
+  register("judgeChapterDrafts", async (id, input, override) => {
+    const project = database.getProject(id);
+    return ai.judgeChapterDrafts(project, input, override);
   });
   register("reviseChapterFromQuality", async (id, chapterId) => {
     if (isGenerationActive(id)) {

@@ -18,6 +18,7 @@ const api: AppApi = {
   promoteIncubation: (id) => invoke("promoteIncubation", id),
   getCategoryTags: (categoryKey) => invoke("getCategoryTags", categoryKey),
   generateLaunchPack: (id, options) => invoke("generateLaunchPack", id, options),
+  approveLaunchPack: (id) => invoke("approveLaunchPack", id),
   deleteProject: (id, confirmationTitle) => invoke("deleteProject", id, confirmationTitle),
   getProject: (id) => invoke("getProject", id),
   getChapter: (id, chapterId) => invoke("getChapter", id, chapterId),
@@ -35,6 +36,10 @@ const api: AppApi = {
     invoke("applyNovelRevision", id, proposal, selectedRepairIds),
   saveChapter: (id, chapter, mode) => invoke("saveChapter", id, chapter, mode),
   saveExpectation: (id, expectation) => invoke("saveExpectation", id, expectation),
+  saveStoryEntry: (id, entry) => invoke("saveStoryEntry", id, entry),
+  deleteStoryEntry: (id, entryId) => invoke("deleteStoryEntry", id, entryId),
+  seedStoryEntries: (id) => invoke("seedStoryEntries", id),
+  saveAiFlavorWhitelist: (id, terms) => invoke("saveAiFlavorWhitelist", id, terms),
   transitionChapter: (id, chapterId, status) => invoke("transitionChapter", id, chapterId, status),
   onChapterFactsExtracted: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: ChapterFactsExtractionEvent) => listener(payload);
@@ -46,6 +51,7 @@ const api: AppApi = {
   listRevisions: (id, collection, entityId) => invoke("listRevisions", id, collection, entityId),
   restoreRevision: (id, revisionId) => invoke("restoreRevision", id, revisionId),
   runQualityCheck: (id, chapterId, override) => invoke("runQualityCheck", id, chapterId, override),
+  judgeChapterDrafts: (id, input, override) => invoke("judgeChapterDrafts", id, input, override),
   reviseChapterFromQuality: (id, chapterId) => invoke("reviseChapterFromQuality", id, chapterId),
   extractChapterFacts: (id, chapterId, override) => invoke("extractChapterFacts", id, chapterId, override),
   saveFact: (id, fact) => invoke("saveFact", id, fact),
@@ -109,6 +115,8 @@ const api: AppApi = {
   testAiProfile: (id) => invoke("testAiProfile", id),
   listAiProfileModels: (id) => invoke("listAiProfileModels", id),
   refreshAiProfileModels: (id, force) => invoke("refreshAiProfileModels", id, force),
+  saveAiModelContextWindow: (id, modelId, contextWindow) =>
+    invoke("saveAiModelContextWindow", id, modelId, contextWindow),
   exportAiProfiles: () => invoke("exportAiProfiles"),
   importAiProfiles: (json) => invoke("importAiProfiles", json),
   getProxySettings: () => invoke("getProxySettings"),

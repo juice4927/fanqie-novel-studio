@@ -67,9 +67,23 @@ function buildModelOptions(database: ProfileDatabase, profile: AiProfile, now: (
     const modelId = record.modelId.trim();
     if (!modelId) continue;
     const existing = options.get(modelId);
-    if (!existing || Date.parse(record.probedAt) > Date.parse(existing.fetchedAt)) {
-      options.set(modelId, { modelId, source: record.source, fetchedAt: record.probedAt });
+    if (!existing) {
+      options.set(modelId, {
+        modelId,
+        source: record.source,
+        fetchedAt: record.probedAt,
+        contextWindow: record.contextWindow,
+      });
+      continue;
     }
+    const newer = Date.parse(record.probedAt) > Date.parse(existing.fetchedAt);
+    options.set(modelId, {
+      modelId,
+      source: newer ? record.source : existing.source,
+      fetchedAt: newer ? record.probedAt : existing.fetchedAt,
+      // 窗口取最新一条非空值：远端清单写入 null 时不能把作者填写的值覆盖掉。
+      contextWindow: record.contextWindow ?? existing.contextWindow,
+    });
   }
   const manual = [
     profile.defaultModel,
@@ -81,7 +95,7 @@ function buildModelOptions(database: ProfileDatabase, profile: AiProfile, now: (
   for (const value of manual) {
     const modelId = value.trim();
     if (!modelId || options.has(modelId)) continue;
-    options.set(modelId, { modelId, source: "user", fetchedAt: now() });
+    options.set(modelId, { modelId, source: "user", fetchedAt: now(), contextWindow: null });
   }
   const defaultModel = profile.defaultModel.trim();
   return [...options.values()].sort((a, b) => {
@@ -123,6 +137,22 @@ function sanitizeProfile(input: AiProfile): AiProfile {
 
 function authHeadersFor(profile: AiProfile, secret: string) {
   return resolveAuthHeaders(profile.authScheme, secret);
+}
+
+/**
+ * 远端清单与探测结果只写"未被作者覆盖"的窗口：
+ * 作者手动填过的值（source=user）不能被后续的 null 冲掉。
+ */
+function preservedContextWindow(
+  database: ProfileDatabase,
+  profileId: string,
+  modelId: string,
+  apiSurface: string,
+): number | null {
+  const existing = database
+    .listModelCapabilities(profileId)
+    .find((record) => record.modelId === modelId && record.apiSurface === apiSurface);
+  return existing?.source === "user" ? existing.contextWindow : null;
 }
 
 /** 按声明的协议面（auto 时依次协商）做一次最小结构化调用，并回写探测结果。 */
@@ -260,7 +290,15 @@ export function registerAiProfileHandlers({
     const secret = profile.authScheme === "none" ? "" : await credentials.read(id);
     if (profile.authScheme !== "none" && !secret) throw new Error("该来源还没有保存 API 密钥");
     const result = await probeProfile(profile, secret, profile.defaultModel);
-    if (result.capability) database.saveModelCapability(result.capability);
+    if (result.capability) {
+      result.capability.contextWindow = preservedContextWindow(
+        database,
+        profile.id,
+        result.capability.modelId,
+        result.capability.apiSurface,
+      );
+      database.saveModelCapability(result.capability);
+    }
     database.saveAiProfile({
       ...profile,
       lastTestAt: now(),
@@ -320,22 +358,50 @@ export function registerAiProfileHandlers({
       .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
       .slice(0, 500);
     for (const modelId of models) {
+      const apiSurface = profile.apiSurface === "auto" ? "openai-chat" : profile.apiSurface;
       database.saveModelCapability({
         profileId: profile.id,
         modelId,
-        apiSurface: profile.apiSurface === "auto" ? "openai-chat" : profile.apiSurface,
+        apiSurface,
         supportsJsonSchema: null,
         supportsJsonMode: null,
         supportsStreaming: null,
         supportsStreamUsage: null,
         supportsReasoning: null,
         maxOutputTokens: null,
-        contextWindow: null,
+        contextWindow: preservedContextWindow(database, profile.id, modelId, apiSurface),
         probedAt: now(),
         source: "remote",
       });
     }
     return models;
+  });
+
+  /**
+   * 作者手动覆盖某模型的上下文窗口。写入能力行并标记 source=user，
+   * 优先级高于模型目录与探测结果；传 null 表示清除覆盖、回到默认推导。
+   */
+  register("saveAiModelContextWindow", (id, modelId, contextWindow) => {
+    const profile = database.getAiProfile(id);
+    if (!profile) throw new Error("来源不存在");
+    const apiSurface = profile.apiSurface === "auto" ? "openai-chat" : profile.apiSurface;
+    const existing = database
+      .listModelCapabilities(id)
+      .find((record) => record.modelId === modelId && record.apiSurface === apiSurface);
+    return database.saveModelCapability({
+      profileId: id,
+      modelId,
+      apiSurface,
+      supportsJsonSchema: existing?.supportsJsonSchema ?? null,
+      supportsJsonMode: existing?.supportsJsonMode ?? null,
+      supportsStreaming: existing?.supportsStreaming ?? null,
+      supportsStreamUsage: existing?.supportsStreamUsage ?? null,
+      supportsReasoning: existing?.supportsReasoning ?? null,
+      maxOutputTokens: existing?.maxOutputTokens ?? null,
+      contextWindow,
+      probedAt: now(),
+      source: "user",
+    });
   });
 
   register("exportAiProfiles", () => {
